@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
 import { GpuRenderer, type DrawItem } from "./Renderer";
-import type { EditorTool, ElementType, GardenElement } from "../types";
+import type {
+  Crop,
+  CropAssignment,
+  EditorTool,
+  ElementType,
+  GardenElement,
+} from "../types";
 import { PX_PER_M, fmtM } from "../storage";
 
 interface ElementUpdate {
@@ -9,17 +15,27 @@ interface ElementUpdate {
   y?: number;
   widthM?: number;
   heightM?: number;
+  /** when a bed is resized, its plants scale proportionally */
+  crops?: CropAssignment[];
 }
 
 interface Props {
   elements: GardenElement[];
+  catalog: Crop[];
   tool: EditorTool;
   frameType: ElementType;
   selectedIds: string[];
+  selectedCropId: string | null;
   theme: "light" | "dark";
   onSelect: (ids: string[]) => void;
+  onSelectCrop: (instanceId: string | null) => void;
   onApplyChanges: (updates: ElementUpdate[]) => void;
   onAddFrame: (type: ElementType, x: number, y: number, wM: number, hM: number) => string;
+  onUpdateCrop: (
+    eId: string,
+    instanceId: string,
+    patch: Partial<CropAssignment>
+  ) => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
@@ -38,9 +54,18 @@ interface Pt {
   x: number;
   y: number;
 }
-interface Guides {
-  v: number[];
-  h: number[];
+/** One snap guide line. `at` is the aligned coordinate; `a`..`b` is the extent
+ *  along the perpendicular axis (so the line spans both involved objects);
+ *  `center` marks a centre-alignment (drawn solid + dot) vs an edge (dashed). */
+interface SnapLine {
+  at: number;
+  center: boolean;
+  a: number;
+  b: number;
+}
+interface SnapGuides {
+  v: SnapLine[];
+  h: SnapLine[];
 }
 
 const MIN = 5; // world px == 5cm
@@ -56,44 +81,57 @@ type Gesture =
   | { k: "drag"; id: string; sp: Pt; origin: R }
   | { k: "groupDrag"; ids: string[]; sp: Pt; origins: Map<string, R>; leadId: string }
   | { k: "groupResize"; ids: string[]; dir: Dir; union: R; origins: Map<string, R> }
-  | { k: "frame"; start: Pt; end: Pt };
+  | { k: "frame"; start: Pt; end: Pt }
+  | { k: "cropDrag"; eId: string; instanceId: string; sp: Pt; origin: R; bed: R }
+  | { k: "cropResize"; eId: string; instanceId: string; dir: Dir; origin: R; bed: R };
 
 function rectOf(el: GardenElement): R {
   return { x: el.x, y: el.y, w: el.widthM * PX_PER_M, h: el.heightM * PX_PER_M };
 }
 
+/** Convert a crop's metres-relative area into world px, defaulting to the full bed. */
+/** Scale plant areas proportionally when their bed is resized. */
+function scaleCropAreas(crops: CropAssignment[], sx: number, sy: number): CropAssignment[] {
+  if (!crops.length || (sx === 1 && sy === 1)) return crops;
+  return crops.map((c) => {
+    if (!c.area) return c;
+    return {
+      ...c,
+      area: { x: c.area.x * sx, y: c.area.y * sy, w: c.area.w * sx, h: c.area.h * sy },
+    };
+  });
+}
 
 
-function snapRect(moved: R, others: R[]): { x: number; y: number; v: number[]; h: number[] } {
-  let x = moved.x;
-  let y = moved.y;
-  let vLine: number | null = null;
-  let hLine: number | null = null;
-  let bestDx = SNAP;
-  let bestDy = SNAP;
+
+function snapRect(moved: R, others: R[], anchor: R): { x: number; y: number; v: SnapLine[]; h: SnapLine[] } {
+  const candX: Cand[] = [];
+  const candY: Cand[] = [];
   for (const o of others) {
-    for (const cand of [
-      o.x,
-      o.x + o.w - moved.w,
-      o.x + o.w,
-      o.x - moved.w,
-      o.x + (o.w - moved.w) / 2,
-    ]) {
-      const d = Math.abs(cand - x);
-      if (d < bestDx) { bestDx = d; x = cand; vLine = cand; }
-    }
-    for (const cand of [
-      o.y,
-      o.y + o.h - moved.h,
-      o.y + o.h,
-      o.y - moved.h,
-      o.y + (o.h - moved.h) / 2,
-    ]) {
-      const d = Math.abs(cand - y);
-      if (d < bestDy) { bestDy = d; y = cand; hLine = cand; }
+    candX.push(...xCands(moved, o));
+    candY.push(...yCands(moved, o));
+  }
+  let nx = moved.x;
+  let ny = moved.y;
+  let v: SnapLine[] = [];
+  let h: SnapLine[] = [];
+  let bestX = SNAP;
+  let bestY = SNAP;
+  for (const c of candX) {
+    const d = Math.abs(c.at - moved.x);
+    if (d < bestX) {
+      bestX = d; nx = c.at;
+      v = [{ at: c.center ? c.at + moved.w / 2 : c.at, center: c.center, ...guideExtent({ x: moved.x, y: anchor.y, w: moved.w, h: anchor.h }, c.o, "y", c.center) }];
     }
   }
-  return { x, y, v: vLine === null ? [] : [vLine], h: hLine === null ? [] : [hLine] };
+  for (const c of candY) {
+    const d = Math.abs(c.at - moved.y);
+    if (d < bestY) {
+      bestY = d; ny = c.at;
+      h = [{ at: c.center ? c.at + moved.h / 2 : c.at, center: c.center, ...guideExtent({ x: anchor.x, y: moved.y, w: anchor.w, h: moved.h }, c.o, "x", c.center) }];
+    }
+  }
+  return { x: nx, y: ny, v, h };
 }
 
 function resizeRect(origin: R, dir: Dir, p: Pt): R {
@@ -114,45 +152,205 @@ function resizeRect(origin: R, dir: Dir, p: Pt): R {
   return { x, y, w, h };
 }
 
-/** Snap the resize so the dragged edge(s) align with other elements' edges within SNAP. */
-function snapResize(rect: R, dir: Dir, anchor: R, others: R[]): { r: R; v: number[]; h: number[] } {
+/** Snap the resize so the dragged edge(s) align with other elements' edges and centres. */
+function snapResize(rect: R, dir: Dir, anchor: R, others: R[]): { r: R; v: SnapLine[]; h: SnapLine[] } {
   let { x, y, w, h } = rect;
-  const vGuides: number[] = [];
-  const hGuides: number[] = [];
-  const cX: number[] = [];
-  const cY: number[] = [];
+  const vGuides: SnapLine[] = [];
+  const hGuides: SnapLine[] = [];
+  const candX: Cand[] = [];
+  const candY: Cand[] = [];
   for (const o of others) {
-    cX.push(o.x, o.x + o.w);
-    cY.push(o.y, o.y + o.h);
+    candX.push({ at: o.x, center: false, o }, { at: o.x + o.w, center: false, o }, { at: o.x + o.w / 2, center: true, o });
+    candY.push({ at: o.y, center: false, o }, { at: o.y + o.h, center: false, o }, { at: o.y + o.h / 2, center: true, o });
   }
   const fixedRight = anchor.x + anchor.w;
   const fixedBottom = anchor.y + anchor.h;
 
   if (dir.includes("e")) {
     const target = x + w;
-    let best = SNAP, snapped: number | null = null;
-    for (const cand of cX) { const d = Math.abs(cand - target); if (d < best) { best = d; snapped = cand; } }
-    if (snapped !== null) { w = Math.max(MIN, snapped - x); vGuides.push(x + w); }
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candX) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) {
+      w = Math.max(MIN, s.at - x);
+      vGuides.push({ at: x + w, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "y", s.center) });
+    }
   }
   if (dir.includes("w")) {
     const target = x;
-    let best = SNAP, snapped: number | null = null;
-    for (const cand of cX) { const d = Math.abs(cand - target); if (d < best) { best = d; snapped = cand; } }
-    if (snapped !== null) { x = Math.min(snapped, fixedRight - MIN); w = fixedRight - x; vGuides.push(x); }
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candX) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) {
+      x = Math.min(s.at, fixedRight - MIN); w = fixedRight - x;
+      vGuides.push({ at: x, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "y", s.center) });
+    }
   }
   if (dir.includes("s")) {
     const target = y + h;
-    let best = SNAP, snapped: number | null = null;
-    for (const cand of cY) { const d = Math.abs(cand - target); if (d < best) { best = d; snapped = cand; } }
-    if (snapped !== null) { h = Math.max(MIN, snapped - y); hGuides.push(y + h); }
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candY) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) {
+      h = Math.max(MIN, s.at - y);
+hGuides.push({ at: y + h, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "x", s.center) });
+    }
   }
   if (dir.includes("n")) {
     const target = y;
-    let best = SNAP, snapped: number | null = null;
-    for (const cand of cY) { const d = Math.abs(cand - target); if (d < best) { best = d; snapped = cand; } }
-    if (snapped !== null) { y = Math.min(snapped, fixedBottom - MIN); h = fixedBottom - y; hGuides.push(y); }
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candY) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) {
+      y = Math.min(s.at, fixedBottom - MIN); h = fixedBottom - y;
+hGuides.push({ at: y, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "x", s.center) });
+    }
   }
   return { r: { x, y, w, h }, v: vGuides, h: hGuides };
+}
+
+const CROP_GRID = 5; // 5px == 5cm fine grid when nothing else snaps
+
+/** Perpendicular extent (a..b) for a guide line joining rects `m` and `o`.
+ *  For a centre snap the line spans only the overlap, so it appears at / through
+ *  the objects' centres; for an edge snap it spans the full union of the two. */
+function guideExtent(m: R, o: R, perpendicular: "x" | "y", useOverlap: boolean): { a: number; b: number } {
+  const ma = perpendicular === "x" ? m.x : m.y;
+  const ms = ma + (perpendicular === "x" ? m.w : m.h);
+  const oa = perpendicular === "x" ? o.x : o.y;
+  const os = oa + (perpendicular === "x" ? o.w : o.h);
+  if (useOverlap) {
+    const a = Math.max(ma, oa);
+    const b = Math.min(ms, os);
+    if (a < b) return { a, b };
+  }
+  return { a: Math.min(ma, oa), b: Math.max(ms, os) };
+}
+
+interface Cand {
+  at: number;
+  center: boolean;
+  o: R;
+}
+
+/** Snap candidates for aligning the moving rect `m` against a target rect `o`,
+ *  covering edge/edge, edge/centre and centre/centre (x axis). */
+function xCands(m: R, o: R): Cand[] {
+  return [
+    { at: o.x, center: false, o }, // m.left  -> o.left
+    { at: o.x + o.w, center: false, o }, // m.left  -> o.right
+    { at: o.x + o.w - m.w, center: false, o }, // m.right -> o.right
+    { at: o.x - m.w, center: false, o }, // m.right -> o.left
+    { at: o.x + (o.w - m.w) / 2, center: true, o }, // m.cx -> o.cx
+    { at: o.x + o.w / 2, center: true, o }, // m.left  -> o.cx
+    { at: o.x + o.w / 2 - m.w, center: true, o }, // m.right -> o.cx
+    { at: o.x - m.w / 2, center: false, o }, // m.cx -> o.left
+    { at: o.x + o.w - m.w / 2, center: false, o }, // m.cx -> o.right
+  ];
+}
+function yCands(m: R, o: R): Cand[] {
+  return [
+    { at: o.y, center: false, o },
+    { at: o.y + o.h, center: false, o },
+    { at: o.y + o.h - m.h, center: false, o },
+    { at: o.y - m.h, center: false, o },
+    { at: o.y + (o.h - m.h) / 2, center: true, o },
+    { at: o.y + o.h / 2, center: true, o },
+    { at: o.y + o.h / 2 - m.h, center: true, o },
+    { at: o.y - m.h / 2, center: false, o },
+    { at: o.y + o.h - m.h / 2, center: false, o },
+  ];
+}
+
+/** Snap a plant rectangle being dragged.
+ * Targets are ONLY the parent bed and the plant's own siblings plus a fine grid
+ * (never unrelated elements). Supports edge and centre snapping:
+ *  - plant edges  -> parent/sibling edges
+ *  - plant edges  -> parent/sibling centre lines
+ *  - plant centre -> parent/sibling centres
+ */
+function snapCropRect(moved: R, bed: R, others: R[], anchor: R): { x: number; y: number; v: SnapLine[]; h: SnapLine[] } {
+  const candX: Cand[] = [];
+  const candY: Cand[] = [];
+  const push = (o: R) => {
+    candX.push(...xCands(moved, o));
+    candY.push(...yCands(moved, o));
+  };
+  push(bed);
+  for (const o of others) push(o);
+  let nx = moved.x, ny = moved.y;
+  let vGrp: SnapLine[] = [], hGrp: SnapLine[] = [];
+  let bestX = SNAP, bestY = SNAP;
+  for (const c of candX) {
+    const d = Math.abs(c.at - moved.x);
+    if (d < bestX) {
+      bestX = d; nx = c.at;
+      vGrp = [{ at: c.center ? c.at + moved.w / 2 : c.at, center: c.center, ...guideExtent({ x: moved.x, y: anchor.y, w: moved.w, h: anchor.h }, c.o, "y", c.center) }];
+    }
+  }
+  for (const c of candY) {
+    const d = Math.abs(c.at - moved.y);
+    if (d < bestY) {
+      bestY = d; ny = c.at;
+      hGrp = [{ at: c.center ? c.at + moved.h / 2 : c.at, center: c.center, ...guideExtent({ x: anchor.x, y: moved.y, w: anchor.w, h: moved.h }, c.o, "x", c.center) }];
+    }
+  }
+  if (vGrp.length === 0) nx = Math.round(nx / CROP_GRID) * CROP_GRID;
+  if (hGrp.length === 0) ny = Math.round(ny / CROP_GRID) * CROP_GRID;
+  nx = Math.max(bed.x, Math.min(bed.x + bed.w - moved.w, nx));
+  ny = Math.max(bed.y, Math.min(bed.y + bed.h - moved.h, ny));
+  return { x: nx, y: ny, v: vGrp, h: hGrp };
+}
+
+/** Snap the dragged edge(s) of a plant resize to bed/sibling edges and centres. */
+function snapCropResize(rect: R, dir: Dir, anchor: R, bed: R, others: R[]): { r: R; v: SnapLine[]; h: SnapLine[] } {
+  let { x, y, w, h } = rect;
+  const vGuides: SnapLine[] = [];
+  const hGuides: SnapLine[] = [];
+  const candX: Cand[] = [];
+  const candY: Cand[] = [];
+  for (const o of [bed, ...others]) {
+    candX.push({ at: o.x, center: false, o }, { at: o.x + o.w, center: false, o }, { at: o.x + o.w / 2, center: true, o });
+    candY.push({ at: o.y, center: false, o }, { at: o.y + o.h, center: false, o }, { at: o.y + o.h / 2, center: true, o });
+  }
+  const fixedRight = anchor.x + anchor.w;
+  const fixedBottom = anchor.y + anchor.h;
+
+  if (dir.includes("e")) {
+    const target = x + w;
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candX) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) { w = Math.max(MIN, s.at - x); vGuides.push({ at: x + w, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "y", s.center) }); }
+    else w = Math.max(MIN, Math.round(w / CROP_GRID) * CROP_GRID);
+  }
+  if (dir.includes("w")) {
+    const target = x;
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candX) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) { x = Math.min(s.at, fixedRight - MIN); w = fixedRight - x; vGuides.push({ at: x, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "y", s.center) }); }
+    else { x = Math.round(x / CROP_GRID) * CROP_GRID; w = fixedRight - x; }
+  }
+  if (dir.includes("s")) {
+    const target = y + h;
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candY) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) { h = Math.max(MIN, s.at - y); hGuides.push({ at: y + h, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "x", s.center) }); }
+    else h = Math.max(MIN, Math.round(h / CROP_GRID) * CROP_GRID);
+  }
+  if (dir.includes("n")) {
+    const target = y;
+    let best = SNAP, s: Cand | null = null;
+    for (const c of candY) { const d = Math.abs(c.at - target); if (d < best) { best = d; s = c; } }
+    if (s !== null) { y = Math.min(s.at, fixedBottom - MIN); h = fixedBottom - y; hGuides.push({ at: y, center: s.center, ...guideExtent({ x, y, w, h }, s.o, "x", s.center) }); }
+    else { y = Math.round(y / CROP_GRID) * CROP_GRID; h = fixedBottom - y; }
+  }
+  w = Math.max(MIN, w);
+  h = Math.max(MIN, h);
+  if (x < bed.x) { w = Math.max(MIN, w - (bed.x - x)); x = bed.x; }
+  if (y < bed.y) { h = Math.max(MIN, h - (bed.y - y)); y = bed.y; }
+  if (x + w > bed.x + bed.w) w = Math.max(MIN, bed.x + bed.w - x);
+  if (y + h > bed.y + bed.h) h = Math.max(MIN, bed.y + bed.h - y);
+  return {
+    r: { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) },
+    v: vGuides,
+    h: hGuides,
+  };
 }
 
 function dirCursor(dir: Dir): string {
@@ -167,27 +365,36 @@ function dirCursor(dir: Dir): string {
 
 export function GpuCanvas({
   elements,
+  catalog,
   tool,
   frameType,
   selectedIds,
+  selectedCropId,
   theme,
   onSelect,
+  onSelectCrop,
   onApplyChanges,
   onAddFrame,
+  onUpdateCrop,
   onBusyChange,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const gpuRef = useRef<HTMLCanvasElement | null>(null);
   const ovRef = useRef<HTMLCanvasElement | null>(null);
 
-  const propsRef = useRef({ elements, tool, frameType, selectedIds, theme });
-  propsRef.current = { elements, tool, frameType, selectedIds, theme };
-  const handlersRef = useRef({ onSelect, onApplyChanges, onAddFrame, onBusyChange });
-  handlersRef.current = { onSelect, onApplyChanges, onAddFrame, onBusyChange };
+  const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog });
+  propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog };
+  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onAddFrame, onUpdateCrop, onBusyChange });
+  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onAddFrame, onUpdateCrop, onBusyChange };
 
   const camRef = useRef<Cam>({ x: 0, y: 0, zoom: 1 });
   const draftRef = useRef<Map<string, R>>(new Map());
-  const guidesRef = useRef<Guides>({ v: [], h: [] });
+  /** live crop-area rects keyed by instanceId, in world px (only during a crop gesture). */
+  const cropDraftRef = useRef<Map<string, R>>(new Map());
+  const guidesRef = useRef<SnapGuides>({ v: [], h: [] });
+  const cropGuidesRef = useRef<SnapGuides>({ v: [], h: [] });
+  /** last pointer position (screen-local) for hover highlighting. */
+  const mouseRef = useRef<Pt>({ x: 0, y: 0 });
   const spaceRef = useRef(false);
   const gRef = useRef<Gesture>({ k: "none" });
   const hostSize = useRef({ w: 0, h: 0 });
@@ -278,6 +485,78 @@ export function GpuCanvas({
     return null;
   };
 
+  // Editing plants is only possible when exactly one bed is selected.
+  const selectedBedEl = (): GardenElement | null => {
+    const p = propsRef.current;
+    if (p.tool !== "select" || p.selectedIds.length !== 1) return null;
+    const el = p.elements.find((e) => e.id === p.selectedIds[0]);
+    return el && el.type === "bed" ? el : null;
+  };
+
+  // Resolve a plant's world rect. Prefers the live crop-draft; otherwise builds
+  // from the bed's *live* draft position so plants follow their parent while it
+  // is being dragged or resized.
+  const cropRectOf = (bed: GardenElement, a: CropAssignment): R => {
+    const live = cropDraftRef.current.get(a.instanceId);
+    if (live) return live;
+    const base = draftRef.current.get(bed.id) ?? rectOf(bed);
+    const ar = a.area ?? { x: 0, y: 0, w: bed.widthM, h: bed.heightM };
+    return {
+      x: base.x + ar.x * PX_PER_M,
+      y: base.y + ar.y * PX_PER_M,
+      w: ar.w * PX_PER_M,
+      h: ar.h * PX_PER_M,
+    };
+  };
+
+  // corner-handle hit on any crop of the selected bed
+  const hitCropHandle = (
+    sp: Pt,
+    c: Cam,
+    bed: GardenElement
+  ): { a: CropAssignment; dir: Dir } | null => {
+    const p = propsRef.current;
+    for (const a of bed.crops) {
+      const r = cropRectOf(bed, a);
+      const p0 = worldToScreen({ x: r.x, y: r.y }, c);
+      const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+      // corner handles work on any plant
+      const corners: [Dir, number, number][] = [
+        ["nw", p0.x, p0.y], ["ne", p1.x, p0.y], ["sw", p0.x, p1.y], ["se", p1.x, p1.y],
+      ];
+      for (const [dir, hx, hy] of corners) {
+        if (Math.abs(sp.x - hx) <= HANDLE_HIT && Math.abs(sp.y - hy) <= HANDLE_HIT)
+          return { a, dir };
+      }
+      // edge resize: only on the selected plant (or a lone plant) so grabbing a
+      // border resizes it instead of dragging a neighbouring plant.
+      const isSel = p.selectedCropId === a.instanceId;
+      if (isSel || bed.crops.length === 1) {
+        const inX = sp.x >= p0.x - EDGE_HIT && sp.x <= p1.x + EDGE_HIT;
+        const inY = sp.y >= p0.y - EDGE_HIT && sp.y <= p1.y + EDGE_HIT;
+        if (inX && sp.y >= p0.y - EDGE_HIT && sp.y <= p0.y + EDGE_HIT) return { a, dir: "n" };
+        if (inX && sp.y >= p1.y - EDGE_HIT && sp.y <= p1.y + EDGE_HIT) return { a, dir: "s" };
+        if (inY && sp.x >= p0.x - EDGE_HIT && sp.x <= p0.x + EDGE_HIT) return { a, dir: "w" };
+        if (inY && sp.x >= p1.x - EDGE_HIT && sp.x <= p1.x + EDGE_HIT) return { a, dir: "e" };
+      }
+    }
+    return null;
+  };
+
+  const hitCrop = (wp: Pt, bed: GardenElement): CropAssignment | null => {
+    for (let i = bed.crops.length - 1; i >= 0; i--) {
+      const a = bed.crops[i];
+      const r = cropRectOf(bed, a);
+      if (wp.x >= r.x && wp.x <= r.x + r.w && wp.y >= r.y && wp.y <= r.y + r.h) return a;
+    }
+    return null;
+  };
+
+  const bedRefOf = (bed: GardenElement): R => {
+    const r = draftRef.current.get(bed.id) ?? rectOf(bed);
+    return { x: r.x, y: r.y, w: bed.widthM * PX_PER_M, h: bed.heightM * PX_PER_M };
+  };
+
   // ---- gestures ----
   const onPointerDown = (e: React.PointerEvent) => {
     const sp = screenToLocal(e);
@@ -309,6 +588,42 @@ export function GpuCanvas({
       return;
     }
     // "select/edit" tool: select, move and resize.
+    // Plants inside a fully-selected bed take priority over the bed itself.
+    const bedSel = selectedBedEl();
+    if (bedSel && bedSel.crops.length > 0) {
+      const cHandle = hitCropHandle(sp, c, bedSel);
+      if (cHandle) {
+        handlersRef.current.onSelectCrop(cHandle.a.instanceId);
+        gRef.current = {
+          k: "cropResize",
+          eId: bedSel.id,
+          instanceId: cHandle.a.instanceId,
+          dir: cHandle.dir,
+          origin: cropRectOf(bedSel, cHandle.a),
+          bed: bedRefOf(bedSel),
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        doBusy(true);
+        return;
+      }
+      const cHit = hitCrop(screenToWorld(sp, c), bedSel);
+      if (cHit) {
+        handlersRef.current.onSelectCrop(cHit.instanceId);
+        gRef.current = {
+          k: "cropDrag",
+          eId: bedSel.id,
+          instanceId: cHit.instanceId,
+          sp,
+          origin: cropRectOf(bedSel, cHit),
+          bed: bedRefOf(bedSel),
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        doBusy(true);
+        return;
+      }
+      // clicked on bed area but outside any plant -> drop plant selection
+      handlersRef.current.onSelectCrop(null);
+    }
     const dir = hitHandle(sp, c);
     if (dir && p.selectedIds.length > 0) {
       const origins = new Map<string, R>();
@@ -338,6 +653,7 @@ export function GpuCanvas({
         gRef.current = { k: "groupDrag", ids: p.selectedIds, sp, origins, leadId: hit.id };
       } else {
         handlersRef.current.onSelect([hit.id]);
+        handlersRef.current.onSelectCrop(null);
         const origin = draftRef.current.get(hit.id) ?? rectOf(hit);
         gRef.current = { k: "drag", id: hit.id, sp, origin };
       }
@@ -356,15 +672,24 @@ export function GpuCanvas({
     const g = gRef.current;
     if (g.k === "none") {
       const sp = screenToLocal(e);
+      mouseRef.current = sp;
       const c = camRef.current;
       const p = propsRef.current;
       let cur = "default";
       if (p.tool === "move" || spaceRef.current) {
         cur = spaceRef.current ? "grabbing" : "grab";
       } else if (p.tool === "select") {
-        const dir = hitHandle(sp, c);
-        if (dir) cur = dirCursor(dir);
-        else if (hitItem(screenToWorld(sp, c))) cur = "move";
+        const bedSel = selectedBedEl();
+        if (bedSel && bedSel.crops.length > 0) {
+          const ch = hitCropHandle(sp, c, bedSel);
+          if (ch) cur = dirCursor(ch.dir);
+          else if (hitCrop(screenToWorld(sp, c), bedSel)) cur = "move";
+        }
+        if (cur === "default") {
+          const dir = hitHandle(sp, c);
+          if (dir) cur = dirCursor(dir);
+          else if (hitItem(screenToWorld(sp, c))) cur = "move";
+        }
       } else if (p.tool === "frame") {
         cur = "crosshair";
       }
@@ -392,7 +717,7 @@ export function GpuCanvas({
       const others = propsRef.current.elements
         .filter((el) => el.id !== g.id)
         .map((el) => draftRef.current.get(el.id) ?? rectOf(el));
-      const res = snapRect(moved, others);
+      const res = snapRect(moved, others, g.origin);
       draftRef.current.set(g.id, { x: res.x, y: res.y, w: moved.w, h: moved.h });
       guidesRef.current = { v: res.v, h: res.h };
       return;
@@ -416,7 +741,7 @@ export function GpuCanvas({
       const others = propsRef.current.elements
         .filter((el) => !sel.has(el.id))
         .map((el) => draftRef.current.get(el.id) ?? rectOf(el));
-      const res = snapRect(movedLead, others);
+      const res = snapRect(movedLead, others, lead);
       const fx = res.x - lead.x;
       const fy = res.y - lead.y;
       for (const [id, o] of g.origins) {
@@ -448,6 +773,45 @@ export function GpuCanvas({
       guidesRef.current = { v: sn.v, h: sn.h };
       return;
     }
+    if (g.k === "cropDrag") {
+      const wcur = screenToWorld(sp, c);
+      const wstart = screenToWorld(g.sp, c);
+      const bed = propsRef.current.elements.find((e) => e.id === g.eId);
+      const moved: R = {
+        x: g.origin.x + (wcur.x - wstart.x),
+        y: g.origin.y + (wcur.y - wstart.y),
+        w: g.origin.w,
+        h: g.origin.h,
+      };
+      const others: R[] = bed
+        ? bed.crops
+            .filter((a) => a.instanceId !== g.instanceId)
+            .map((a) => cropRectOf(bed, a))
+        : [];
+      const res = snapCropRect(moved, g.bed, others, g.origin);
+      cropDraftRef.current.set(g.instanceId, {
+        x: Math.round(res.x),
+        y: Math.round(res.y),
+        w: g.origin.w,
+        h: g.origin.h,
+      });
+      cropGuidesRef.current = { v: res.v, h: res.h };
+      return;
+    }
+    if (g.k === "cropResize") {
+      const wcur = screenToWorld(sp, c);
+      const bed = propsRef.current.elements.find((e) => e.id === g.eId);
+      const others: R[] = bed
+        ? bed.crops
+            .filter((a) => a.instanceId !== g.instanceId)
+            .map((a) => cropRectOf(bed, a))
+        : [];
+      const nr = resizeRect(g.origin, g.dir, wcur);
+      const sn = snapCropResize(nr, g.dir, g.origin, g.bed, others);
+      cropDraftRef.current.set(g.instanceId, sn.r);
+      cropGuidesRef.current = { v: sn.v, h: sn.h };
+      return;
+    }
   };
 
   const onPointerUp = () => {
@@ -471,13 +835,28 @@ export function GpuCanvas({
       const updates: ElementUpdate[] = [];
       for (const id of g.ids) {
         const r = draftRef.current.get(id);
-        if (r) updates.push({
-          id,
-          x: Math.round(r.x),
-          y: Math.round(r.y),
-          widthM: r.w / PX_PER_M,
-          heightM: r.h / PX_PER_M,
-        });
+        if (r) {
+          const u: ElementUpdate = {
+            id,
+            x: Math.round(r.x),
+            y: Math.round(r.y),
+            widthM: r.w / PX_PER_M,
+            heightM: r.h / PX_PER_M,
+          };
+          const org = g.origins.get(id);
+          const el = propsRef.current.elements.find((e) => e.id === id);
+          if (
+            el &&
+            el.type === "bed" &&
+            el.crops.length > 0 &&
+            org &&
+            org.w > 0 &&
+            org.h > 0
+          ) {
+            u.crops = scaleCropAreas(el.crops, r.w / org.w, r.h / org.h);
+          }
+          updates.push(u);
+        }
         draftRef.current.delete(id);
       }
       if (updates.length > 0) handlersRef.current.onApplyChanges(updates);
@@ -500,10 +879,33 @@ export function GpuCanvas({
         handlersRef.current.onSelect(found);
       } else {
         handlersRef.current.onSelect([]);
+        handlersRef.current.onSelectCrop(null);
       }
     } else if (g.k === "pan") {
-      if (wasEmptyClickRef.current) handlersRef.current.onSelect([]);
+      if (wasEmptyClickRef.current) {
+        handlersRef.current.onSelect([]);
+        handlersRef.current.onSelectCrop(null);
+      }
       wasEmptyClickRef.current = false;
+    } else if (g.k === "cropDrag" || g.k === "cropResize") {
+      const r = cropDraftRef.current.get(g.instanceId);
+      const bed = propsRef.current.elements.find((e) => e.id === g.eId);
+      if (r && bed) {
+        let ar = {
+          x: (r.x - bed.x) / PX_PER_M,
+          y: (r.y - bed.y) / PX_PER_M,
+          w: r.w / PX_PER_M,
+          h: r.h / PX_PER_M,
+        };
+        ar.x = Math.round(ar.x * 100) / 100;
+        ar.y = Math.round(ar.y * 100) / 100;
+        ar.w = Math.round(ar.w * 100) / 100;
+        ar.h = Math.round(ar.h * 100) / 100;
+        handlersRef.current.onUpdateCrop(g.eId, g.instanceId, { area: ar });
+      }
+      cropDraftRef.current.delete(g.instanceId);
+      cropGuidesRef.current = { v: [], h: [] };
+      guidesRef.current = { v: [], h: [] };
     } else if (g.k === "frame") {
       const p = propsRef.current;
       const end = g.end;
@@ -567,6 +969,61 @@ export function GpuCanvas({
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, w, h);
 
+      // plant rectangles drawn inside each bed (colour-coded per catalog crop)
+      const colorMap = new Map<string, string>();
+      const nameMap = new Map<string, string>();
+      for (const cr of p.catalog) {
+        colorMap.set(cr.id, cr.color);
+        nameMap.set(cr.id, cr.name);
+      }
+      // which plant is under the pointer (only meaningful inside the selected bed)
+      let hoverCropId: string | null = null;
+      {
+        const bedSel = selectedBedEl();
+        if (bedSel && bedSel.crops.length > 0) {
+          const hc = hitCrop(screenToWorld(mouseRef.current, c), bedSel);
+          if (hc) hoverCropId = hc.instanceId;
+        }
+      }
+      for (const el of p.elements) {
+        if (el.type !== "bed" || el.crops.length === 0) continue;
+        for (const a of el.crops) {
+          const r = cropRectOf(el, a);
+          const p0 = worldToScreen({ x: r.x, y: r.y }, c);
+          const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+          const bw = p1.x - p0.x;
+          const bh = p1.y - p0.y;
+          if (bw < 2 || bh < 2) continue;
+          const col = colorMap.get(a.cropId) ?? "#9aa0a6";
+          const isSel = p.selectedCropId === a.instanceId;
+          const isHov = hoverCropId === a.instanceId;
+          let fillAlpha = 0.22;
+          if (isSel) fillAlpha = 0.42;
+          else if (p.selectedCropId) fillAlpha = 0.10; // dim inactive plants once one is selected
+          else if (isHov) fillAlpha = 0.32;
+          ctx.globalAlpha = fillAlpha;
+          ctx.fillStyle = col;
+          ctx.fillRect(p0.x, p0.y, bw, bh);
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = isSel || isHov ? col : "rgba(0,0,0,0.18)";
+          ctx.lineWidth = isSel ? 2 : 1;
+          ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, bw - 1, bh - 1);
+          if (bw >= 42 && bh >= 16) {
+            const nm = nameMap.get(a.cropId) ?? "";
+            if (nm) {
+              const fs = Math.max(9, Math.min(12, 11 * c.zoom));
+              ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillStyle = "rgba(255,255,255,0.9)";
+              ctx.fillText(nm, p0.x + bw / 2, p0.y + bh / 2);
+              ctx.textAlign = "left";
+              ctx.textBaseline = "top";
+            }
+          }
+        }
+      }
+
       // labels
       for (const el of p.elements) {
         const r = draftRef.current.get(el.id) ?? rectOf(el);
@@ -622,25 +1079,39 @@ export function GpuCanvas({
         }
       }
 
-      // snap guides
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "#f24822";
-      for (const vx of guidesRef.current.v) {
-        const sx = worldToScreen({ x: vx, y: 0 }, c).x;
-        ctx.beginPath();
-        ctx.moveTo(sx, 0);
-        ctx.lineTo(sx, h);
-        ctx.stroke();
-      }
-      for (const hy of guidesRef.current.h) {
-        const sy = worldToScreen({ x: 0, y: hy }, c).y;
-        ctx.beginPath();
-        ctx.moveTo(0, sy);
-        ctx.lineTo(w, sy);
-        ctx.stroke();
-      }
+      // snap guides (elements) — dashed for an edge snap, solid for a centre snap;
+      // centre lines span the objects' overlap, edge lines span both.
+      const drawGuide = (line: SnapLine, axis: "v" | "h") => {
+        ctx.lineWidth = line.center ? 1.6 : 1;
+        ctx.strokeStyle = "#f24822";
+        ctx.setLineDash(line.center ? [] : [4, 4]);
+        if (axis === "v") {
+          const sx = worldToScreen({ x: line.at, y: 0 }, c).x;
+          const ay = worldToScreen({ x: 0, y: line.a }, c).y;
+          const by = worldToScreen({ x: 0, y: line.b }, c).y;
+          ctx.beginPath();
+          ctx.moveTo(sx, ay);
+          ctx.lineTo(sx, by);
+          ctx.stroke();
+        } else {
+          const sy = worldToScreen({ x: 0, y: line.at }, c).y;
+          const ax = worldToScreen({ x: line.a, y: 0 }, c).x;
+          const bx = worldToScreen({ x: line.b, y: 0 }, c).x;
+          ctx.beginPath();
+          ctx.moveTo(ax, sy);
+          ctx.lineTo(bx, sy);
+          ctx.stroke();
+        }
+      };
+      for (const gv of guidesRef.current.v) drawGuide(gv, "v");
+      for (const gh of guidesRef.current.h) drawGuide(gh, "h");
       ctx.setLineDash([]);
+      {
+        const cgg = cropGuidesRef.current;
+        for (const gv of cgg.v) drawGuide(gv, "v");
+        for (const gh of cgg.h) drawGuide(gh, "h");
+        ctx.setLineDash([]);
+      }
 
       // marquee (selection box) preview, in screen space
       if (gRef.current.k === "marquee") {
@@ -656,7 +1127,7 @@ export function GpuCanvas({
         ctx.strokeRect(x, y, mw, mh);
       }
 
-      // frame preview
+      // frame preview (drawing a new bed/path)
       if (gRef.current.k === "frame") {
         const g = gRef.current as { k: "frame"; start: Pt; end: Pt };
         const end = g.end;
@@ -664,11 +1135,38 @@ export function GpuCanvas({
         const p1 = worldToScreen(end, c);
         const x = Math.min(p0.x, p1.x);
         const y = Math.min(p0.y, p1.y);
-        ctx.strokeStyle = "#0d99ff";
+        const w = Math.abs(p1.x - p0.x);
+        const h = Math.abs(p1.y - p0.y);
+        const fcol = p.frameType === "bed" ? accent(p.theme) : "#6b6258";
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = fcol;
+        ctx.fillRect(x, y, w, h);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = fcol;
         ctx.lineWidth = 1.5;
-        ctx.fillStyle = "rgba(13,153,255,0.12)";
-        ctx.fillRect(x, y, Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
-        ctx.strokeRect(x, y, Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(x, y, w, h);
+        ctx.setLineDash([]);
+        // live size label while drawing
+        if (w > MIN && h > MIN) {
+          const wM = Math.max(0.05, Math.round((w / PX_PER_M) * 20) / 20);
+          const hM = Math.max(0.05, Math.round((h / PX_PER_M) * 20) / 20);
+          const txt = `${fmtM(wM)} × ${fmtM(hM)}`;
+          const fs = Math.max(10, Math.min(13, 11 * c.zoom));
+          ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+          const tw = ctx.measureText(txt).width + 16;
+          const th = fs + 7;
+          const lx = x;
+          const ly = y + h + 8;
+          ctx.fillStyle = fcol;
+          ctx.beginPath();
+          ctx.roundRect(lx, ly, tw, th, 4);
+          ctx.fill();
+          ctx.fillStyle = "hsla(0,0%,100%,0.95)";
+          ctx.textBaseline = "middle";
+          ctx.fillText(txt, lx + 8, ly + th / 2 + 1);
+          ctx.textBaseline = "top";
+        }
       }
 
       // selected outline + handles (drawn around the union bounding box)
@@ -704,6 +1202,56 @@ export function GpuCanvas({
           ctx.fillRect(cxm - eb / 2, p1.y - 2, eb, 2); // s
           ctx.fillRect(p0.x, cmy - eb / 2, 2, eb); // w
           ctx.fillRect(p1.x - 2, cmy - eb / 2, 2, eb); // e
+        }
+      }
+
+      // plant handles: only the selected plant is fully highlighted
+      if (p.tool === "select") {
+        const bedEl = selectedBedEl();
+        if (bedEl && bedEl.crops.length > 0) {
+          const col = accent(p.theme);
+          for (const a of bedEl.crops) {
+            const isSel = p.selectedCropId === a.instanceId;
+            const r = cropRectOf(bedEl, a);
+            const p0 = worldToScreen({ x: r.x, y: r.y }, c);
+            const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+            if (isSel) {
+              ctx.strokeStyle = col;
+              ctx.lineWidth = 2;
+              ctx.strokeRect(p0.x + 1, p0.y + 1, p1.x - p0.x - 2, p1.y - p0.y - 2);
+              const hs = Math.max(4, Math.min(8, 5.5 * Math.pow(c.zoom, 0.35)));
+              const hx = [p0.x, p1.x, p0.x, p1.x];
+              const hy = [p0.y, p0.y, p1.y, p1.y];
+              ctx.fillStyle = "rgba(255,255,255,0.95)";
+              ctx.lineWidth = 1.25;
+              ctx.strokeStyle = col;
+              for (let i = 0; i < 4; i++) {
+                ctx.fillRect(hx[i] - hs / 2, hy[i] - hs / 2, hs, hs);
+                ctx.strokeRect(hx[i] - hs / 2, hy[i] - hs / 2, hs, hs);
+              }
+              // crop size chip (kept near constant screen size)
+              const txt = `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
+              const fs = Math.max(9, Math.min(13, 11 * c.zoom));
+              ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+              const tw = ctx.measureText(txt).width + 16;
+              const th = fs + 7;
+              const cy = p1.y + 8;
+              const cx = Math.max(2, Math.min(w - tw - 2, (p0.x + p1.x) / 2 - tw / 2));
+              ctx.fillStyle = col;
+              ctx.beginPath();
+              ctx.roundRect(cx, cy, tw, th, 4);
+              ctx.fill();
+              ctx.fillStyle = "rgba(255,255,255,0.95)";
+              ctx.textBaseline = "middle";
+              ctx.fillText(txt, cx + 8, cy + th / 2 + 1);
+              ctx.textBaseline = "top";
+            } else if (!p.selectedCropId && hoverCropId === a.instanceId) {
+              ctx.setLineDash([3, 3]);
+              ctx.strokeStyle = col;
+              ctx.lineWidth = 1.5;
+              ctx.strokeRect(p0.x + 1, p0.y + 1, p1.x - p0.x - 2, p1.y - p0.y - 2);
+            }
+          }
         }
       }
     };

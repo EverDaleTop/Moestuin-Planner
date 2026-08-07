@@ -30,6 +30,11 @@ export interface CropAssignment {
   rowSpacing?: number;
   /** optional override, snapshotted from the crop at add time */
   plantSpacing?: number;
+  /**
+   * Sub-region the planting occupies, in metres relative to the bed's top-left
+   * corner. When absent the planting fills the whole bed.
+   */
+  area?: { x: number; y: number; w: number; h: number };
 }
 
 export interface GardenElement {

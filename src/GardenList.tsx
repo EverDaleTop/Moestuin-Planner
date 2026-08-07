@@ -10,9 +10,10 @@ interface Props {
   onOpen: (id: string) => void;
   onAdd: (name: string) => void;
   onDelete: (id: string) => void;
+  onPlants: () => void;
 }
 
-export function GardenList({ gardens, theme, onToggleTheme, onOpen, onAdd, onDelete }: Props) {
+export function GardenList({ gardens, theme, onToggleTheme, onOpen, onAdd, onDelete, onPlants }: Props) {
   const [name, setName] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
@@ -33,6 +34,10 @@ export function GardenList({ gardens, theme, onToggleTheme, onOpen, onAdd, onDel
           </div>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
+        <nav className="gl-nav">
+          <button className="nav-tab nav-active" disabled>Tuinen</button>
+          <button className="nav-tab" onClick={onPlants}>Gewassen</button>
+        </nav>
       </header>
 
       <section className="gl-new">

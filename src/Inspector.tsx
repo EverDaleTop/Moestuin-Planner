@@ -16,6 +16,68 @@ interface Props {
   onAddCropToCatalog: (crop: Omit<Crop, "id">) => void;
 }
 
+function CropPicker({
+  catalog,
+  value,
+  onPick,
+  placeholder,
+}: {
+  catalog: Crop[];
+  value: string | null;
+  onPick: (id: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const selected = value ? catalog.find((c) => c.id === value) : null;
+  const query = q.trim().toLowerCase();
+  const filtered = query
+    ? catalog.filter((c) => c.name.toLowerCase().includes(query))
+    : catalog;
+  return (
+    <div className="crop-picker">
+      <button
+        type="button"
+        className="crop-picker-btn"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="crop-dot" style={{ background: selected?.color ?? "#999" }} />
+        <span className="cp-btn-name">{selected?.name ?? placeholder}</span>
+        <span className="cp-caret">▾</span>
+      </button>
+      {open && (
+        <div className="crop-picker-pop">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Zoek gewas…"
+            className="cp-search"
+          />
+          <div className="cp-list">
+            {filtered.map((c) => (
+              <button
+                type="button"
+                key={c.id}
+                className={c.id === value ? "cp-item cp-active" : "cp-item"}
+                onClick={() => {
+                  onPick(c.id);
+                  setOpen(false);
+                  setQ("");
+                }}
+              >
+                <span className="crop-dot" style={{ background: c.color }} />
+                <span className="cp-name">{c.name}</span>
+              </button>
+            ))}
+            {filtered.length === 0 && <div className="cp-empty">Geen gewassen</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NumField({
   label,
   value,
@@ -58,7 +120,6 @@ export function Inspector({
   onRemoveCrop,
   onAddCropToCatalog,
 }: Props) {
-  const [newCropId, setNewCropId] = useState("");
   const [showCatalogForm, setShowCatalogForm] = useState(false);
 
   const [cfName, setCfName] = useState("");
@@ -71,11 +132,6 @@ export function Inspector({
     catalog.forEach((c) => m.set(c.id, c));
     return m;
   }, [catalog]);
-
-  const catalogOptions = useMemo(
-    () => catalog.filter((c) => !element || !element.crops.some((x) => x.cropId === c.id)),
-    [catalog, element]
-  );
 
   const addCatalogCrop = () => {
     if (!cfName.trim()) return;
@@ -162,12 +218,20 @@ export function Inspector({
               const total = c.rows * perRow;
               return (
                 <li key={c.instanceId} className="crop-item">
-                  <span
-                    className="crop-dot"
-                    style={{ background: crop?.color ?? "#999" }}
-                  />
                   <div className="crop-info">
-                    <div className="crop-name">{crop?.name ?? "Onbekend"}</div>
+                    <CropPicker
+                      catalog={catalog}
+                      value={c.cropId}
+                      placeholder="Kies gewas"
+                      onPick={(id) => {
+                        const next = cropById.get(id);
+                        onUpdateCrop(c.instanceId, {
+                          cropId: id,
+                          rowSpacing: next?.rowSpacing,
+                          plantSpacing: next?.plantSpacing,
+                        });
+                      }}
+                    />
                     <div className="crop-controls">
                       <NumField
                         label="Rijen"
@@ -206,27 +270,12 @@ export function Inspector({
           </ul>
 
           <div className="crop-add">
-            <select
-              value={newCropId}
-              onChange={(e) => setNewCropId(e.target.value)}
-              aria-label="Kies gewas"
-            >
-              <option value="">Kies een gewas…</option>
-              {catalogOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <button
-              disabled={!newCropId}
-              onClick={() => {
-                onAddCrop(newCropId);
-                setNewCropId("");
-              }}
-            >
-              Toevoegen
-            </button>
+            <CropPicker
+              catalog={catalog}
+              value={null}
+              placeholder="Gewas toevoegen…"
+              onPick={(id) => onAddCrop(id)}
+            />
           </div>
         </section>
       )}

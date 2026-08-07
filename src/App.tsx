@@ -3,12 +3,14 @@ import type { AppData, Crop, Garden, GardenElement, CropAssignment } from "./typ
 import { loadData, saveData, id } from "./storage";
 import { GardenList } from "./GardenList";
 import { GardenEditor } from "./GardenEditor";
+import { PlantDatabase } from "./PlantDatabase";
 import { useTheme } from "./useTheme";
 import "./App.css";
 
 export default function App() {
   const [data, setData] = useState<AppData>(() => loadData());
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [screen, setScreen] = useState<"gardens" | "plants">("gardens");
   const [theme, toggleTheme] = useTheme();
 
   const undoStack = useRef<AppData[]>([]);
@@ -98,7 +100,34 @@ export default function App() {
     (gId: string, eId: string, patch: Partial<GardenElement>) => {
       updateGarden(gId, (g) => ({
         ...g,
-        elements: g.elements.map((e) => (e.id === eId ? { ...e, ...patch } : e)),
+        elements: g.elements.map((e) => {
+          if (e.id !== eId) return e;
+          let next: Partial<GardenElement> = { ...patch };
+          // when a bed's size changes, its plants scale proportionally
+          if (
+            e.type === "bed" &&
+            e.crops.length > 0 &&
+            (patch.widthM !== undefined || patch.heightM !== undefined)
+          ) {
+            const ow = e.widthM || 1;
+            const oh = e.heightM || 1;
+            const nw = patch.widthM ?? e.widthM;
+            const nh = patch.heightM ?? e.heightM;
+            next.crops = e.crops.map((c) => {
+              if (!c.area) return c;
+              return {
+                ...c,
+                area: {
+                  x: c.area.x * (nw / ow),
+                  y: c.area.y * (nh / oh),
+                  w: c.area.w * (nw / ow),
+                  h: c.area.h * (nh / oh),
+                },
+              };
+            });
+          }
+          return { ...e, ...next };
+        }),
       }));
     },
     [updateGarden]
@@ -131,7 +160,17 @@ export default function App() {
   // Apply a batch of element size/position changes in ONE undoable step, so a
   // multi-element move or resize collapses to a single undo entry.
   const applyElements = useCallback(
-    (gId: string, updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number }[]) => {
+    (
+      gId: string,
+      updates: {
+        id: string;
+        x?: number;
+        y?: number;
+        widthM?: number;
+        heightM?: number;
+        crops?: CropAssignment[];
+      }[]
+    ) => {
       if (updates.length === 0) return;
       mutate((d) => ({
         ...d,
@@ -148,6 +187,7 @@ export default function App() {
               if (u.y !== undefined) next.y = u.y;
               if (u.widthM !== undefined) next.widthM = u.widthM;
               if (u.heightM !== undefined) next.heightM = u.heightM;
+              if (u.crops !== undefined) next.crops = u.crops;
               return { ...e, ...next };
             }),
           };
@@ -183,12 +223,26 @@ export default function App() {
     (gId: string, eId: string, cropId: string) => {
       const crop = data.cropCatalog.find((c) => c.id === cropId);
       if (!crop) return;
+      const bed = data.gardens
+        .find((g) => g.id === gId)
+        ?.elements.find((e) => e.id === eId);
+      const bedW = bed?.widthM ?? 1;
+      const bedH = bed?.heightM ?? 1;
+      const count = bed?.crops.length ?? 0;
+      const bandH = Math.max(0.1, bedH / (count + 1));
+      const area = {
+        x: 0,
+        y: Math.max(0, Math.min(count * bandH, bedH - bandH)),
+        w: bedW,
+        h: bandH,
+      };
       const assignment: CropAssignment = {
         instanceId: id(),
         cropId,
         rows: 1,
         rowSpacing: crop.rowSpacing,
         plantSpacing: crop.plantSpacing,
+        area,
       };
       updateGarden(gId, (g) => ({
         ...g,
@@ -197,7 +251,7 @@ export default function App() {
         ),
       }));
     },
-    [data.cropCatalog, updateGarden]
+    [data.cropCatalog, data.gardens, updateGarden]
   );
 
   const updateCrop = useCallback(
@@ -233,14 +287,75 @@ export default function App() {
     [updateGarden]
   );
 
+  const duplicateCrop = useCallback(
+    (gId: string, eId: string, instanceId: string): string | null => {
+      const bed = data.gardens
+        .find((g) => g.id === gId)
+        ?.elements.find((e) => e.id === eId);
+      const src = bed?.crops.find((c) => c.instanceId === instanceId);
+      if (!src) return null;
+      const copy: CropAssignment = {
+        ...src,
+        instanceId: id(),
+        area: src.area
+          ? { ...src.area, x: src.area.x + 0.1, y: src.area.y + 0.1 }
+          : undefined,
+      };
+      updateGarden(gId, (g) => ({
+        ...g,
+        elements: g.elements.map((e) =>
+          e.id === eId ? { ...e, crops: [...e.crops, copy] } : e
+        ),
+      }));
+      return copy.instanceId;
+    },
+    [data.gardens, updateGarden]
+  );
+
   const addCropToCatalog = useCallback((crop: Omit<Crop, "id">) => {
     const full: Crop = { ...crop, id: id() };
     mutate((d) => ({ ...d, cropCatalog: [...d.cropCatalog, full] }));
   }, [mutate]);
 
+  const updateCropInCatalog = useCallback(
+    (cropId: string, patch: Partial<Crop>) => {
+      mutate((d) => ({
+        ...d,
+        cropCatalog: d.cropCatalog.map((c) =>
+          c.id === cropId ? { ...c, ...patch } : c
+        ),
+      }));
+    },
+    [mutate]
+  );
+
+  const removeCropFromCatalog = useCallback(
+    (cropId: string) => {
+      mutate((d) => ({
+        ...d,
+        cropCatalog: d.cropCatalog.filter((c) => c.id !== cropId),
+      }));
+    },
+    [mutate]
+  );
+
   const catalogByCrop = data.cropCatalog;
 
   if (!garden) {
+    if (screen === "plants") {
+      return (
+        <PlantDatabase
+          catalog={data.cropCatalog}
+          gardenCount={data.gardens.length}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onBack={() => setScreen("gardens")}
+          onAdd={addCropToCatalog}
+          onUpdate={updateCropInCatalog}
+          onDelete={removeCropFromCatalog}
+        />
+      );
+    }
     return (
       <GardenList
         gardens={data.gardens}
@@ -249,6 +364,7 @@ export default function App() {
         onOpen={setActiveId}
         onAdd={addGarden}
         onDelete={deleteGarden}
+        onPlants={() => setScreen("plants")}
       />
     );
   }
@@ -270,9 +386,14 @@ export default function App() {
       onAddCrop={(eId, cropId) => addCrop(garden.id, eId, cropId)}
       onUpdateCrop={(eId, iId, patch) => updateCrop(garden.id, eId, iId, patch)}
       onRemoveCrop={(eId, iId) => removeCrop(garden.id, eId, iId)}
+      onDuplicateCrop={(eId, iId) => duplicateCrop(garden.id, eId, iId)}
       onAddCropToCatalog={addCropToCatalog}
       onUndo={undo}
       onRedo={redo}
+      onOpenPlants={() => {
+        setScreen("plants");
+        setActiveId(null);
+      }}
     />
   );
 }
