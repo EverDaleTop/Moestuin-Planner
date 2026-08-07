@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment } from "./types";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense } from "./types";
 import { loadData, saveData, id } from "./storage";
 import { GardenList } from "./GardenList";
 import { GardenEditor } from "./GardenEditor";
@@ -64,6 +64,8 @@ export default function App() {
       name,
       createdAt: Date.now(),
       elements: [],
+      harvests: [],
+      expenses: [],
     };
     mutate((d) => ({ ...d, gardens: [...d.gardens, g] }));
     setActiveId(g.id);
@@ -339,6 +341,62 @@ export default function App() {
     [mutate]
   );
 
+  const addHarvest = useCallback(
+    (gId: string, entry: Omit<HarvestEntry, "id">) => {
+      const full: HarvestEntry = { ...entry, id: id() };
+      updateGarden(gId, (g) => ({ ...g, harvests: [...g.harvests, full] }));
+    },
+    [updateGarden]
+  );
+
+  const updateHarvest = useCallback(
+    (gId: string, hId: string, patch: Partial<HarvestEntry>) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        harvests: g.harvests.map((h) => (h.id === hId ? { ...h, ...patch } : h)),
+      }));
+    },
+    [updateGarden]
+  );
+
+  const removeHarvest = useCallback(
+    (gId: string, hId: string) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        harvests: g.harvests.filter((h) => h.id !== hId),
+      }));
+    },
+    [updateGarden]
+  );
+
+  const addExpense = useCallback(
+    (gId: string, entry: Omit<Expense, "id">) => {
+      const full: Expense = { ...entry, id: id() };
+      updateGarden(gId, (g) => ({ ...g, expenses: [...g.expenses, full] }));
+    },
+    [updateGarden]
+  );
+
+  const updateExpense = useCallback(
+    (gId: string, eId: string, patch: Partial<Expense>) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        expenses: g.expenses.map((e) => (e.id === eId ? { ...e, ...patch } : e)),
+      }));
+    },
+    [updateGarden]
+  );
+
+  const removeExpense = useCallback(
+    (gId: string, eId: string) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        expenses: g.expenses.filter((e) => e.id !== eId),
+      }));
+    },
+    [updateGarden]
+  );
+
   const catalogByCrop = data.cropCatalog;
 
   if (!garden) {
@@ -388,6 +446,12 @@ export default function App() {
       onRemoveCrop={(eId, iId) => removeCrop(garden.id, eId, iId)}
       onDuplicateCrop={(eId, iId) => duplicateCrop(garden.id, eId, iId)}
       onAddCropToCatalog={addCropToCatalog}
+      onAddHarvest={(entry) => addHarvest(garden.id, entry)}
+      onUpdateHarvest={(hId, patch) => updateHarvest(garden.id, hId, patch)}
+      onRemoveHarvest={(hId) => removeHarvest(garden.id, hId)}
+      onAddExpense={(entry) => addExpense(garden.id, entry)}
+      onUpdateExpense={(eId, patch) => updateExpense(garden.id, eId, patch)}
+      onRemoveExpense={(eId) => removeExpense(garden.id, eId)}
       onUndo={undo}
       onRedo={redo}
       onOpenPlants={() => {

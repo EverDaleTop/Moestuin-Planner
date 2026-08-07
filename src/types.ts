@@ -52,11 +52,29 @@ export interface GardenElement {
   crops: CropAssignment[];
 }
 
+export interface HarvestEntry {
+  id: string;
+  cropId: string;
+  quantity: number;
+  date: string;
+  pricePerKg: number;
+  isOrganic: boolean;
+}
+
+export interface Expense {
+  id: string;
+  description: string;
+  amount: number;
+  date: string;
+}
+
 export interface Garden {
   id: string;
   name: string;
   createdAt: number;
   elements: GardenElement[];
+  harvests: HarvestEntry[];
+  expenses: Expense[];
 }
 
 export interface AppData {

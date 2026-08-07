@@ -44,7 +44,11 @@ export function loadData(): AppData {
     if (!raw) return base;
     const parsed = JSON.parse(raw) as Partial<AppData>;
     return {
-      gardens: parsed.gardens ?? [],
+      gardens: (parsed.gardens ?? []).map((g: any) => ({
+        ...g,
+        harvests: g.harvests ?? [],
+        expenses: g.expenses ?? [],
+      })),
       cropCatalog: parsed.cropCatalog ?? base.cropCatalog,
     };
   } catch {

@@ -12,9 +12,12 @@ import type {
 	ElementType,
 	Garden,
 	GardenElement,
+	HarvestEntry,
+	Expense,
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
 import { Inspector } from './Inspector'
+import { HarvestExpenseView } from './HarvestExpenseView'
 import type { Theme } from './useTheme'
 import { ThemeToggle } from './ThemeToggle'
 
@@ -128,6 +131,12 @@ interface Props {
 	onRemoveCrop: (eId: string, iId: string) => void
 	onDuplicateCrop: (eId: string, iId: string) => string | null
 	onAddCropToCatalog: (crop: Omit<Crop, 'id'>) => void
+	onAddHarvest: (entry: Omit<HarvestEntry, 'id'>) => void
+	onUpdateHarvest: (hId: string, patch: Partial<HarvestEntry>) => void
+	onRemoveHarvest: (hId: string) => void
+	onAddExpense: (entry: Omit<Expense, 'id'>) => void
+	onUpdateExpense: (eId: string, patch: Partial<Expense>) => void
+	onRemoveExpense: (eId: string) => void
 	onUndo: () => void
 	onRedo: () => void
 	onOpenPlants: () => void
@@ -152,10 +161,18 @@ export function GardenEditor(props: Props) {
 		onRemoveCrop,
 		onDuplicateCrop,
 		onAddCropToCatalog,
+		onAddHarvest,
+		onUpdateHarvest,
+		onRemoveHarvest,
+		onAddExpense,
+		onUpdateExpense,
+		onRemoveExpense,
 		onUndo,
 		onRedo,
 		onOpenPlants,
 	} = props
+
+	const [editorTab, setEditorTab] = useState<'canvas' | 'oogst'>('canvas')
 
 	const [selectedIds, setSelectedIds] = useState<string[]>([])
 	const [selectedCropId, setSelectedCropId] = useState<string | null>(null)
@@ -351,6 +368,18 @@ export function GardenEditor(props: Props) {
 					}
 				/>
 				<div className='ge-spacer' />
+				<div className='ge-editor-tabs'>
+					<button
+						className={`nav-tab ${editorTab === 'canvas' ? 'nav-active' : ''}`}
+						onClick={() => setEditorTab('canvas')}>
+						Tuin
+					</button>
+					<button
+						className={`nav-tab ${editorTab === 'oogst' ? 'nav-active' : ''}`}
+						onClick={() => setEditorTab('oogst')}>
+						Oogst & Uitgaven
+					</button>
+				</div>
 				<button
 					className='btn-ghost'
 					onClick={onOpenPlants}
@@ -360,140 +389,154 @@ export function GardenEditor(props: Props) {
 				<ThemeToggle theme={theme} onToggle={onToggleTheme} />
 			</header>
 
-			<div className='ge-body'>
-				<div className='ge-canvas'>
-					<GardenCanvas
-						elements={garden.elements}
-						catalog={catalog}
-						tool={tool}
-						frameType={frameType}
-						selectedIds={selectedIds}
-						selectedCropId={selectedCropId}
-						onSelect={(ids) => {
-							setSelectedIds(ids)
-							const el =
-								ids.length === 1
-									? (garden.elements.find((e) => e.id === ids[0]) ?? null)
-									: null
-							if (!el || el.type !== 'bed') setSelectedCropId(null)
-						}}
-						onSelectCrop={setSelectedCropId}
-						onBusyChange={onBusyChange}
-						theme={theme}
-						onApplyChanges={(updates) => onApplyElements(updates)}
-						onAddFrame={handleAddFrame}
-						onUpdateCrop={(eId, iId, patch) => onUpdateCrop(eId, iId, patch)}
-					/>
-					<div
-						className='ge-bottom-toolbar'
-						role='toolbar'
-						aria-label='Gereedschap'>
+			{editorTab === 'canvas' ? (
+				<div className='ge-body'>
+					<div className='ge-canvas'>
+						<GardenCanvas
+							elements={garden.elements}
+							catalog={catalog}
+							tool={tool}
+							frameType={frameType}
+							selectedIds={selectedIds}
+							selectedCropId={selectedCropId}
+							onSelect={(ids) => {
+								setSelectedIds(ids)
+								const el =
+									ids.length === 1
+										? (garden.elements.find((e) => e.id === ids[0]) ?? null)
+										: null
+								if (!el || el.type !== 'bed') setSelectedCropId(null)
+							}}
+							onSelectCrop={setSelectedCropId}
+							onBusyChange={onBusyChange}
+							theme={theme}
+							onApplyChanges={(updates) => onApplyElements(updates)}
+							onAddFrame={handleAddFrame}
+							onUpdateCrop={(eId, iId, patch) => onUpdateCrop(eId, iId, patch)}
+						/>
 						<div
-							className='ge-tools'
-							role='group'
+							className='ge-bottom-toolbar'
+							role='toolbar'
 							aria-label='Gereedschap'>
-							<button
-								className={tool === 'select' ? 'tool-active' : ''}
-								onClick={() => setTool('select')}
-								aria-label='Bewerken'
-								data-tooltip='Bewerken (V)'>
-								<IconSelect />
-							</button>
-							<button
-								className={tool === 'move' ? 'tool-active' : ''}
-								onClick={() => setTool('move')}
-								aria-label='Verplaatsen'
-								data-tooltip='Verplaatsen (Spatie)'>
-								<IconMove />
-							</button>
-							<button
-								className={tool === 'frame' ? 'tool-active' : ''}
-								onClick={() => {
-									setTool('frame')
-									setSelectedIds([])
-								}}
-								aria-label='Tekenen'
-								data-tooltip='Tekenen (R)'>
-								<IconFrame />
-							</button>
-						</div>
-						<div
-							className='ge-tools'
-							role='group'
-							aria-label='Te tekenen element'>
-							<button
-								className={frameType === 'bed' ? 'tool-active' : ''}
-								onClick={() => setFrameType('bed')}
-								aria-label='Bed'
-								data-tooltip='Bed'>
-								<IconBed />
-							</button>
-							<button
-								className={frameType === 'path' ? 'tool-active' : ''}
-								onClick={() => setFrameType('path')}
-								aria-label='Pad'
-								data-tooltip='Pad'>
-								<IconPath />
-							</button>
-						</div>
-						<div
-							className='ge-tools'
-							role='group'
-							aria-label='Verwijderen'>
-							<button
-								className='tool-delete'
-								disabled={selectedIds.length === 0 && !cropContext}
-								onClick={deleteSelected}
-								aria-label='Verwijderen'
-								data-tooltip='Verwijderen (Del)'>
-								<IconTrash />
-							</button>
-							<button
-								disabled={selectedIds.length === 0 && !cropContext}
-								onClick={duplicateSelected}
-								aria-label='Dupliceren'
-								data-tooltip='Dupliceren (Ctrl+D)'>
-								<IconCopy />
-							</button>
-						</div>
-						<div
-							className='ge-tools'
-							role='group'
-							aria-label='Ongedaan maken'>
-							<button
-								onClick={onUndo}
-								aria-label='Ongedaan maken'
-								data-tooltip='Ongedaan maken (Ctrl+Z)'>
-								<IconUndo />
-							</button>
-							<button
-								onClick={onRedo}
-								aria-label='Opnieuw'
-								data-tooltip='Opnieuw (Ctrl+Y)'>
-								<IconRedo />
-							</button>
+							<div
+								className='ge-tools'
+								role='group'
+								aria-label='Gereedschap'>
+								<button
+									className={tool === 'select' ? 'tool-active' : ''}
+									onClick={() => setTool('select')}
+									aria-label='Bewerken'
+									data-tooltip='Bewerken (V)'>
+									<IconSelect />
+								</button>
+								<button
+									className={tool === 'move' ? 'tool-active' : ''}
+									onClick={() => setTool('move')}
+									aria-label='Verplaatsen'
+									data-tooltip='Verplaatsen (Spatie)'>
+									<IconMove />
+								</button>
+								<button
+									className={tool === 'frame' ? 'tool-active' : ''}
+									onClick={() => {
+										setTool('frame')
+										setSelectedIds([])
+									}}
+									aria-label='Tekenen'
+									data-tooltip='Tekenen (R)'>
+									<IconFrame />
+								</button>
+							</div>
+							<div
+								className='ge-tools'
+								role='group'
+								aria-label='Te tekenen element'>
+								<button
+									className={frameType === 'bed' ? 'tool-active' : ''}
+									onClick={() => setFrameType('bed')}
+									aria-label='Bed'
+									data-tooltip='Bed'>
+									<IconBed />
+								</button>
+								<button
+									className={frameType === 'path' ? 'tool-active' : ''}
+									onClick={() => setFrameType('path')}
+									aria-label='Pad'
+									data-tooltip='Pad'>
+									<IconPath />
+								</button>
+							</div>
+							<div
+								className='ge-tools'
+								role='group'
+								aria-label='Verwijderen'>
+								<button
+									className='tool-delete'
+									disabled={selectedIds.length === 0 && !cropContext}
+									onClick={deleteSelected}
+									aria-label='Verwijderen'
+									data-tooltip='Verwijderen (Del)'>
+									<IconTrash />
+								</button>
+								<button
+									disabled={selectedIds.length === 0 && !cropContext}
+									onClick={duplicateSelected}
+									aria-label='Dupliceren'
+									data-tooltip='Dupliceren (Ctrl+D)'>
+									<IconCopy />
+								</button>
+							</div>
+							<div
+								className='ge-tools'
+								role='group'
+								aria-label='Ongedaan maken'>
+								<button
+									onClick={onUndo}
+									aria-label='Ongedaan maken'
+									data-tooltip='Ongedaan maken (Ctrl+Z)'>
+									<IconUndo />
+								</button>
+								<button
+									onClick={onRedo}
+									aria-label='Opnieuw'
+									data-tooltip='Opnieuw (Ctrl+Y)'>
+									<IconRedo />
+								</button>
+							</div>
 						</div>
 					</div>
+					<Inspector
+						element={selected}
+						catalog={catalog}
+						onUpdate={(patch) =>
+							selected && onUpdateElement(selected.id, patch)
+						}
+						onRemove={() => selected && onRemoveElement(selected.id)}
+						onAddCrop={(cropId) =>
+							selected && onAddCrop(selected.id, cropId)
+						}
+						onUpdateCrop={(iId, patch) =>
+							selected && onUpdateCrop(selected.id, iId, patch)
+						}
+						onRemoveCrop={(iId) =>
+							selected && onRemoveCrop(selected.id, iId)
+						}
+						onAddCropToCatalog={onAddCropToCatalog}
+					/>
 				</div>
-				<Inspector
-					element={selected}
+			) : (
+				<HarvestExpenseView
 					catalog={catalog}
-					onUpdate={(patch) =>
-						selected && onUpdateElement(selected.id, patch)
-					}
-					onRemove={() => selected && onRemoveElement(selected.id)}
-					onAddCrop={(cropId) =>
-						selected && onAddCrop(selected.id, cropId)
-					}
-					onUpdateCrop={(iId, patch) =>
-						selected && onUpdateCrop(selected.id, iId, patch)
-					}
-					onRemoveCrop={(iId) =>
-						selected && onRemoveCrop(selected.id, iId)
-					}
-					onAddCropToCatalog={onAddCropToCatalog}
+					harvests={garden.harvests}
+					expenses={garden.expenses}
+					onAddHarvest={onAddHarvest}
+					onUpdateHarvest={onUpdateHarvest}
+					onRemoveHarvest={onRemoveHarvest}
+					onAddExpense={onAddExpense}
+					onUpdateExpense={onUpdateExpense}
+					onRemoveExpense={onRemoveExpense}
 				/>
-			</div>
+			)}
 		</div>
 	)
 }
