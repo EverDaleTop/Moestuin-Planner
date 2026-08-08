@@ -7,12 +7,20 @@ export interface LiveUpdate {
   y?: number;
   widthM?: number;
   heightM?: number;
+  crops?: { instanceId: string; cropId: string; rows: number; rowSpacing?: number; plantSpacing?: number; cols?: number; padding?: number; area?: { x: number; y: number; w: number; h: number } }[];
 }
+
+/** Transient ghost the other editors see while you are creating something. */
+export type PreviewPayload =
+  | { kind: "frame"; rect: { x: number; y: number; w: number; h: number } }
+  | { kind: "gaas"; a: { x: number; y: number }; b: { x: number; y: number } }
+  | { kind: "clear" };
 
 export type RealtimeMessage =
   | { type: "joined"; gardenId: string }
   | { type: "garden"; garden: Garden }
   | { type: "move"; gardenId: string; updates: LiveUpdate[] }
+  | { type: "preview"; gardenId: string; preview: PreviewPayload }
   | { type: "presence"; gardenId: string; count: number }
   | { type: "error"; message: string };
 
@@ -60,6 +68,12 @@ class RealtimeClient {
   sendMove(gardenId: string, updates: LiveUpdate[]): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     this.send({ type: "move", gardenId, updates });
+  }
+
+  /** Transient "in progress" ghost (frame/gaas being drawn), relayed live. */
+  sendPreview(gardenId: string, preview: PreviewPayload): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    this.send({ type: "preview", gardenId, preview });
   }
 
   private open(): void {

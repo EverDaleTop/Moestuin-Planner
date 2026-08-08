@@ -1,5 +1,6 @@
 import { GpuCanvas } from "./gpu/GpuCanvas";
 import type { Crop, EditorTool, GardenElement, CropAssignment, GardenObjectKey } from "./types";
+import type { PreviewPayload } from "./realtime";
 
 interface Props {
   elements: GardenElement[];
@@ -23,7 +24,9 @@ interface Props {
       gaas?: import("./types").GaasData;
     }[]
   ) => void;
-  onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number }[]) => void;
+  onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: CropAssignment[] }[]) => void;
+  onLivePreview?: (preview: PreviewPayload) => void;
+  livePreview?: PreviewPayload | null;
   onAddFrame: (
     type: "bed" | "path",
     x: number,
@@ -55,6 +58,8 @@ export function GardenCanvas({
   theme,
   onApplyChanges,
   onLiveMove,
+  onLivePreview,
+  livePreview,
   onAddFrame,
   onAddObject,
   objectMenuOpen,
@@ -74,6 +79,8 @@ export function GardenCanvas({
       onSelectCrop={onSelectCrop}
       onApplyChanges={onApplyChanges}
       onLiveMove={onLiveMove}
+      onLivePreview={onLivePreview}
+      livePreview={livePreview}
       onAddFrame={onAddFrame}
       onAddObject={onAddObject}
       objectMenuOpen={objectMenuOpen}

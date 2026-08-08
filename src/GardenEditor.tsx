@@ -16,6 +16,7 @@ import type {
 	Expense,
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
+import type { PreviewPayload } from './realtime'
 import { Inspector } from './Inspector'
 import { HarvestExpenseView } from './HarvestExpenseView'
 import { PlantCatalog } from './PlantDatabase'
@@ -163,7 +164,9 @@ interface Props {
 	onRemoveExpense: (eId: string) => void
 	onUndo: () => void
 	onRedo: () => void
-	onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number }[]) => void
+	onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: { instanceId: string; cropId: string; rows: number; rowSpacing?: number; plantSpacing?: number; cols?: number; padding?: number; area?: { x: number; y: number; w: number; h: number } }[] }[]) => void
+	onLivePreview?: (preview: PreviewPayload) => void
+	livePreview?: PreviewPayload | null
 	onAddCropToCatalog: (crop: Omit<Crop, 'id'>) => void
 	onUpdateCropInCatalog: (cropId: string, patch: Partial<Crop>) => void
 	onRemoveCropFromCatalog: (cropId: string) => void
@@ -199,6 +202,8 @@ export function GardenEditor(props: Props) {
 		onUndo,
 		onRedo,
 		onLiveMove,
+		onLivePreview,
+		livePreview,
 		onUpdateCropInCatalog,
 		onRemoveCropFromCatalog,
 	} = props
@@ -458,6 +463,8 @@ export function GardenEditor(props: Props) {
 							theme={theme}
 						onApplyChanges={(updates) => onApplyElements(updates)}
 						onLiveMove={onLiveMove}
+						onLivePreview={onLivePreview}
+						livePreview={livePreview}
 						onAddFrame={handleAddFrame}
 							onAddObject={onAddObject}
 							onUpdateCrop={(eId, iId, patch) => onUpdateCrop(eId, iId, patch)}

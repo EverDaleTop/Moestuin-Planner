@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, GardenObjectKey, GaasData, User } from "./types";
 import { id } from "./storage";
 import { api, getToken, setToken, onUnauthorized, type MeResponse } from "./api";
-import { realtime, type LiveUpdate } from "./realtime";
+import { realtime, type LiveUpdate, type PreviewPayload } from "./realtime";
 import { GardenList } from "./GardenList";
 import { GardenEditor } from "./GardenEditor";
 import { PlantDatabase } from "./PlantDatabase";
@@ -30,6 +30,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [screen, setScreen] = useState<"gardens" | "plants">("gardens");
   const [presence, setPresence] = useState(0);
+  const [livePreview, setLivePreview] = useState<{ gardenId: string; preview: PreviewPayload } | null>(null);
   const [invite, setInvite] = useState<InviteTarget | null>(() => parseInvite());
   const [theme, toggleTheme] = useTheme();
 
@@ -134,6 +135,7 @@ export default function App() {
     const off = realtime.onMessage((msg) => {
       if (msg.type === "garden") {
         lastSentRef.current.set(msg.garden.id, JSON.stringify(msg.garden));
+        setLivePreview((cur) => (cur?.gardenId === msg.garden.id ? null : cur));
         setData((prev) => {
           const exists = prev.gardens.some((g) => g.id === msg.garden.id);
           return {
@@ -159,6 +161,7 @@ export default function App() {
               if (u.y !== undefined) next.y = u.y;
               if (u.widthM !== undefined) next.widthM = u.widthM;
               if (u.heightM !== undefined) next.heightM = u.heightM;
+              if (u.crops && next.type === "bed") next.crops = u.crops;
               return next;
             }),
           };
@@ -166,6 +169,12 @@ export default function App() {
           lastSentRef.current.set(msg.gardenId, JSON.stringify(nextG));
           return { ...prev, gardens: prev.gardens.map((x) => (x.id === msg.gardenId ? nextG : x)) };
         });
+      } else if (msg.type === "preview") {
+        setLivePreview(
+          msg.preview.kind === "clear"
+            ? null
+            : { gardenId: msg.gardenId, preview: msg.preview }
+        );
       } else if (msg.type === "presence") {
         setPresence(msg.count);
       }
@@ -207,6 +216,13 @@ export default function App() {
     if (now - lastMoveRef.current < 60) return;
     lastMoveRef.current = now;
     realtime.sendMove(gId, updates);
+  }, []);
+
+  const sendLivePreview = useCallback((gId: string, preview: PreviewPayload) => {
+    const now = Date.now();
+    if (now - lastMoveRef.current < 60) return;
+    lastMoveRef.current = now;
+    realtime.sendPreview(gId, preview);
   }, []);
 
   const garden = data.gardens.find((g) => g.id === activeId) ?? null;
@@ -730,6 +746,8 @@ export default function App() {
       onUndo={undo}
       onRedo={redo}
       onLiveMove={(updates) => sendLiveMove(garden.id, updates)}
+      onLivePreview={(preview) => sendLivePreview(garden.id, preview)}
+      livePreview={livePreview?.gardenId === garden.id ? livePreview.preview : null}
     />
   );
 }

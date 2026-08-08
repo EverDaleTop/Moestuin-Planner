@@ -94,6 +94,19 @@ export class WsHub {
       return;
     }
 
+    if (msg.type === "preview") {
+      const gardenId = String(msg.gardenId ?? "");
+      if (state.gardenId !== gardenId) return;
+      const garden = await this.store.getGarden(gardenId);
+      if (!garden || !this.canAccess(state.userId, garden)) return;
+      this.broadcast(
+        gardenId,
+        { type: "preview", gardenId, preview: msg.preview },
+        socket
+      );
+      return;
+    }
+
     if (msg.type === "garden") {
       const garden = msg.garden as Garden;
       if (!garden || !garden.id || state.gardenId !== garden.id) return;

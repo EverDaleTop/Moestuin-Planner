@@ -10,6 +10,7 @@ import type {
   GardenObjectKey,
 } from "../types";
 import { PX_PER_M, fmtM } from "../storage";
+import type { PreviewPayload } from "../realtime";
 import { plantPositions, cropIconChar } from "../cropIcons";
 import {
   GARDEN_OBJECTS,
@@ -41,7 +42,11 @@ interface Props {
   onSelectCrop: (instanceId: string | null) => void;
   onApplyChanges: (updates: ElementUpdate[]) => void;
   /** transient drag positions, relayed to other editors (live collaboration) */
-  onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number }[]) => void;
+  onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: CropAssignment[] }[]) => void;
+  /** transient "ghost" of something being created, relayed live */
+  onLivePreview?: (preview: PreviewPayload) => void;
+  /** ghost received from another editor, drawn as an overlay */
+  livePreview?: PreviewPayload | null;
   onAddFrame: (type: "bed" | "path", x: number, y: number, wM: number, hM: number) => string;
   /** adds a garden object as a sibling element, returns its id; "gaas" carries its pin anchors */
   onAddObject: (key: GardenObjectKey, x: number, y: number, gaas?: GaasData) => string;
@@ -401,6 +406,8 @@ export function GpuCanvas({
   onSelectCrop,
   onApplyChanges,
   onLiveMove,
+  onLivePreview,
+  livePreview,
   onAddFrame,
   onAddObject,
   objectMenuOpen,
@@ -412,10 +419,10 @@ export function GpuCanvas({
   const gpuRef = useRef<HTMLCanvasElement | null>(null);
   const ovRef = useRef<HTMLCanvasElement | null>(null);
 
-  const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog });
-  propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog };
-  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onLiveMove, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
-  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onLiveMove, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
+  const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview });
+  propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview };
+  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
+  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
 
   const [objSearch, setObjSearch] = useState("");
 
@@ -454,6 +461,27 @@ export function GpuCanvas({
       heightM: Math.round(r.h) / PX_PER_M,
     }));
     if (updates.length > 0) handlersRef.current.onLiveMove?.(updates);
+  };
+
+  /** Relay a live crop (plant) drag so other editors see it move in real time. */
+  const emitLiveCropMoves = (eId: string, instanceId: string) => {
+    const bed = propsRef.current.elements.find((e) => e.id === eId);
+    const r = cropDraftRef.current.get(instanceId);
+    if (!bed || bed.type !== "bed" || !r) return;
+    const crops = bed.crops.map((a) =>
+      a.instanceId === instanceId
+        ? {
+            ...a,
+            area: {
+              x: Math.round(((r.x - bed.x) / PX_PER_M) * 100) / 100,
+              y: Math.round(((r.y - bed.y) / PX_PER_M) * 100) / 100,
+              w: Math.round((r.w / PX_PER_M) * 100) / 100,
+              h: Math.round((r.h / PX_PER_M) * 100) / 100,
+            },
+          }
+        : a
+    );
+    handlersRef.current.onLiveMove?.([{ id: eId, crops }]);
   };
 
   // ---- gaas (mesh line) helpers ----
@@ -922,10 +950,22 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     }
     if (g.k === "frame") {
       gRef.current = { ...g, end: screenToWorld(sp, c) };
+      const a = g.start;
+      const b = gRef.current.end;
+      const rect = {
+        x: Math.round(Math.min(a.x, b.x)),
+        y: Math.round(Math.min(a.y, b.y)),
+        w: Math.round(Math.abs(b.x - a.x)),
+        h: Math.round(Math.abs(b.y - a.y)),
+      };
+      handlersRef.current.onLivePreview?.({ kind: "frame", rect });
       return;
     }
     if (g.k === "ga") {
       gRef.current = { ...g, end: screenToWorld(sp, c) };
+      const a = g.start;
+      const b = gRef.current.end;
+      handlersRef.current.onLivePreview?.({ kind: "gaas", a: { x: Math.round(a.x), y: Math.round(a.y) }, b: { x: Math.round(b.x), y: Math.round(b.y) } });
       return;
     }
     if (g.k === "marquee") {
@@ -1018,6 +1058,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         h: g.origin.h,
       });
       cropGuidesRef.current = { v: res.v, h: res.h };
+      emitLiveCropMoves(g.eId, g.instanceId);
       return;
     }
     if (g.k === "cropResize") {
@@ -1032,6 +1073,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const sn = snapCropResize(nr, g.dir, g.origin, g.bed, others);
       cropDraftRef.current.set(g.instanceId, sn.r);
       cropGuidesRef.current = { v: sn.v, h: sn.h };
+      emitLiveCropMoves(g.eId, g.instanceId);
       return;
     }
   };
@@ -1181,6 +1223,9 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           handlersRef.current.onSelectCrop(null);
         }
       }
+    }
+    if (gRef.current.k === "frame" || gRef.current.k === "ga") {
+      handlersRef.current.onLivePreview?.({ kind: "clear" });
     }
     gRef.current = { k: "none" };
     if (hostRef.current) hostRef.current.style.cursor = "default";
@@ -1621,6 +1666,35 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           ctx.fillText(txt, lx + 8, ly + th / 2 + 1);
           ctx.textBaseline = "top";
         }
+      }
+
+      // remote live ghost: what another editor is creating right now
+      const rp = p.livePreview;
+      if (rp) {
+        ctx.save();
+        ctx.setLineDash([6, 5]);
+        ctx.strokeStyle = "#9b5cf6";
+        ctx.lineWidth = 2;
+        if (rp.kind === "frame") {
+          const p0 = worldToScreen({ x: rp.rect.x, y: rp.rect.y }, c);
+          const p1 = worldToScreen({ x: rp.rect.x + rp.rect.w, y: rp.rect.y + rp.rect.h }, c);
+          ctx.globalAlpha = 0.12;
+          ctx.fillStyle = "#9b5cf6";
+          ctx.fillRect(p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
+          ctx.globalAlpha = 0.85;
+          ctx.strokeRect(p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
+        } else if (rp.kind === "gaas") {
+          const a = worldToScreen(rp.a, c);
+          const b = worldToScreen(rp.b, c);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.fillStyle = "#9b5cf6";
+          ctx.fillRect(a.x - 3, a.y - 3, 6, 6);
+          ctx.fillRect(b.x - 3, b.y - 3, 6, 6);
+        }
+        ctx.restore();
       }
 
       // selected outline + handles (drawn around the union bounding box)
