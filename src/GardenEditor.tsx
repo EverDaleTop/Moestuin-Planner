@@ -9,15 +9,16 @@ import {
 import type {
 	Crop,
 	EditorTool,
-	ElementType,
 	Garden,
 	GardenElement,
+	GardenObjectKey,
 	HarvestEntry,
 	Expense,
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
 import { Inspector } from './Inspector'
 import { HarvestExpenseView } from './HarvestExpenseView'
+import { PlantCatalog } from './PlantDatabase'
 import type { Theme } from './useTheme'
 import { ThemeToggle } from './ThemeToggle'
 
@@ -63,6 +64,14 @@ const IconPath = () =>
 			<path d='M18 5l-12 12' />
 		</g>,
 	)
+const IconGaas = () =>
+	icon(
+		<g>
+			<circle cx='19' cy='6' r='1.5' />
+			<circle cx='5' cy='18' r='1.5' />
+			<path d='M17.5 7.2L6.5 16.8' strokeDasharray='3 2.4' />
+		</g>,
+	)
 const IconTrash = () =>
 	icon(
 		<g>
@@ -93,6 +102,14 @@ const IconRedo = () =>
 			<path d='M20 12H9a5 5 0 0 0 0 10' />
 		</g>,
 	)
+const IconObject = () =>
+	icon(
+		<g>
+			<path d='M5 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2' />
+			<path d='M3 12v-2a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2' />
+			<path d='M5 12v6M19 12v6' />
+		</g>,
+	)
 
 interface Props {
 	garden: Garden
@@ -108,6 +125,12 @@ interface Props {
 		widthM: number,
 		heightM: number,
 	) => string
+	onAddObject: (
+    key: GardenObjectKey,
+    x: number,
+    y: number,
+    gaas?: import("./types").GaasData,
+  ) => string
 	onUpdateElement: (eId: string, patch: Partial<GardenElement>) => void
 	onRemoveElement: (eId: string) => void
 	onRemoveElements: (ids: string[]) => void
@@ -119,6 +142,7 @@ interface Props {
 			widthM?: number
 			heightM?: number
 			crops?: GardenElement['crops']
+			gaas?: import('./types').GaasData
 		}[],
 	) => void
 	onDuplicateElements: (ids: string[]) => string[]
@@ -130,7 +154,6 @@ interface Props {
 	) => void
 	onRemoveCrop: (eId: string, iId: string) => void
 	onDuplicateCrop: (eId: string, iId: string) => string | null
-	onAddCropToCatalog: (crop: Omit<Crop, 'id'>) => void
 	onAddHarvest: (entry: Omit<HarvestEntry, 'id'>) => void
 	onUpdateHarvest: (hId: string, patch: Partial<HarvestEntry>) => void
 	onRemoveHarvest: (hId: string) => void
@@ -139,7 +162,9 @@ interface Props {
 	onRemoveExpense: (eId: string) => void
 	onUndo: () => void
 	onRedo: () => void
-	onOpenPlants: () => void
+	onAddCropToCatalog: (crop: Omit<Crop, 'id'>) => void
+	onUpdateCropInCatalog: (cropId: string, patch: Partial<Crop>) => void
+	onRemoveCropFromCatalog: (cropId: string) => void
 }
 
 export function GardenEditor(props: Props) {
@@ -151,6 +176,7 @@ export function GardenEditor(props: Props) {
 		onNameChange,
 		onBack,
 		onAddFrame,
+		onAddObject,
 		onUpdateElement,
 		onRemoveElement,
 		onRemoveElements,
@@ -169,10 +195,13 @@ export function GardenEditor(props: Props) {
 		onRemoveExpense,
 		onUndo,
 		onRedo,
-		onOpenPlants,
+		onUpdateCropInCatalog,
+		onRemoveCropFromCatalog,
 	} = props
 
-	const [editorTab, setEditorTab] = useState<'canvas' | 'oogst'>('canvas')
+	const [editorTab, setEditorTab] = useState<'canvas' | 'gewassen' | 'oogst'>(
+		'canvas',
+	)
 
 	const [selectedIds, setSelectedIds] = useState<string[]>([])
 	const [selectedCropId, setSelectedCropId] = useState<string | null>(null)
@@ -182,7 +211,8 @@ export function GardenEditor(props: Props) {
 	}, [])
 	const [name, setName] = useState(garden.name)
 	const [tool, setTool] = useState<EditorTool>('select')
-	const [frameType, setFrameType] = useState<ElementType>('bed')
+	const [frameType, setFrameType] = useState<'bed' | 'path'>('bed')
+	const [objectMenu, setObjectMenu] = useState(false)
 
 	// If a child plant is selected, remember which bed holds it so delete /
 	// duplicate can act on the child instead of the whole bed.
@@ -289,8 +319,11 @@ export function GardenEditor(props: Props) {
 		const onKey = (e: KeyboardEvent) => {
 			if (isEditable(e.target)) return
 			const k = e.key.toLowerCase()
-			if (k === 'v') setTool('select')
-			else if (k === 'r') {
+			if (k === 'v') {
+				setObjectMenu(false)
+				setTool('select')
+			} else if (k === 'r') {
+				setObjectMenu(false)
 				setTool('frame')
 				setSelectedIds([])
 			}
@@ -329,7 +362,7 @@ export function GardenEditor(props: Props) {
 	}, [onUndo, onRedo])
 
 	const handleAddFrame = (
-		type: ElementType,
+		type: 'bed' | 'path',
 		x: number,
 		y: number,
 		w: number,
@@ -372,20 +405,22 @@ export function GardenEditor(props: Props) {
 					<button
 						className={`nav-tab ${editorTab === 'canvas' ? 'nav-active' : ''}`}
 						onClick={() => setEditorTab('canvas')}>
+						<i className='fa-solid fa-seedling' />
 						Tuin
+					</button>
+					<button
+						className={`nav-tab ${editorTab === 'gewassen' ? 'nav-active' : ''}`}
+						onClick={() => setEditorTab('gewassen')}>
+						<i className='fa-solid fa-carrot' />
+						Gewassen
 					</button>
 					<button
 						className={`nav-tab ${editorTab === 'oogst' ? 'nav-active' : ''}`}
 						onClick={() => setEditorTab('oogst')}>
+						<i className='fa-solid fa-coins' />
 						Oogst & Uitgaven
 					</button>
 				</div>
-				<button
-					className='btn-ghost'
-					onClick={onOpenPlants}
-					title='Plantendatabase'>
-					Gewassen
-				</button>
 				<ThemeToggle theme={theme} onToggle={onToggleTheme} />
 			</header>
 
@@ -399,6 +434,8 @@ export function GardenEditor(props: Props) {
 							frameType={frameType}
 							selectedIds={selectedIds}
 							selectedCropId={selectedCropId}
+							objectMenuOpen={objectMenu}
+							onObjectMenuOpenChange={setObjectMenu}
 							onSelect={(ids) => {
 								setSelectedIds(ids)
 								const el =
@@ -412,6 +449,7 @@ export function GardenEditor(props: Props) {
 							theme={theme}
 							onApplyChanges={(updates) => onApplyElements(updates)}
 							onAddFrame={handleAddFrame}
+							onAddObject={onAddObject}
 							onUpdateCrop={(eId, iId, patch) => onUpdateCrop(eId, iId, patch)}
 						/>
 						<div
@@ -458,14 +496,39 @@ export function GardenEditor(props: Props) {
 									data-tooltip='Bed'>
 									<IconBed />
 								</button>
-								<button
-									className={frameType === 'path' ? 'tool-active' : ''}
-									onClick={() => setFrameType('path')}
-									aria-label='Pad'
-									data-tooltip='Pad'>
-									<IconPath />
-								</button>
-							</div>
+							<button
+								className={frameType === 'path' ? 'tool-active' : ''}
+								onClick={() => setFrameType('path')}
+								aria-label='Pad'
+								data-tooltip='Pad'>
+								<IconPath />
+							</button>
+							<button
+								className={tool === 'gaas' ? 'tool-active' : ''}
+								onClick={() => {
+									setTool('gaas')
+									setSelectedIds([])
+								}}
+								aria-label='Gaas tekenen'
+								data-tooltip='Gaas tekenen (trek een lijn, eindigt op een paal als die eronder zit)'>
+								<IconGaas />
+							</button>
+						</div>
+						<div
+							className='ge-tools'
+							role='group'
+							aria-label='Voorwerpen toevoegen'>
+							<button
+								className={objectMenu ? 'tool-active' : ''}
+								onClick={() => {
+									setTool('select')
+									setObjectMenu((o) => !o)
+								}}
+								aria-label='Voorwerp toevoegen'
+								data-tooltip='Voorwerp toevoegen (Bank, …)'>
+								<IconObject />
+							</button>
+						</div>
 							<div
 								className='ge-tools'
 								role='group'
@@ -508,6 +571,13 @@ export function GardenEditor(props: Props) {
 					<Inspector
 						element={selected}
 						catalog={catalog}
+						crop={cropContext?.crop ?? null}
+						cropInfo={
+							cropContext
+								? (catalog.find((c) => c.id === cropContext.crop.cropId) ??
+									null)
+								: null
+						}
 						onUpdate={(patch) =>
 							selected && onUpdateElement(selected.id, patch)
 						}
@@ -518,10 +588,28 @@ export function GardenEditor(props: Props) {
 						onUpdateCrop={(iId, patch) =>
 							selected && onUpdateCrop(selected.id, iId, patch)
 						}
-						onRemoveCrop={(iId) =>
-							selected && onRemoveCrop(selected.id, iId)
-						}
-						onAddCropToCatalog={onAddCropToCatalog}
+						onRemoveCrop={(iId) => {
+							if (selected) {
+								onRemoveCrop(selected.id, iId)
+								setSelectedCropId(null)
+							}
+						}}
+						onDuplicateCrop={(iId) => {
+							if (selected) {
+								const newId = onDuplicateCrop(selected.id, iId)
+								if (newId) setSelectedCropId(newId)
+							}
+						}}
+						onDeselectCrop={() => setSelectedCropId(null)}
+					/>
+				</div>
+			) : editorTab === 'gewassen' ? (
+				<div className='he-wrap'>
+					<PlantCatalog
+						catalog={catalog}
+						onAdd={onAddCropToCatalog}
+						onUpdate={onUpdateCropInCatalog}
+						onDelete={onRemoveCropFromCatalog}
 					/>
 				</div>
 			) : (

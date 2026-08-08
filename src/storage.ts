@@ -18,16 +18,16 @@ export function id(): string {
 }
 
 export const DEFAULT_CROP_CATALOG: Crop[] = [
-  { id: "carrot", name: "Wortel", color: "#e67e22", rowSpacing: 0.15, plantSpacing: 0.05, sowWindow: "mrt–jun", notes: "Dun uit tot 5 cm in de rij." },
-  { id: "tomato", name: "Tomaat", color: "#e74c3c", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "feb–apr", notes: "Tuinpoten na vorst." },
-  { id: "lettuce", name: "Sla", color: "#27ae60", rowSpacing: 0.3, plantSpacing: 0.25, sowWindow: "mrt–aug" },
-  { id: "potato", name: "Aardappel", color: "#b08968", rowSpacing: 0.75, plantSpacing: 0.3, sowWindow: "apr" },
-  { id: "beet", name: "Biet", color: "#8e44ad", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "apr–jul" },
-  { id: "bean", name: "Boon", color: "#7dcea0", rowSpacing: 0.5, plantSpacing: 0.1, sowWindow: "mei–jun" },
-  { id: "pepper", name: "Paprika", color: "#f1c40f", rowSpacing: 0.5, plantSpacing: 0.4, sowWindow: "feb–mrt" },
-  { id: "onion", name: "Ui", color: "#d4a373", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "mrt" },
-  { id: "spinach", name: "Spinazie", color: "#2ecc71", rowSpacing: 0.25, plantSpacing: 0.1, sowWindow: "mrt–apr" },
-  { id: "broccoli", name: "Broccoli", color: "#1e8449", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "apr–jun" },
+  { id: "carrot", name: "Wortel", color: "#e67e22", rowSpacing: 0.15, plantSpacing: 0.05, sowWindow: "mrt–jun", notes: "Dun uit tot 5 cm in de rij.", icon: "carrot" },
+  { id: "tomato", name: "Tomaat", color: "#e74c3c", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "feb–apr", notes: "Tuinpoten na vorst.", icon: "apple-whole" },
+  { id: "lettuce", name: "Sla", color: "#27ae60", rowSpacing: 0.3, plantSpacing: 0.25, sowWindow: "mrt–aug", icon: "leaf" },
+  { id: "potato", name: "Aardappel", color: "#b08968", rowSpacing: 0.75, plantSpacing: 0.3, sowWindow: "apr", icon: "sprout" },
+  { id: "beet", name: "Biet", color: "#8e44ad", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "apr–jul", icon: "clover" },
+  { id: "bean", name: "Boon", color: "#7dcea0", rowSpacing: 0.5, plantSpacing: 0.1, sowWindow: "mei–jun", icon: "hand-fist" },
+  { id: "pepper", name: "Paprika", color: "#f1c40f", rowSpacing: 0.5, plantSpacing: 0.4, sowWindow: "feb–mrt", icon: "pepper-hot" },
+  { id: "onion", name: "Ui", color: "#d4a373", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "mrt", icon: "spa" },
+  { id: "spinach", name: "Spinazie", color: "#2ecc71", rowSpacing: 0.25, plantSpacing: 0.1, sowWindow: "mrt–apr", icon: "snowflake" },
+  { id: "broccoli", name: "Broccoli", color: "#1e8449", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "apr–jun", icon: "tree" },
 ];
 
 function defaultData(): AppData {

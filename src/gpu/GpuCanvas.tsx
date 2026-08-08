@@ -1,13 +1,21 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GpuRenderer, type DrawItem } from "./Renderer";
 import type {
   Crop,
   CropAssignment,
   EditorTool,
-  ElementType,
+  GaasData,
+  GaasPin,
   GardenElement,
+  GardenObjectKey,
 } from "../types";
 import { PX_PER_M, fmtM } from "../storage";
+import { plantPositions, cropIconChar } from "../cropIcons";
+import {
+  GARDEN_OBJECTS,
+  objectChar,
+  type GardenObjectDef,
+} from "../gardenObjects";
 
 interface ElementUpdate {
   id: string;
@@ -17,20 +25,26 @@ interface ElementUpdate {
   heightM?: number;
   /** when a bed is resized, its plants scale proportionally */
   crops?: CropAssignment[];
+  /** new anchor pins when a gaas was moved or resized */
+  gaas?: GaasData;
 }
 
 interface Props {
   elements: GardenElement[];
   catalog: Crop[];
   tool: EditorTool;
-  frameType: ElementType;
+  frameType: "bed" | "path";
   selectedIds: string[];
   selectedCropId: string | null;
   theme: "light" | "dark";
   onSelect: (ids: string[]) => void;
   onSelectCrop: (instanceId: string | null) => void;
   onApplyChanges: (updates: ElementUpdate[]) => void;
-  onAddFrame: (type: ElementType, x: number, y: number, wM: number, hM: number) => string;
+  onAddFrame: (type: "bed" | "path", x: number, y: number, wM: number, hM: number) => string;
+  /** adds a garden object as a sibling element, returns its id; "gaas" carries its pin anchors */
+  onAddObject: (key: GardenObjectKey, x: number, y: number, gaas?: GaasData) => string;
+  objectMenuOpen: boolean;
+  onObjectMenuOpenChange: (open: boolean) => void;
   onUpdateCrop: (
     eId: string,
     instanceId: string,
@@ -82,11 +96,21 @@ type Gesture =
   | { k: "groupDrag"; ids: string[]; sp: Pt; origins: Map<string, R>; leadId: string }
   | { k: "groupResize"; ids: string[]; dir: Dir; union: R; origins: Map<string, R> }
   | { k: "frame"; start: Pt; end: Pt }
+  | { k: "ga"; start: Pt; end: Pt }
   | { k: "cropDrag"; eId: string; instanceId: string; sp: Pt; origin: R; bed: R }
   | { k: "cropResize"; eId: string; instanceId: string; dir: Dir; origin: R; bed: R };
 
 function rectOf(el: GardenElement): R {
   return { x: el.x, y: el.y, w: el.widthM * PX_PER_M, h: el.heightM * PX_PER_M };
+}
+
+/** Shortest distance from a point to a line segment (world units). */
+function distToSeg(x1: number, y1: number, x2: number, y2: number, px: number, py: number): number {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
 /** Convert a crop's metres-relative area into world px, defaulting to the full bed. */
@@ -375,6 +399,9 @@ export function GpuCanvas({
   onSelectCrop,
   onApplyChanges,
   onAddFrame,
+  onAddObject,
+  objectMenuOpen,
+  onObjectMenuOpenChange,
   onUpdateCrop,
   onBusyChange,
 }: Props) {
@@ -384,11 +411,15 @@ export function GpuCanvas({
 
   const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog });
   propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog };
-  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onAddFrame, onUpdateCrop, onBusyChange });
-  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onAddFrame, onUpdateCrop, onBusyChange };
+  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
+  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
+
+  const [objSearch, setObjSearch] = useState("");
 
   const camRef = useRef<Cam>({ x: 0, y: 0, zoom: 1 });
   const draftRef = useRef<Map<string, R>>(new Map());
+  /** live gaas pins while a gaas is being dragged/resized (free anchors only). */
+  const gaasDraftRef = useRef<Map<string, GaasData>>(new Map());
   /** live crop-area rects keyed by instanceId, in world px (only during a crop gesture). */
   const cropDraftRef = useRef<Map<string, R>>(new Map());
   const guidesRef = useRef<SnapGuides>({ v: [], h: [] });
@@ -409,6 +440,60 @@ export function GpuCanvas({
   const screenToWorld = (s: Pt, c: Cam): Pt => ({ x: (s.x - c.x) / c.zoom, y: (s.y - c.y) / c.zoom });
 
   const doBusy = (b: boolean) => handlersRef.current.onBusyChange?.(b);
+
+  // ---- gaas (mesh line) helpers ----
+  // A gaas spans two pins; a pin either sticks to a pole (whose centre is
+  // recomputed live, so the line follows it) or floats freely.
+  const pinPointOf = (pin: GaasPin): Pt => {
+    const p = propsRef.current;
+    const pole = pin.poleId ? p.elements.find((e) => e.id === pin.poleId) : undefined;
+    if (pole) {
+      const r = draftRef.current.get(pole.id) ?? rectOf(pole);
+      return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+    }
+    return { x: pin.x, y: pin.y };
+  };
+  const gaasEndsOf = (el: GardenElement): { a: Pt; b: Pt } => {
+    const g = gaasDraftRef.current.get(el.id) ?? el.gaas;
+    if (!g) return { a: { x: el.x, y: el.y }, b: { x: el.x + el.widthM * PX_PER_M, y: el.y } };
+    return { a: pinPointOf(g.a), b: pinPointOf(g.b) };
+  };
+  const gaasLengthM = (el: GardenElement): number => {
+    const { a, b } = gaasEndsOf(el);
+    return Math.hypot(b.x - a.x, b.y - a.y) / PX_PER_M;
+  };
+  /** Translate a gaas: free anchors follow the drag delta, pole-pinned ones stay. */
+  const moveGaas = (el: GardenElement, dx: number, dy: number): GaasData => {
+    const g = gaasDraftRef.current.get(el.id) ?? el.gaas!;
+    const map = (p: GaasPin): GaasPin =>
+      p.poleId ? { ...p } : { x: Math.round(p.x + dx), y: Math.round(p.y + dy) };
+    return { a: map(g.a), b: map(g.b) };
+  };
+  /** Resize a gaas: scale the free anchors relative to the selection bounding box. */
+  const scaleGaas = (el: GardenElement, union: R, r: R, sx: number, sy: number): GaasData => {
+    const g = gaasDraftRef.current.get(el.id) ?? el.gaas!;
+    const map = (p: GaasPin): GaasPin => {
+      if (p.poleId) return { ...p };
+      const pt = pinPointOf(p);
+      return { x: Math.round(r.x + (pt.x - union.x) * sx), y: Math.round(r.y + (pt.y - union.y) * sy) };
+    };
+    return { a: map(g.a), b: map(g.b) };
+  };
+  /** Live rect of an element: for a gaas this is the bounding box of its two
+   *  endpoints (so selection/marquee/labels stay correct when poles move). */
+  const rOf = (el: GardenElement): R => {
+    if (el.object === "gaas" && el.gaas) {
+      const { a, b } = gaasEndsOf(el);
+      const t = (el.widthM || 0.1) * PX_PER_M;
+      return {
+        x: Math.round(Math.min(a.x, b.x) - t),
+        y: Math.round(Math.min(a.y, b.y) - t),
+        w: Math.ceil(Math.abs(b.x - a.x) + t * 2),
+        h: Math.ceil(Math.abs(b.y - a.y) + t * 2),
+      };
+    }
+    return draftRef.current.get(el.id) ?? rectOf(el);
+  };
 
   const fitView = useCallback(() => {
     const rect = hostRef.current?.getBoundingClientRect();
@@ -445,7 +530,7 @@ export function GpuCanvas({
     for (const id of p.selectedIds) {
       const el = p.elements.find((e) => e.id === id);
       if (!el) return null;
-      const r = draftRef.current.get(id) ?? rectOf(el);
+      const r = rOf(el);
       minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
       maxX = Math.max(maxX, r.x + r.w); maxY = Math.max(maxY, r.y + r.h);
     }
@@ -479,8 +564,37 @@ export function GpuCanvas({
     const els = propsRef.current.elements;
     for (let i = els.length - 1; i >= 0; i--) {
       const el = els[i];
-      const r = draftRef.current.get(el.id) ?? rectOf(el);
+      const r = rOf(el);
       if (wp.x >= r.x && wp.x <= r.x + r.w && wp.y >= r.y && wp.y <= r.y + r.h) return el;
+    }
+    return null;
+  };
+
+  // Objects are drawn on top of beds/paths, so they win the hit-test first.
+  // Round objects (poles) are hit-tested against their circle, not the square.
+  const hitObjectElement = (wp: Pt): GardenElement | null => {
+    const els = propsRef.current.elements;
+    for (let i = els.length - 1; i >= 0; i--) {
+      const el = els[i];
+      if (el.type !== "object") continue;
+      const r = rOf(el);
+      if (el.shape === "circle") {
+        const cx = r.x + r.w / 2;
+        const cy = r.y + r.h / 2;
+        const rad = Math.max(r.w, r.h) / 2 + 4;
+        const dx = wp.x - cx;
+        const dy = wp.y - cy;
+        if (dx * dx + dy * dy <= rad * rad) return el;
+      } else if (el.object === "gaas" && el.gaas) {
+        const { a, b } = gaasEndsOf(el);
+        const hit = Math.hypot(b.x - a.x, b.y - a.y) > 2;
+        if (hit) {
+          const d = distToSeg(a.x, a.y, b.x, b.y, wp.x, wp.y);
+          if (d <= (el.widthM || 0.1) * PX_PER_M / 2 + 8) return el;
+        }
+      } else if (wp.x >= r.x && wp.x <= r.x + r.w && wp.y >= r.y && wp.y <= r.y + r.h) {
+        return el;
+      }
     }
     return null;
   };
@@ -553,15 +667,44 @@ export function GpuCanvas({
   };
 
   const bedRefOf = (bed: GardenElement): R => {
-    const r = draftRef.current.get(bed.id) ?? rectOf(bed);
+    const r = rOf(bed);
     return { x: r.x, y: r.y, w: bed.widthM * PX_PER_M, h: bed.heightM * PX_PER_M };
   };
 
   // ---- gestures ----
+  // Pressing an object in the picker menu imports it (as a sibling element) and
+  // immediately starts dragging it: a plain click drops it where it appears.
+const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const c = camRef.current;
+    const sp = screenToLocal(e);
+    const wp = screenToWorld(sp, c);
+
+    const pw = def.widthM * PX_PER_M;
+    const ph = def.heightM * PX_PER_M;
+    const origin: R = {
+      x: Math.round(wp.x - pw / 2),
+      y: Math.round(wp.y - ph / 2),
+      w: pw,
+      h: ph,
+    };
+    const newId = handlersRef.current.onAddObject(def.key, origin.x, origin.y);
+    if (!newId) return;
+    handlersRef.current.onSelect([newId]);
+    handlersRef.current.onSelectCrop(null);
+    gRef.current = { k: "drag", id: newId, sp: { x: sp.x, y: sp.y }, origin };
+    hostRef.current?.setPointerCapture(e.pointerId);
+    doBusy(true);
+    handlersRef.current.onObjectMenuOpenChange(false);
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     const sp = screenToLocal(e);
     const c = camRef.current;
     const p = propsRef.current;
+    // clicking the canvas closes the object picker menu
+    handlersRef.current.onObjectMenuOpenChange(false);
     // middle mouse always pans
     if (e.button === 1) {
       wasEmptyClickRef.current = false;
@@ -587,7 +730,53 @@ export function GpuCanvas({
       doBusy(true);
       return;
     }
+    if (p.tool === "gaas") {
+      const start = screenToWorld(sp, c);
+      gRef.current = { k: "ga", start, end: start };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      doBusy(true);
+      return;
+    }
     // "select/edit" tool: select, move and resize.
+    // Resize handles win first (they sit on the bbox of the selection and would
+    // otherwise be eaten by the object/line hit-test); then garden objects take
+    // priority over beds and plants.
+    if (p.tool === "select") {
+      const dirH = hitHandle(sp, c);
+      if (dirH && p.selectedIds.length > 0) {
+        const origins = new Map<string, R>();
+        for (const id of p.selectedIds) {
+          const el = p.elements.find((e) => e.id === id)!;
+          origins.set(id, rOf(el));
+        }
+        gRef.current = {
+          k: "groupResize",
+          ids: p.selectedIds,
+          dir: dirH,
+          union: unionOfSelected()!,
+          origins,
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        doBusy(true);
+        return;
+      }
+      const objHit = hitObjectElement(screenToWorld(sp, c));
+      if (objHit) {
+        if (p.selectedIds.includes(objHit.id)) {
+          const origins = new Map<string, R>();
+          origins.set(objHit.id, rOf(objHit));
+          gRef.current = { k: "groupDrag", ids: [objHit.id], sp, origins, leadId: objHit.id };
+        } else {
+          handlersRef.current.onSelect([objHit.id]);
+          handlersRef.current.onSelectCrop(null);
+          const origin = rOf(objHit);
+          gRef.current = { k: "drag", id: objHit.id, sp, origin };
+        }
+        e.currentTarget.setPointerCapture(e.pointerId);
+        doBusy(true);
+        return;
+      }
+    }
     // Plants inside a fully-selected bed take priority over the bed itself.
     const bedSel = selectedBedEl();
     if (bedSel && bedSel.crops.length > 0) {
@@ -624,37 +813,19 @@ export function GpuCanvas({
       // clicked on bed area but outside any plant -> drop plant selection
       handlersRef.current.onSelectCrop(null);
     }
-    const dir = hitHandle(sp, c);
-    if (dir && p.selectedIds.length > 0) {
-      const origins = new Map<string, R>();
-      for (const id of p.selectedIds) {
-        const el = p.elements.find((e) => e.id === id)!;
-        origins.set(id, draftRef.current.get(id) ?? rectOf(el));
-      }
-      gRef.current = {
-        k: "groupResize",
-        ids: p.selectedIds,
-        dir,
-        union: unionOfSelected()!,
-        origins,
-      };
-      e.currentTarget.setPointerCapture(e.pointerId);
-      doBusy(true);
-      return;
-    }
     const hit = hitItem(screenToWorld(sp, c));
     if (hit) {
       if (p.selectedIds.includes(hit.id)) {
         const origins = new Map<string, R>();
         for (const id of p.selectedIds) {
           const el = p.elements.find((e) => e.id === id)!;
-          origins.set(id, draftRef.current.get(id) ?? rectOf(el));
+          origins.set(id, rOf(el));
         }
         gRef.current = { k: "groupDrag", ids: p.selectedIds, sp, origins, leadId: hit.id };
       } else {
         handlersRef.current.onSelect([hit.id]);
         handlersRef.current.onSelectCrop(null);
-        const origin = draftRef.current.get(hit.id) ?? rectOf(hit);
+        const origin = rOf(hit);
         gRef.current = { k: "drag", id: hit.id, sp, origin };
       }
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -679,18 +850,22 @@ export function GpuCanvas({
       if (p.tool === "move" || spaceRef.current) {
         cur = spaceRef.current ? "grabbing" : "grab";
       } else if (p.tool === "select") {
-        const bedSel = selectedBedEl();
-        if (bedSel && bedSel.crops.length > 0) {
-          const ch = hitCropHandle(sp, c, bedSel);
-          if (ch) cur = dirCursor(ch.dir);
-          else if (hitCrop(screenToWorld(sp, c), bedSel)) cur = "move";
+        if (hitObjectElement(screenToWorld(sp, c))) {
+          cur = "move";
+        } else {
+          const bedSel = selectedBedEl();
+          if (bedSel && bedSel.crops.length > 0) {
+            const ch = hitCropHandle(sp, c, bedSel);
+            if (ch) cur = dirCursor(ch.dir);
+            else if (hitCrop(screenToWorld(sp, c), bedSel)) cur = "move";
+          }
+          if (cur === "default") {
+            const dir = hitHandle(sp, c);
+            if (dir) cur = dirCursor(dir);
+            else if (hitItem(screenToWorld(sp, c))) cur = "move";
+          }
         }
-        if (cur === "default") {
-          const dir = hitHandle(sp, c);
-          if (dir) cur = dirCursor(dir);
-          else if (hitItem(screenToWorld(sp, c))) cur = "move";
-        }
-      } else if (p.tool === "frame") {
+      } else if (p.tool === "frame" || p.tool === "gaas") {
         cur = "crosshair";
       }
       if (hostRef.current) hostRef.current.style.cursor = cur;
@@ -716,13 +891,24 @@ export function GpuCanvas({
       };
       const others = propsRef.current.elements
         .filter((el) => el.id !== g.id)
-        .map((el) => draftRef.current.get(el.id) ?? rectOf(el));
+        .map((el) => rOf(el));
       const res = snapRect(moved, others, g.origin);
-      draftRef.current.set(g.id, { x: res.x, y: res.y, w: moved.w, h: moved.h });
+      const el = propsRef.current.elements.find((e) => e.id === g.id);
+      if (el && el.object === "gaas" && el.gaas) {
+        // translate the free anchors; pole-pinned ones stay pinned
+        const draft = moveGaas(el, wcur.x - wstart.x, wcur.y - wstart.y);
+        gaasDraftRef.current.set(g.id, draft);
+      } else {
+        draftRef.current.set(g.id, { x: res.x, y: res.y, w: moved.w, h: moved.h });
+      }
       guidesRef.current = { v: res.v, h: res.h };
       return;
     }
     if (g.k === "frame") {
+      gRef.current = { ...g, end: screenToWorld(sp, c) };
+      return;
+    }
+    if (g.k === "ga") {
       gRef.current = { ...g, end: screenToWorld(sp, c) };
       return;
     }
@@ -740,12 +926,17 @@ export function GpuCanvas({
       const sel = new Set(g.ids);
       const others = propsRef.current.elements
         .filter((el) => !sel.has(el.id))
-        .map((el) => draftRef.current.get(el.id) ?? rectOf(el));
+        .map((el) => rOf(el));
       const res = snapRect(movedLead, others, lead);
       const fx = res.x - lead.x;
       const fy = res.y - lead.y;
       for (const [id, o] of g.origins) {
-        draftRef.current.set(id, { x: o.x + fx, y: o.y + fy, w: o.w, h: o.h });
+        const el = propsRef.current.elements.find((e) => e.id === id);
+        if (el && el.object === "gaas" && el.gaas) {
+          gaasDraftRef.current.set(id, moveGaas(el, fx, fy));
+        } else {
+          draftRef.current.set(id, { x: o.x + fx, y: o.y + fy, w: o.w, h: o.h });
+        }
       }
       guidesRef.current = { v: res.v, h: res.h };
       return;
@@ -756,18 +947,31 @@ export function GpuCanvas({
       const sel = new Set(g.ids);
       const others = propsRef.current.elements
         .filter((el) => !sel.has(el.id))
-        .map((el) => draftRef.current.get(el.id) ?? rectOf(el));
+        .map((el) => rOf(el));
       const sn = snapResize(nr, g.dir, g.union, others);
       const fx = sn.r.w / g.union.w;
       const fy = sn.r.h / g.union.h;
       for (const [id, o] of g.origins) {
-        const nx = sn.r.x + (o.x - g.union.x) * fx;
-        const ny = sn.r.y + (o.y - g.union.y) * fy;
+        // round objects scale uniformly so they stay circles
+        let sx = fx;
+        let sy = fy;
+        const el = propsRef.current.elements.find((el) => el.id === id);
+        if (el?.shape === "circle") {
+          const f = (fx + fy) / 2;
+          sx = f;
+          sy = f;
+        }
+        if (el && el.object === "gaas" && el.gaas) {
+          gaasDraftRef.current.set(id, scaleGaas(el, g.union, sn.r, sx, sy));
+          continue;
+        }
+        const nx = sn.r.x + (o.x - g.union.x) * sx;
+        const ny = sn.r.y + (o.y - g.union.y) * sy;
         draftRef.current.set(id, {
           x: Math.round(nx),
           y: Math.round(ny),
-          w: Math.max(MIN, Math.round(o.w * fx)),
-          h: Math.max(MIN, Math.round(o.h * fy)),
+          w: Math.max(MIN, Math.round(o.w * sx)),
+          h: Math.max(MIN, Math.round(o.h * sy)),
         });
       }
       guidesRef.current = { v: sn.v, h: sn.h };
@@ -818,46 +1022,64 @@ export function GpuCanvas({
     const g = gRef.current;
     doBusy(false);
     if (g.k === "drag") {
-      const r = draftRef.current.get(g.id);
-      if (r) handlersRef.current.onApplyChanges([{ id: g.id, x: Math.round(r.x), y: Math.round(r.y) }]);
+      const el = propsRef.current.elements.find((e) => e.id === g.id);
+      const gd = gaasDraftRef.current.get(g.id);
+      if (el && gd && el.object === "gaas") {
+        handlersRef.current.onApplyChanges([{ id: g.id, gaas: gd }]);
+      } else {
+        const r = draftRef.current.get(g.id);
+        if (r) handlersRef.current.onApplyChanges([{ id: g.id, x: Math.round(r.x), y: Math.round(r.y) }]);
+      }
       draftRef.current.delete(g.id);
+      gaasDraftRef.current.delete(g.id);
       guidesRef.current = { v: [], h: [] };
     } else if (g.k === "groupDrag") {
       const updates: ElementUpdate[] = [];
       for (const id of g.ids) {
-        const r = draftRef.current.get(id);
-        if (r) updates.push({ id, x: Math.round(r.x), y: Math.round(r.y) });
+        const gd = gaasDraftRef.current.get(id);
+        if (gd) updates.push({ id, gaas: gd });
+        else {
+          const r = draftRef.current.get(id);
+          if (r) updates.push({ id, x: Math.round(r.x), y: Math.round(r.y) });
+        }
         draftRef.current.delete(id);
+        gaasDraftRef.current.delete(id);
       }
       if (updates.length > 0) handlersRef.current.onApplyChanges(updates);
       guidesRef.current = { v: [], h: [] };
     } else if (g.k === "groupResize") {
       const updates: ElementUpdate[] = [];
       for (const id of g.ids) {
-        const r = draftRef.current.get(id);
-        if (r) {
-          const u: ElementUpdate = {
-            id,
-            x: Math.round(r.x),
-            y: Math.round(r.y),
-            widthM: r.w / PX_PER_M,
-            heightM: r.h / PX_PER_M,
-          };
-          const org = g.origins.get(id);
-          const el = propsRef.current.elements.find((e) => e.id === id);
-          if (
-            el &&
-            el.type === "bed" &&
-            el.crops.length > 0 &&
-            org &&
-            org.w > 0 &&
-            org.h > 0
-          ) {
-            u.crops = scaleCropAreas(el.crops, r.w / org.w, r.h / org.h);
+        const gd = gaasDraftRef.current.get(id);
+        if (gd) {
+          updates.push({ id, gaas: gd });
+        } else {
+          const r = draftRef.current.get(id);
+          if (r) {
+            const u: ElementUpdate = {
+              id,
+              x: Math.round(r.x),
+              y: Math.round(r.y),
+              widthM: r.w / PX_PER_M,
+              heightM: r.h / PX_PER_M,
+            };
+            const org = g.origins.get(id);
+            const el = propsRef.current.elements.find((e) => e.id === id);
+            if (
+              el &&
+              el.type === "bed" &&
+              el.crops.length > 0 &&
+              org &&
+              org.w > 0 &&
+              org.h > 0
+            ) {
+              u.crops = scaleCropAreas(el.crops, r.w / org.w, r.h / org.h);
+            }
+            updates.push(u);
           }
-          updates.push(u);
         }
         draftRef.current.delete(id);
+        gaasDraftRef.current.delete(id);
       }
       if (updates.length > 0) handlersRef.current.onApplyChanges(updates);
       guidesRef.current = { v: [], h: [] };
@@ -872,7 +1094,7 @@ export function GpuCanvas({
       if (w > 2 && h > 2) {
         const found = p.elements
           .filter((el) => {
-            const r = rectOf(el);
+            const r = rOf(el);
             return r.x + r.w >= x && r.x <= x + w && r.y + r.h >= y && r.y <= y + h;
           })
           .map((el) => el.id);
@@ -918,6 +1140,29 @@ export function GpuCanvas({
         const hM = Math.max(0.05, Math.round((h / PX_PER_M) * 20) / 20);
         handlersRef.current.onAddFrame(p.frameType, Math.round(x), Math.round(y), wM, hM);
       }
+    } else if (g.k === "ga") {
+      const snap = (pt: Pt): GaasPin => {
+        const o = hitObjectElement(pt);
+        if (o && o.type === "object" && o.object === "pole") {
+          const r = rOf(o);
+          return {
+            poleId: o.id,
+            x: Math.round(r.x + r.w / 2),
+            y: Math.round(r.y + r.h / 2),
+          };
+        }
+        return { x: Math.round(pt.x), y: Math.round(pt.y) };
+      };
+      const pa = snap(g.start);
+      const pb = snap(g.end);
+      const len = Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y);
+      if (len > MIN) {
+        const id = handlersRef.current.onAddObject("gaas", g.start.x, g.start.y, { a: pa, b: pb });
+        if (id) {
+          handlersRef.current.onSelect([id]);
+          handlersRef.current.onSelectCrop(null);
+        }
+      }
     }
     gRef.current = { k: "none" };
     if (hostRef.current) hostRef.current.style.cursor = "default";
@@ -961,7 +1206,8 @@ export function GpuCanvas({
 
       const items: DrawItem[] = [];
       for (const el of p.elements) {
-        const r = draftRef.current.get(el.id) ?? rectOf(el);
+        if (el.type === "object") continue; // objects are drawn in their own pass
+        const r = rOf(el);
         items.push({ rect: r, color: el.color, selected: false });
       }
       renderer.render(items, c, bg(p.theme));
@@ -970,12 +1216,12 @@ export function GpuCanvas({
       ctx.clearRect(0, 0, w, h);
 
       // plant rectangles drawn inside each bed (colour-coded per catalog crop)
-      const colorMap = new Map<string, string>();
-      const nameMap = new Map<string, string>();
-      for (const cr of p.catalog) {
-        colorMap.set(cr.id, cr.color);
-        nameMap.set(cr.id, cr.name);
-      }
+      const dark = p.theme === "dark";
+      const chipBg = dark ? "rgba(28,32,39,0.9)" : "rgba(255,255,255,0.9)";
+      const chipBorder = dark ? "rgba(255,255,255,0.12)" : "rgba(16,24,40,0.08)";
+      const chipName = dark ? "#e7eaee" : "#171b21";
+      const chipMeta = dark ? "#8a93a1" : "#70788a";
+      const cropById = new Map(p.catalog.map((cr) => [cr.id, cr]));
       // which plant is under the pointer (only meaningful inside the selected bed)
       let hoverCropId: string | null = null;
       {
@@ -994,7 +1240,8 @@ export function GpuCanvas({
           const bw = p1.x - p0.x;
           const bh = p1.y - p0.y;
           if (bw < 2 || bh < 2) continue;
-          const col = colorMap.get(a.cropId) ?? "#9aa0a6";
+          const crop = cropById.get(a.cropId);
+          const col = crop?.color ?? "#9aa0a6";
           const isSel = p.selectedCropId === a.instanceId;
           const isHov = hoverCropId === a.instanceId;
           let fillAlpha = 0.22;
@@ -1008,50 +1255,239 @@ export function GpuCanvas({
           ctx.strokeStyle = isSel || isHov ? col : "rgba(0,0,0,0.18)";
           ctx.lineWidth = isSel ? 2 : 1;
           ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, bw - 1, bh - 1);
-          if (bw >= 42 && bh >= 16) {
-            const nm = nameMap.get(a.cropId) ?? "";
-            if (nm) {
-              const fs = Math.max(9, Math.min(12, 11 * c.zoom));
-              ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
-              ctx.textAlign = "center";
-              ctx.textBaseline = "middle";
-              ctx.fillStyle = "rgba(255,255,255,0.9)";
-              ctx.fillText(nm, p0.x + bw / 2, p0.y + bh / 2);
-              ctx.textAlign = "left";
-              ctx.textBaseline = "top";
+
+          // flat plant icons arranged in the chosen layout, spacing from the
+          // crop's row/plant spacing
+          const rowSpacingM = a.rowSpacing ?? crop?.rowSpacing ?? 0.3;
+          const plantSpacingM = a.plantSpacing ?? crop?.plantSpacing ?? 0.2;
+          const icon = cropIconChar(crop?.icon);
+          const { spots, size } = plantPositions(
+            { x: r.x, y: r.y, w: r.w, h: r.h },
+            a.rows,
+            a.cols,
+            rowSpacingM,
+            plantSpacingM,
+            a.padding ?? 0.1,
+            PX_PER_M
+          );
+          if (spots.length > 0 && bw >= 16 && bh >= 16) {
+            ctx.globalAlpha = p.selectedCropId && !isSel ? 0.45 : 1;
+            ctx.fillStyle = col;
+            ctx.font = `900 ${size * c.zoom}px "Font Awesome 7 Free", sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            for (const s of spots) {
+              const sp = worldToScreen({ x: s.x, y: s.y }, c);
+              ctx.fillText(icon, sp.x, sp.y + 1);
             }
+            ctx.globalAlpha = 1;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "top";
+          }
+
+          // name chip for the selected/hovered plant
+          if ((isSel || isHov) && bw >= 56 && bh >= 26) {
+            const nfs = Math.max(9, Math.min(11, 10.5 * c.zoom));
+            const nm = crop?.name ?? "";
+            ctx.font = `600 ${nfs}px Inter, system-ui, sans-serif`;
+            const nw = ctx.measureText(nm).width;
+            const npx = 9;
+            const nwW = nw + npx * 2;
+            const nhh = nfs + 7;
+            ctx.fillStyle = chipBg;
+            ctx.strokeStyle = chipBorder;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(p0.x + 3, p0.y + 3, Math.min(nwW, bw - 6), nhh, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = chipName;
+            ctx.textBaseline = "middle";
+            ctx.fillText(nm, p0.x + 3 + npx, p0.y + 3 + nhh / 2 + 1);
+            ctx.textBaseline = "top";
           }
         }
       }
 
+      // garden objects: always drawn on top of beds/paths and their plants
+      for (const el of p.elements) {
+        if (el.type !== "object") continue;
+        const isSel = p.selectedIds.includes(el.id);
+
+        // "gaas": a mesh line stretching between its two anchors
+        if (el.object === "gaas" && el.gaas) {
+          const { a, b } = gaasEndsOf(el);
+          const sA = worldToScreen(a, c);
+          const sB = worldToScreen(b, c);
+          const dx = sB.x - sA.x;
+          const dy = sB.y - sA.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 3) continue;
+          const t2 = Math.max(1.5, ((el.widthM || 0.1) * PX_PER_M * c.zoom) / 2);
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          // translucent band
+          ctx.globalAlpha = isSel ? 0.65 : 0.42;
+          ctx.strokeStyle = el.color;
+          ctx.lineWidth = t2 * 2;
+          ctx.beginPath();
+          ctx.moveTo(sA.x, sA.y);
+          ctx.lineTo(sB.x, sB.y);
+          ctx.stroke();
+          // mesh strands crossing the line
+          const cell = Math.max(7, Math.round(PX_PER_M * 0.12 * c.zoom));
+          ctx.globalAlpha = isSel ? 0.7 : 0.4;
+          ctx.strokeStyle = isSel ? accent(p.theme) : "rgba(0,0,0,0.35)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          for (let d = cell; d < len; d += cell) {
+            const cx = sA.x + (dx / len) * d;
+            const cy = sA.y + (dy / len) * d;
+            ctx.moveTo(cx - (-dy / len) * t2, cy - (dx / len) * t2);
+            ctx.lineTo(cx + (-dy / len) * t2, cy + (dx / len) * t2);
+          }
+          ctx.stroke();
+          // free (non-pole) anchors get a little marker
+          ctx.globalAlpha = 1;
+          const dotF = Math.max(2, t2 * 0.85);
+          ctx.fillStyle = el.color;
+          for (const s of [sA, sB]) {
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, dotF, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.lineCap = "butt";
+          ctx.lineJoin = "miter";
+          continue;
+        }
+
+        const r = rOf(el);
+        const p0 = worldToScreen({ x: r.x, y: r.y }, c);
+        const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+        const rw = p1.x - p0.x;
+        const rh = p1.y - p0.y;
+
+        // round objects (poles/tuns): filled circle, ring, and solid centre
+        if (el.shape === "circle") {
+          const cx = (p0.x + p1.x) / 2;
+          const cy = (p0.y + p1.y) / 2;
+          const rad = rw / 2;
+          if (rad < 3) continue;
+          ctx.globalAlpha = isSel ? 0.35 : 0.22;
+          ctx.fillStyle = el.color;
+          ctx.beginPath();
+          ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = isSel ? accent(p.theme) : "rgba(0,0,0,0.28)";
+          ctx.lineWidth = isSel ? 2 : 1;
+          ctx.beginPath();
+          ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+          ctx.stroke();
+          // a solid centre dot reads as a pole; tuns keep a small glyph
+          if (el.object === "pole") {
+            const dot = Math.max(2.5, rad * 0.3);
+            ctx.fillStyle = isSel ? accent(p.theme) : el.color;
+            ctx.beginPath();
+            ctx.arc(cx, cy, dot, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            const size = Math.max(rad * 0.6, 6);
+            ctx.fillStyle = el.color;
+            ctx.font = `900 ${size}px "Font Awesome 7 Free", sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(objectChar(el.object), cx, cy + 1);
+            ctx.textAlign = "left";
+            ctx.textBaseline = "top";
+          }
+          continue;
+        }
+
+        if (rw < 6 || rh < 6) continue;
+        ctx.globalAlpha = isSel ? 0.3 : 0.18;
+        ctx.fillStyle = el.color;
+        ctx.beginPath();
+        ctx.roundRect(p0.x, p0.y, rw, rh, 7);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = isSel ? accent(p.theme) : "rgba(0,0,0,0.25)";
+        ctx.lineWidth = isSel ? 2 : 1;
+        ctx.beginPath();
+        ctx.roundRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1, 7);
+        ctx.stroke();
+
+        const size = Math.min(rw, rh) * 0.55;
+        if (size >= 6) {
+          ctx.fillStyle = el.color;
+          ctx.font = `900 ${size}px "Font Awesome 7 Free", sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(objectChar(el.object), (p0.x + p1.x) / 2, (p0.y + p1.y) / 2 + 1);
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+        }
+      }
+
+      // live preview while drawing a gaas line
+      if (gRef.current.k === "ga") {
+        const st = worldToScreen(gRef.current.start, c);
+        const en = worldToScreen(gRef.current.end, c);
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = "#3d9e6a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(st.x, st.y);
+        ctx.lineTo(en.x, en.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#3d9e6a";
+        ctx.beginPath();
+        ctx.arc(st.x, st.y, 4, 0, Math.PI * 2);
+        ctx.arc(en.x, en.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       // labels
       for (const el of p.elements) {
-        const r = draftRef.current.get(el.id) ?? rectOf(el);
+        const r = rOf(el);
         const p0 = worldToScreen({ x: r.x, y: r.y }, c);
         const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
         const bw = p1.x - p0.x;
         const bh = p1.y - p0.y;
         if (bw < 46 || bh < 22) continue;
         const fs = Math.max(9, Math.min(13, 12 * c.zoom));
-        const sizeTxt = `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
+        const sizeTxt =
+          el.shape === "circle"
+            ? `⌀ ${fmtM(el.widthM)}`
+            : el.object === "gaas" && el.gaas
+              ? `${fmtM(gaasLengthM(el))} m`
+              : `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
         ctx.textBaseline = "top";
         ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
         const nameW = ctx.measureText(el.label).width;
         const smallFs = Math.max(8, Math.min(10, 9 * c.zoom));
         ctx.font = `600 ${smallFs}px Inter, system-ui, sans-serif`;
         const sizeW = ctx.measureText(sizeTxt).width;
-        const chipW = Math.max(nameW, sizeW) + 14;
+        const padX = 9;
+        const padY = 5;
         const hasSizeLine = bh >= 44;
-        const chipH = hasSizeLine ? fs + smallFs + 10 : fs + 8;
-        ctx.fillStyle = "rgba(255,255,255,0.82)";
-        ctx.fillRect(p0.x + 3, p0.y + 3, Math.min(chipW, bw - 6), chipH);
-        ctx.fillStyle = "#2d2a24";
+        const chipW = Math.max(nameW, sizeW) + padX * 2;
+        const chipH = hasSizeLine ? fs + smallFs + padY * 2 + 1 : fs + padY * 2;
+        ctx.fillStyle = chipBg;
+        ctx.strokeStyle = chipBorder;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(p0.x + 3, p0.y + 3, Math.min(chipW, bw - 6), chipH, 7);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = chipName;
         ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
-        ctx.fillText(el.label, p0.x + 10, p0.y + 5 + (fs - 10) / 2);
+        ctx.fillText(el.label, p0.x + 3 + padX, p0.y + 3 + padY + (fs - 10) / 2);
         if (hasSizeLine) {
-          ctx.fillStyle = "#6b6258";
+          ctx.fillStyle = chipMeta;
           ctx.font = `600 ${smallFs}px Inter, system-ui, sans-serif`;
-          ctx.fillText(sizeTxt, p0.x + 10, p0.y + 5 + fs + (smallFs - 8) / 2 + 2);
+          ctx.fillText(sizeTxt, p0.x + 3 + padX, p0.y + 3 + padY + fs + (smallFs - 8) / 2 + 1);
         }
       }
 
@@ -1230,7 +1666,15 @@ export function GpuCanvas({
                 ctx.strokeRect(hx[i] - hs / 2, hy[i] - hs / 2, hs, hs);
               }
               // crop size chip (kept near constant screen size)
-              const txt = `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
+          const txt =
+            p.selectedIds.length === 1
+              ? (() => {
+                  const el = p.elements.find((e) => e.id === p.selectedIds[0]);
+                  return el && el.object === "gaas" && el.gaas
+                    ? `${fmtM(gaasLengthM(el))} m`
+                    : `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
+                })()
+              : `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
               const fs = Math.max(9, Math.min(13, 11 * c.zoom));
               ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
               const tw = ctx.measureText(txt).width + 16;
@@ -1312,6 +1756,74 @@ export function GpuCanvas({
     >
       <canvas ref={gpuRef} style={{ position: "absolute", inset: 0 }} />
       <canvas ref={ovRef} style={{ position: "absolute", inset: 0 }} />
+      {objectMenuOpen && (
+        <ObjectMenu
+          search={objSearch}
+          onSearchChange={setObjSearch}
+          onClose={() => handlersRef.current.onObjectMenuOpenChange(false)}
+          onItemPointerDown={startObjectDrag}
+        />
+      )}
+    </div>
+  );
+}
+
+function ObjectMenu({
+  search,
+  onSearchChange,
+  onClose,
+  onItemPointerDown,
+}: {
+  search: string;
+  onSearchChange: (v: string) => void;
+  onClose: () => void;
+  onItemPointerDown: (def: GardenObjectDef, e: React.PointerEvent) => void;
+}) {
+  const s = search.trim().toLowerCase();
+  const filtered = GARDEN_OBJECTS.filter(
+    (o) =>
+      !s ||
+      o.name.toLowerCase().includes(s) ||
+      o.keywords.toLowerCase().includes(s)
+  );
+  return (
+    <div
+      className="obj-menu"
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="obj-menu-head">
+        <span className="obj-menu-title">Voorwerpen</span>
+        <button
+          type="button"
+          className="obj-menu-close"
+          onClick={onClose}
+          aria-label="Sluiten"
+        >
+          ✕
+        </button>
+      </div>
+      <input
+        className="obj-menu-search"
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Zoek voorwerp…"
+      />
+      <div className="obj-menu-grid">
+        {filtered.map((def) => (
+          <button
+            key={def.key}
+            type="button"
+            className="obj-menu-item"
+            onPointerDown={(e) => onItemPointerDown(def, e)}
+          >
+            <i className={def.icon} />
+            <span>{def.name}</span>
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <div className="obj-menu-empty">Geen resultaten.</div>
+        )}
+      </div>
     </div>
   );
 }

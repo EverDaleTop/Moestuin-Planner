@@ -1,11 +1,11 @@
 import { GpuCanvas } from "./gpu/GpuCanvas";
-import type { Crop, EditorTool, ElementType, GardenElement, CropAssignment } from "./types";
+import type { Crop, EditorTool, GardenElement, CropAssignment, GardenObjectKey } from "./types";
 
 interface Props {
   elements: GardenElement[];
   catalog: Crop[];
   tool: EditorTool;
-  frameType: ElementType;
+  frameType: "bed" | "path";
   selectedIds: string[];
   selectedCropId: string | null;
   onSelect: (ids: string[]) => void;
@@ -20,15 +20,24 @@ interface Props {
       widthM?: number;
       heightM?: number;
       crops?: CropAssignment[];
+      gaas?: import("./types").GaasData;
     }[]
   ) => void;
   onAddFrame: (
-    type: ElementType,
+    type: "bed" | "path",
     x: number,
     y: number,
     widthM: number,
     heightM: number
   ) => string;
+  onAddObject: (
+    key: GardenObjectKey,
+    x: number,
+    y: number,
+    gaas?: import("./types").GaasData
+  ) => string;
+  objectMenuOpen: boolean;
+  onObjectMenuOpenChange: (open: boolean) => void;
   onUpdateCrop: (eId: string, instanceId: string, patch: Partial<CropAssignment>) => void;
 }
 
@@ -45,6 +54,9 @@ export function GardenCanvas({
   theme,
   onApplyChanges,
   onAddFrame,
+  onAddObject,
+  objectMenuOpen,
+  onObjectMenuOpenChange,
   onUpdateCrop,
 }: Props) {
   return (
@@ -60,6 +72,9 @@ export function GardenCanvas({
       onSelectCrop={onSelectCrop}
       onApplyChanges={onApplyChanges}
       onAddFrame={onAddFrame}
+      onAddObject={onAddObject}
+      objectMenuOpen={objectMenuOpen}
+      onObjectMenuOpenChange={onObjectMenuOpenChange}
       onUpdateCrop={onUpdateCrop}
       onBusyChange={onBusyChange}
     />

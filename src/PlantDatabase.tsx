@@ -2,17 +2,8 @@ import { useMemo, useState } from "react";
 import type { Crop } from "./types";
 import type { Theme } from "./useTheme";
 import { ThemeToggle } from "./ThemeToggle";
-
-interface Props {
-  catalog: Crop[];
-  gardenCount: number;
-  theme: Theme;
-  onToggleTheme: () => void;
-  onBack: () => void;
-  onAdd: (crop: Omit<Crop, "id">) => void;
-  onUpdate: (cropId: string, patch: Partial<Crop>) => void;
-  onDelete: (cropId: string) => void;
-}
+import { IconPicker } from "./CropIconPicker";
+import { cropIconClass, DEFAULT_CROP_ICON } from "./cropIcons";
 
 function NumField({
   label,
@@ -48,18 +39,22 @@ const BLANK = {
   rowSpacing: 0.3,
   plantSpacing: 0.2,
   sowWindow: "",
+  icon: DEFAULT_CROP_ICON,
 };
 
-export function PlantDatabase({
+/** The shared crop-catalog content (search, add form, list). Used both by the
+ *  full-screen PlantDatabase page and the editor's "Gewassen" tab. */
+export function PlantCatalog({
   catalog,
-  gardenCount,
-  theme,
-  onToggleTheme,
-  onBack,
   onAdd,
   onUpdate,
   onDelete,
-}: Props) {
+}: {
+  catalog: Crop[];
+  onAdd: (crop: Omit<Crop, "id">) => void;
+  onUpdate: (cropId: string, patch: Partial<Crop>) => void;
+  onDelete: (cropId: string) => void;
+}) {
   const [form, setForm] = useState(BLANK);
   const [showForm, setShowForm] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -86,27 +81,7 @@ export function PlantDatabase({
   };
 
   return (
-    <div className="gl-wrap">
-      <header className="gl-header">
-        <div className="gl-header-top">
-          <div>
-            <button className="btn-ghost pd-back" onClick={onBack}>
-              ← Tuinen
-            </button>
-            <h1>🌱 Gewassen</h1>
-            <p>
-              Gedeelde plantendatabase · beschikbaar in al je{" "}
-              <strong>{gardenCount}</strong> tuin{gardenCount === 1 ? "" : "en"}.
-            </p>
-          </div>
-          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-        </div>
-        <nav className="gl-nav">
-          <button className="nav-tab" onClick={onBack}>Tuinen</button>
-          <button className="nav-tab nav-active" disabled>Gewassen</button>
-        </nav>
-      </header>
-
+    <>
       <div className="pd-toolbar">
         <input
           className="pd-search"
@@ -145,6 +120,11 @@ export function PlantDatabase({
               onChange={(e) => setForm({ ...form, color: e.target.value })}
             />
           </label>
+          <IconPicker
+            value={form.icon}
+            color={form.color}
+            onChange={(icon) => setForm({ ...form, icon })}
+          />
           <label className="inp-field">
             <span>Zaaivenster (optioneel)</span>
             <input
@@ -180,7 +160,10 @@ export function PlantDatabase({
                 />
               ) : (
                 <>
-                  <span className="crop-dot pd-dot" style={{ background: c.color }} />
+                  <i
+                    className={`crop-icon pd-icon ${cropIconClass(c.icon)}`}
+                    style={{ color: c.color }}
+                  />
                   <div className="pd-card-main">
                     <div className="pd-card-title">{c.name}</div>
                     <div className="pd-card-meta">
@@ -220,6 +203,57 @@ export function PlantDatabase({
           );
         })}
       </section>
+    </>
+  );
+}
+
+export function PlantDatabase({
+  catalog,
+  gardenCount,
+  theme,
+  onToggleTheme,
+  onBack,
+  onAdd,
+  onUpdate,
+  onDelete,
+}: {
+  catalog: Crop[];
+  gardenCount: number;
+  theme: Theme;
+  onToggleTheme: () => void;
+  onBack: () => void;
+  onAdd: (crop: Omit<Crop, "id">) => void;
+  onUpdate: (cropId: string, patch: Partial<Crop>) => void;
+  onDelete: (cropId: string) => void;
+}) {
+  return (
+    <div className="gl-wrap">
+      <header className="gl-header">
+        <div className="gl-header-top">
+          <div>
+            <button className="btn-ghost pd-back" onClick={onBack}>
+              ← Tuinen
+            </button>
+            <h1>🌱 Gewassen</h1>
+            <p>
+              Gedeelde plantendatabase · beschikbaar in al je{" "}
+              <strong>{gardenCount}</strong> tuin{gardenCount === 1 ? "" : "en"}.
+            </p>
+          </div>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
+        <nav className="gl-nav">
+          <button className="nav-tab" onClick={onBack}>Tuinen</button>
+          <button className="nav-tab nav-active" disabled>Gewassen</button>
+        </nav>
+      </header>
+
+      <PlantCatalog
+        catalog={catalog}
+        onAdd={onAdd}
+        onUpdate={onUpdate}
+        onDelete={onDelete}
+      />
     </div>
   );
 }
@@ -238,6 +272,7 @@ function EditRow({
   const [row, setRow] = useState(crop.rowSpacing);
   const [plant, setPlant] = useState(crop.plantSpacing);
   const [sow, setSow] = useState(crop.sowWindow ?? "");
+  const [icon, setIcon] = useState(crop.icon ?? DEFAULT_CROP_ICON);
 
   return (
     <div className="pd-edit">
@@ -253,6 +288,7 @@ function EditRow({
         <span>Kleur</span>
         <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
       </label>
+      <IconPicker value={icon} color={color} onChange={setIcon} />
       <label className="inp-field">
         <span>Zaaperiode</span>
         <input value={sow} onChange={(e) => setSow(e.target.value)} />
@@ -260,7 +296,7 @@ function EditRow({
       <div className="pd-edit-actions">
         <button
           disabled={!name.trim()}
-          onClick={() => onSave({ name: name.trim(), color, rowSpacing: row, plantSpacing: plant, sowWindow: sow.trim() || undefined })}
+          onClick={() => onSave({ name: name.trim(), color, rowSpacing: row, plantSpacing: plant, sowWindow: sow.trim() || undefined, icon })}
         >
           Opslaan
         </button>

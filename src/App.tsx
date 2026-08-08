@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense } from "./types";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, GardenObjectKey, GaasData } from "./types";
 import { loadData, saveData, id } from "./storage";
 import { GardenList } from "./GardenList";
 import { GardenEditor } from "./GardenEditor";
 import { PlantDatabase } from "./PlantDatabase";
 import { useTheme } from "./useTheme";
+import { objectDef } from "./gardenObjects";
 import "./App.css";
 
 export default function App() {
@@ -98,6 +99,60 @@ export default function App() {
     [data.gardens, updateGarden]
   );
 
+  // Add a special garden object (bench, fence, …) as a sibling of beds/paths.
+  // `x`/`y` are the element's top-left corner in canvas px. Objects are named
+  // without a number; the user can rename them in the inspector. A "gaas" is a
+  // line element drawn with the gaas tool and carries its two anchors via `gaas`.
+  const addObject = useCallback(
+    (
+      gId: string,
+      object: GardenObjectKey,
+      x: number,
+      y: number,
+      gaas?: GaasData
+    ): string => {
+      const elBase: GardenElement = {
+        id: id(),
+        type: "object",
+        object,
+        label: "",
+        x: Math.round(x),
+        y: Math.round(y),
+        widthM: 0.1,
+        heightM: 0.1,
+        color: "#666666",
+        crops: [],
+      };
+      if (object === "gaas" && gaas) {
+        const el: GardenElement = {
+          ...elBase,
+          label: "Gaas",
+          widthM: 0.1,
+          heightM: 0.1,
+          color: "#4f9a6a",
+          gaas,
+        };
+        updateGarden(gId, (g) => ({ ...g, elements: [...g.elements, el] }));
+        return el.id;
+      }
+      const def = objectDef(object);
+      if (!def) return "";
+      // round objects (poles, tuns) are sized by their radius: a 2×radius footprint
+      const size = def.radiusM ? def.radiusM * 2 : def.widthM;
+      const el: GardenElement = {
+        ...elBase,
+        label: def.name,
+        widthM: def.shape === "circle" ? size : def.widthM,
+        heightM: def.shape === "circle" ? size : def.heightM,
+        shape: def.shape,
+        color: def.color,
+      };
+      updateGarden(gId, (g) => ({ ...g, elements: [...g.elements, el] }));
+      return el.id;
+    },
+    [data.gardens, updateGarden]
+  );
+
   const updateElement = useCallback(
     (gId: string, eId: string, patch: Partial<GardenElement>) => {
       updateGarden(gId, (g) => ({
@@ -171,6 +226,7 @@ export default function App() {
         widthM?: number;
         heightM?: number;
         crops?: CropAssignment[];
+        gaas?: GaasData;
       }[]
     ) => {
       if (updates.length === 0) return;
@@ -190,6 +246,7 @@ export default function App() {
               if (u.widthM !== undefined) next.widthM = u.widthM;
               if (u.heightM !== undefined) next.heightM = u.heightM;
               if (u.crops !== undefined) next.crops = u.crops;
+              if (u.gaas !== undefined) next.gaas = u.gaas;
               return { ...e, ...next };
             }),
           };
@@ -436,6 +493,7 @@ export default function App() {
       onNameChange={(name) => updateGarden(garden.id, (g) => ({ ...g, name }))}
       onBack={() => setActiveId(null)}
       onAddFrame={(type, x, y, w, h) => addElementAt(garden.id, type, x, y, w, h)}
+      onAddObject={(key, x, y, gaas) => addObject(garden.id, key, x, y, gaas)}
       onUpdateElement={(eId, patch) => updateElement(garden.id, eId, patch)}
       onRemoveElement={(eId) => removeElement(garden.id, eId)}
       onRemoveElements={(ids) => removeElements(garden.id, ids)}
@@ -446,6 +504,8 @@ export default function App() {
       onRemoveCrop={(eId, iId) => removeCrop(garden.id, eId, iId)}
       onDuplicateCrop={(eId, iId) => duplicateCrop(garden.id, eId, iId)}
       onAddCropToCatalog={addCropToCatalog}
+      onUpdateCropInCatalog={updateCropInCatalog}
+      onRemoveCropFromCatalog={removeCropFromCatalog}
       onAddHarvest={(entry) => addHarvest(garden.id, entry)}
       onUpdateHarvest={(hId, patch) => updateHarvest(garden.id, hId, patch)}
       onRemoveHarvest={(hId) => removeHarvest(garden.id, hId)}
@@ -454,10 +514,6 @@ export default function App() {
       onRemoveExpense={(eId) => removeExpense(garden.id, eId)}
       onUndo={undo}
       onRedo={redo}
-      onOpenPlants={() => {
-        setScreen("plants");
-        setActiveId(null);
-      }}
     />
   );
 }
