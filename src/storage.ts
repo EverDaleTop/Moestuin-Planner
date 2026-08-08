@@ -1,6 +1,4 @@
-import type { AppData, Crop, GardenElement } from "./types";
-
-const STORAGE_KEY = "moestuin-planner:v1";
+import type { Crop, GardenElement } from "./types";
 
 export function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -29,40 +27,6 @@ export const DEFAULT_CROP_CATALOG: Crop[] = [
   { id: "spinach", name: "Spinazie", color: "#2ecc71", rowSpacing: 0.25, plantSpacing: 0.1, sowWindow: "mrt–apr", icon: "snowflake" },
   { id: "broccoli", name: "Broccoli", color: "#1e8449", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "apr–jun", icon: "tree" },
 ];
-
-function defaultData(): AppData {
-  return {
-    gardens: [],
-    cropCatalog: DEFAULT_CROP_CATALOG,
-  };
-}
-
-export function loadData(): AppData {
-  const base = defaultData();
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return base;
-    const parsed = JSON.parse(raw) as Partial<AppData>;
-    return {
-      gardens: (parsed.gardens ?? []).map((g: any) => ({
-        ...g,
-        harvests: g.harvests ?? [],
-        expenses: g.expenses ?? [],
-      })),
-      cropCatalog: parsed.cropCatalog ?? base.cropCatalog,
-    };
-  } catch {
-    return base;
-  }
-}
-
-export function saveData(data: AppData): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    // storage may be unavailable (private mode etc.)
-  }
-}
 
 export const PX_PER_M = 100;
 

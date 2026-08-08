@@ -1,21 +1,46 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, GardenObjectKey, GaasData } from "./types";
-import { loadData, saveData, id } from "./storage";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, GardenObjectKey, GaasData, User } from "./types";
+import { id } from "./storage";
+import { api, getToken, setToken, onUnauthorized, type MeResponse } from "./api";
+import { realtime, type LiveUpdate } from "./realtime";
 import { GardenList } from "./GardenList";
 import { GardenEditor } from "./GardenEditor";
 import { PlantDatabase } from "./PlantDatabase";
+import { AuthScreen } from "./AuthScreen";
+import { InviteScreen } from "./InviteScreen";
 import { useTheme } from "./useTheme";
 import { objectDef } from "./gardenObjects";
 import "./App.css";
 
+interface InviteTarget {
+  gardenId: string;
+  token: string;
+}
+
+function parseInvite(): InviteTarget | null {
+  const m = /^\/invite\/([^/]+)\/([^/]+)\/?$/.exec(window.location.pathname);
+  return m ? { gardenId: m[1], token: m[2] } : null;
+}
+
 export default function App() {
-  const [data, setData] = useState<AppData>(() => loadData());
+  const [booted, setBooted] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [data, setData] = useState<AppData>({ gardens: [], cropCatalog: [] });
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [screen, setScreen] = useState<"gardens" | "plants">("gardens");
+  const [presence, setPresence] = useState(0);
+  const [invite, setInvite] = useState<InviteTarget | null>(() => parseInvite());
   const [theme, toggleTheme] = useTheme();
 
   const undoStack = useRef<AppData[]>([]);
   const redoStack = useRef<AppData[]>([]);
+
+  // Last state pushed to the server per garden, so the sync effect below can
+  // tell local edits (push) apart from remote changes (don't echo back).
+  const lastSentRef = useRef<Map<string, string>>(new Map());
+  const lastSentCatalogRef = useRef<string>("");
+  const lastMoveRef = useRef(0);
 
   // Every data mutation goes through `mutate`, which snapshots the previous
   // state onto the undo stack (and clears redo, since the history forks).
@@ -46,36 +71,209 @@ export default function App() {
     });
   }, []);
 
+  // ----- authentication / boot -----
+  const loadList = useCallback(async () => {
+    try {
+      const res: MeResponse = await api.me();
+      setUserNames(res.userNames);
+      setData({ gardens: res.gardens, cropCatalog: res.cropCatalog });
+      lastSentCatalogRef.current = JSON.stringify(res.cropCatalog);
+      const map = new Map<string, string>();
+      for (const g of res.gardens) map.set(g.id, JSON.stringify(g));
+      lastSentRef.current = map;
+    } catch {
+      // token was cleared by the api layer
+    }
+  }, []);
+
   useEffect(() => {
-    saveData(data);
+    const off = onUnauthorized(() => {
+      setUser(null);
+      realtime.disconnect();
+      setData({ gardens: [], cropCatalog: [] });
+    });
+    if (!getToken()) {
+      setBooted(true);
+      return off;
+    }
+    void api
+      .me()
+      .then((res) => {
+        setUser(res.user);
+        setUserNames(res.userNames);
+        setData({ gardens: res.gardens, cropCatalog: res.cropCatalog });
+        lastSentCatalogRef.current = JSON.stringify(res.cropCatalog);
+        const map = new Map<string, string>();
+        for (const g of res.gardens) map.set(g.id, JSON.stringify(g));
+        lastSentRef.current = map;
+      })
+      .catch(() => setUser(null))
+      .finally(() => setBooted(true));
+    return off;
+  }, []);
+
+  const handleAuthed = useCallback((u: User, token: string) => {
+    setToken(token);
+    setUser(u);
+    setData({ gardens: [], cropCatalog: [] });
+    void loadList();
+  }, [loadList]);
+
+  const logout = useCallback(async () => {
+    await api.logout();
+    realtime.disconnect();
+    setUser(null);
+    setActiveId(null);
+    setData({ gardens: [], cropCatalog: [] });
+  }, []);
+
+  // ----- realtime (WebSocket) -----
+  useEffect(() => {
+    if (!user) return;
+    realtime.connect();
+    const off = realtime.onMessage((msg) => {
+      if (msg.type === "garden") {
+        lastSentRef.current.set(msg.garden.id, JSON.stringify(msg.garden));
+        setData((prev) => {
+          const exists = prev.gardens.some((g) => g.id === msg.garden.id);
+          return {
+            ...prev,
+            gardens: exists
+              ? prev.gardens.map((g) => (g.id === msg.garden.id ? msg.garden : g))
+              : [...prev.gardens, msg.garden],
+          };
+        });
+      } else if (msg.type === "move") {
+        const updates = msg.updates as LiveUpdate[];
+        setData((prev) => {
+          const g = prev.gardens.find((x) => x.id === msg.gardenId);
+          if (!g) return prev;
+          const byId = new Map(updates.map((u) => [u.id, u]));
+          const nextG: Garden = {
+            ...g,
+            elements: g.elements.map((e) => {
+              const u = byId.get(e.id);
+              if (!u) return e;
+              const next: GardenElement = { ...e };
+              if (u.x !== undefined) next.x = u.x;
+              if (u.y !== undefined) next.y = u.y;
+              if (u.widthM !== undefined) next.widthM = u.widthM;
+              if (u.heightM !== undefined) next.heightM = u.heightM;
+              return next;
+            }),
+          };
+          // transient drag positions: don't echo them back to the server
+          lastSentRef.current.set(msg.gardenId, JSON.stringify(nextG));
+          return { ...prev, gardens: prev.gardens.map((x) => (x.id === msg.gardenId ? nextG : x)) };
+        });
+      } else if (msg.type === "presence") {
+        setPresence(msg.count);
+      }
+    });
+    return () => {
+      off();
+      realtime.disconnect();
+    };
+  }, [user]);
+
+  useEffect(() => {
+    realtime.setGarden(activeId);
+  }, [activeId]);
+
+  // Re-fetch the list when returning to it, so newly shared gardens (and name
+  // changes from others) appear.
+  useEffect(() => {
+    if (!user || activeId !== null) return;
+    void loadList();
+  }, [user, activeId, loadList]);
+
+  // ----- sync local edits to the server (push only what changed) -----
+  useEffect(() => {
+    for (const g of data.gardens) {
+      const key = JSON.stringify(g);
+      if (lastSentRef.current.get(g.id) === key) continue;
+      lastSentRef.current.set(g.id, key);
+      api.putGarden(g).catch(() => {});
+    }
+    const catKey = JSON.stringify(data.cropCatalog);
+    if (lastSentCatalogRef.current !== catKey) {
+      lastSentCatalogRef.current = catKey;
+      api.putCatalog(data.cropCatalog).catch(() => {});
+    }
   }, [data]);
+
+  const sendLiveMove = useCallback((gId: string, updates: LiveUpdate[]) => {
+    const now = Date.now();
+    if (now - lastMoveRef.current < 60) return;
+    lastMoveRef.current = now;
+    realtime.sendMove(gId, updates);
+  }, []);
 
   const garden = data.gardens.find((g) => g.id === activeId) ?? null;
 
-  const updateGarden = useCallback((id: string, updater: (g: Garden) => Garden) => {
+  const updateGarden = useCallback((gardenId: string, updater: (g: Garden) => Garden) => {
     mutate((d) => ({
       ...d,
-      gardens: d.gardens.map((g) => (g.id === id ? updater(g) : g)),
+      gardens: d.gardens.map((g) => (g.id === gardenId ? updater(g) : g)),
     }));
   }, [mutate]);
 
-  const addGarden = useCallback((name: string) => {
-    const g: Garden = {
-      id: id(),
-      name,
-      createdAt: Date.now(),
-      elements: [],
-      harvests: [],
-      expenses: [],
-    };
-    mutate((d) => ({ ...d, gardens: [...d.gardens, g] }));
-    setActiveId(g.id);
-  }, [mutate]);
+  const addGarden = useCallback(async (name: string) => {
+    try {
+      const g = await api.createGarden(name);
+      lastSentRef.current.set(g.id, JSON.stringify(g));
+      setData((prev) => ({ ...prev, gardens: [...prev.gardens, g] }));
+      setActiveId(g.id);
+    } catch {
+      // keep UI quiet; the list refresh picks up server state
+    }
+  }, []);
 
   const deleteGarden = useCallback((gId: string) => {
+    api.deleteGarden(gId).catch(() => {});
     mutate((d) => ({ ...d, gardens: d.gardens.filter((g) => g.id !== gId) }));
     setActiveId((a) => (a === gId ? null : a));
   }, [mutate]);
+
+  const unshareGarden = useCallback(async (gardenId: string, userId: string) => {
+    try {
+      const g = await api.unshare(gardenId, userId);
+      lastSentRef.current.set(g.id, JSON.stringify(g));
+      setData((prev) => ({
+        ...prev,
+        gardens: prev.gardens.map((x) => (x.id === g.id ? g : x)),
+      }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  /** Replace a garden in the local state after a server-side change. */
+  const onGardenUpdated = useCallback((g: Garden) => {
+    lastSentRef.current.set(g.id, JSON.stringify(g));
+    setData((prev) => ({
+      ...prev,
+      gardens: prev.gardens.map((x) => (x.id === g.id ? g : x)),
+    }));
+  }, []);
+
+  /** Join via invite link, then open the garden and clean the URL. */
+  const handleInviteJoined = useCallback(
+    (g: Garden) => {
+      setInvite(null);
+      window.history.replaceState({}, "", "/");
+      lastSentRef.current.set(g.id, JSON.stringify(g));
+      setData((prev) => {
+        const exists = prev.gardens.some((x) => x.id === g.id);
+        return {
+          ...prev,
+          gardens: exists ? prev.gardens.map((x) => (x.id === g.id ? g : x)) : [...prev.gardens, g],
+        };
+      });
+      setActiveId(g.id);
+    },
+    []
+  );
 
   const addElementAt = useCallback(
     (gId: string, type: "bed" | "path", x: number, y: number, widthM: number, heightM: number) => {
@@ -99,10 +297,6 @@ export default function App() {
     [data.gardens, updateGarden]
   );
 
-  // Add a special garden object (bench, fence, …) as a sibling of beds/paths.
-  // `x`/`y` are the element's top-left corner in canvas px. Objects are named
-  // without a number; the user can rename them in the inspector. A "gaas" is a
-  // line element drawn with the gaas tool and carries its two anchors via `gaas`.
   const addObject = useCallback(
     (
       gId: string,
@@ -137,7 +331,6 @@ export default function App() {
       }
       const def = objectDef(object);
       if (!def) return "";
-      // round objects (poles, tuns) are sized by their radius: a 2×radius footprint
       const size = def.radiusM ? def.radiusM * 2 : def.widthM;
       const el: GardenElement = {
         ...elBase,
@@ -160,7 +353,6 @@ export default function App() {
         elements: g.elements.map((e) => {
           if (e.id !== eId) return e;
           let next: Partial<GardenElement> = { ...patch };
-          // when a bed's size changes, its plants scale proportionally
           if (
             e.type === "bed" &&
             e.crops.length > 0 &&
@@ -200,7 +392,6 @@ export default function App() {
     [updateGarden]
   );
 
-  // Remove several elements in one undoable step (e.g. deleting a selection).
   const removeElements = useCallback(
     (gId: string, ids: string[]) => {
       const set = new Set(ids);
@@ -214,8 +405,6 @@ export default function App() {
     [mutate]
   );
 
-  // Apply a batch of element size/position changes in ONE undoable step, so a
-  // multi-element move or resize collapses to a single undo entry.
   const applyElements = useCallback(
     (
       gId: string,
@@ -454,7 +643,27 @@ export default function App() {
     [updateGarden]
   );
 
-  const catalogByCrop = data.cropCatalog;
+  if (!booted) {
+    return <div className="auth-wrap"><div className="auth-card">Bezig met laden…</div></div>;
+  }
+
+  if (!user) {
+    return <AuthScreen theme={theme} onToggleTheme={toggleTheme} onAuthed={handleAuthed} />;
+  }
+
+  if (invite) {
+    return (
+      <InviteScreen
+        gardenId={invite.gardenId}
+        token={invite.token}
+        onJoined={handleInviteJoined}
+        onCancel={() => {
+          setInvite(null);
+          window.history.replaceState({}, "", "/");
+        }}
+      />
+    );
+  }
 
   if (!garden) {
     if (screen === "plants") {
@@ -474,11 +683,16 @@ export default function App() {
     return (
       <GardenList
         gardens={data.gardens}
+        user={user}
+        userNames={userNames}
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpen={setActiveId}
         onAdd={addGarden}
         onDelete={deleteGarden}
+        onUnshare={unshareGarden}
+        onGardenUpdated={onGardenUpdated}
+        onLogout={logout}
         onPlants={() => setScreen("plants")}
       />
     );
@@ -487,8 +701,9 @@ export default function App() {
   return (
     <GardenEditor
       garden={garden}
-      catalog={catalogByCrop}
+      catalog={data.cropCatalog}
       theme={theme}
+      presence={presence}
       onToggleTheme={toggleTheme}
       onNameChange={(name) => updateGarden(garden.id, (g) => ({ ...g, name }))}
       onBack={() => setActiveId(null)}
@@ -514,6 +729,7 @@ export default function App() {
       onRemoveExpense={(eId) => removeExpense(garden.id, eId)}
       onUndo={undo}
       onRedo={redo}
+      onLiveMove={(updates) => sendLiveMove(garden.id, updates)}
     />
   );
 }

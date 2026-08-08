@@ -115,6 +115,7 @@ interface Props {
 	garden: Garden
 	catalog: Crop[]
 	theme: Theme
+	presence?: number
 	onToggleTheme: () => void
 	onNameChange: (name: string) => void
 	onBack: () => void
@@ -162,6 +163,7 @@ interface Props {
 	onRemoveExpense: (eId: string) => void
 	onUndo: () => void
 	onRedo: () => void
+	onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number }[]) => void
 	onAddCropToCatalog: (crop: Omit<Crop, 'id'>) => void
 	onUpdateCropInCatalog: (cropId: string, patch: Partial<Crop>) => void
 	onRemoveCropFromCatalog: (cropId: string) => void
@@ -172,6 +174,7 @@ export function GardenEditor(props: Props) {
 		garden,
 		catalog,
 		theme,
+		presence,
 		onToggleTheme,
 		onNameChange,
 		onBack,
@@ -195,6 +198,7 @@ export function GardenEditor(props: Props) {
 		onRemoveExpense,
 		onUndo,
 		onRedo,
+		onLiveMove,
 		onUpdateCropInCatalog,
 		onRemoveCropFromCatalog,
 	} = props
@@ -421,6 +425,11 @@ export function GardenEditor(props: Props) {
 						Oogst & Uitgaven
 					</button>
 				</div>
+				{presence !== undefined && presence > 0 && (
+					<span className='ge-presence' title='Aantal personen dat deze tuin nu bewerkt'>
+						<i className='fa-solid fa-users' /> {presence}
+					</span>
+				)}
 				<ThemeToggle theme={theme} onToggle={onToggleTheme} />
 			</header>
 
@@ -447,8 +456,9 @@ export function GardenEditor(props: Props) {
 							onSelectCrop={setSelectedCropId}
 							onBusyChange={onBusyChange}
 							theme={theme}
-							onApplyChanges={(updates) => onApplyElements(updates)}
-							onAddFrame={handleAddFrame}
+						onApplyChanges={(updates) => onApplyElements(updates)}
+						onLiveMove={onLiveMove}
+						onAddFrame={handleAddFrame}
 							onAddObject={onAddObject}
 							onUpdateCrop={(eId, iId, patch) => onUpdateCrop(eId, iId, patch)}
 						/>

@@ -40,6 +40,8 @@ interface Props {
   onSelect: (ids: string[]) => void;
   onSelectCrop: (instanceId: string | null) => void;
   onApplyChanges: (updates: ElementUpdate[]) => void;
+  /** transient drag positions, relayed to other editors (live collaboration) */
+  onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number }[]) => void;
   onAddFrame: (type: "bed" | "path", x: number, y: number, wM: number, hM: number) => string;
   /** adds a garden object as a sibling element, returns its id; "gaas" carries its pin anchors */
   onAddObject: (key: GardenObjectKey, x: number, y: number, gaas?: GaasData) => string;
@@ -398,6 +400,7 @@ export function GpuCanvas({
   onSelect,
   onSelectCrop,
   onApplyChanges,
+  onLiveMove,
   onAddFrame,
   onAddObject,
   objectMenuOpen,
@@ -411,8 +414,8 @@ export function GpuCanvas({
 
   const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog });
   propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog };
-  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
-  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
+  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onLiveMove, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
+  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onLiveMove, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
 
   const [objSearch, setObjSearch] = useState("");
 
@@ -440,6 +443,18 @@ export function GpuCanvas({
   const screenToWorld = (s: Pt, c: Cam): Pt => ({ x: (s.x - c.x) / c.zoom, y: (s.y - c.y) / c.zoom });
 
   const doBusy = (b: boolean) => handlersRef.current.onBusyChange?.(b);
+
+  /** Relay the current draft positions so other editors see the drag live. */
+  const emitLiveMoves = () => {
+    const updates = [...draftRef.current.entries()].map(([id, r]) => ({
+      id,
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+      widthM: Math.round(r.w) / PX_PER_M,
+      heightM: Math.round(r.h) / PX_PER_M,
+    }));
+    if (updates.length > 0) handlersRef.current.onLiveMove?.(updates);
+  };
 
   // ---- gaas (mesh line) helpers ----
   // A gaas spans two pins; a pin either sticks to a pole (whose centre is
@@ -902,6 +917,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         draftRef.current.set(g.id, { x: res.x, y: res.y, w: moved.w, h: moved.h });
       }
       guidesRef.current = { v: res.v, h: res.h };
+      emitLiveMoves();
       return;
     }
     if (g.k === "frame") {
@@ -939,6 +955,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         }
       }
       guidesRef.current = { v: res.v, h: res.h };
+      emitLiveMoves();
       return;
     }
     if (g.k === "groupResize") {
@@ -975,6 +992,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         });
       }
       guidesRef.current = { v: sn.v, h: sn.h };
+      emitLiveMoves();
       return;
     }
     if (g.k === "cropDrag") {

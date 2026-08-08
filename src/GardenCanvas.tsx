@@ -23,6 +23,7 @@ interface Props {
       gaas?: import("./types").GaasData;
     }[]
   ) => void;
+  onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number }[]) => void;
   onAddFrame: (
     type: "bed" | "path",
     x: number,
@@ -53,6 +54,7 @@ export function GardenCanvas({
   onBusyChange,
   theme,
   onApplyChanges,
+  onLiveMove,
   onAddFrame,
   onAddObject,
   objectMenuOpen,
@@ -71,6 +73,7 @@ export function GardenCanvas({
       onSelect={onSelect}
       onSelectCrop={onSelectCrop}
       onApplyChanges={onApplyChanges}
+      onLiveMove={onLiveMove}
       onAddFrame={onAddFrame}
       onAddObject={onAddObject}
       objectMenuOpen={objectMenuOpen}

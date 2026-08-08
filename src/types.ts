@@ -114,6 +114,18 @@ export interface Garden {
   elements: GardenElement[];
   harvests: HarvestEntry[];
   expenses: Expense[];
+  /** user id of the garden's owner; only the owner can share/delete */
+  ownerId: string;
+  /** user ids that may view & edit this garden */
+  sharedWith: string[];
+  /** secret invite token embedded in the share URL; joining requires it */
+  inviteToken: string;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  createdAt: number;
 }
 
 export interface AppData {

@@ -1,8 +1,9 @@
 name: Deploy to GitHub Pages
 
 on:
-  push:
-    branches: [main]
+  # Auto-deploy is disabled: the app now needs a Node.js backend (accounts,
+  # sharing, live updates), which GitHub Pages cannot host. Run this workflow
+  # manually only if you want to publish the frontend to a backend elsewhere.
   workflow_dispatch:
 
 permissions:
