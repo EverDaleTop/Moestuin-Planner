@@ -74,7 +74,7 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
               onChange={(e) => setUsername(e.target.value)}
               autoFocus
               autoComplete="username"
-              placeholder="bijv. robbin"
+              placeholder="je gebruikersnaam"
             />
           </label>
           <label className="auth-field">

@@ -7,9 +7,12 @@ import { AuthService } from "./auth.ts";
 import { createRouter } from "./routes.ts";
 import { WsHub } from "./ws.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const currentDir =
+  typeof __dirname !== "undefined"
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
-const DATA_FILE = process.env.DATA_FILE ?? path.join(__dirname, "data", "db.json");
+const DATA_FILE = process.env.DATA_FILE ?? path.join(currentDir, "..", "data", "db.json");
 
 async function main(): Promise<void> {
   const store = await JsonStore.open(DATA_FILE);
@@ -24,7 +27,7 @@ async function main(): Promise<void> {
   app.use(createRouter(store, auth, ws));
 
   // In production the built frontend lives in dist/ next to the server.
-  const distDir = path.join(__dirname, "..", "dist");
+  const distDir = path.join(currentDir, "..", "dist");
   const indexHtml = path.join(distDir, "index.html");
   app.use(express.static(distDir));
   // SPA fallback (Express 5: use a middleware instead of a "*" route)

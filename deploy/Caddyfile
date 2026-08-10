@@ -1,0 +1,3 @@
+moestuin.discounterfeuerwerk.nl {
+	reverse_proxy localhost:3001
+}
