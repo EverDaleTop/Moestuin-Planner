@@ -105,7 +105,8 @@ type Gesture =
   | { k: "frame"; start: Pt; end: Pt }
   | { k: "ga"; start: Pt; end: Pt }
   | { k: "cropDrag"; eId: string; instanceId: string; sp: Pt; origin: R; bed: R }
-  | { k: "cropResize"; eId: string; instanceId: string; dir: Dir; origin: R; bed: R };
+  | { k: "cropResize"; eId: string; instanceId: string; dir: Dir; origin: R; bed: R }
+  | { k: "pinch"; ids: [number, number]; mid: Pt; startDist: number; cam: Cam };
 
 function rectOf(el: GardenElement): R {
   return { x: el.x, y: el.y, w: el.widthM * PX_PER_M, h: el.heightM * PX_PER_M };
@@ -438,6 +439,7 @@ export function GpuCanvas({
   const mouseRef = useRef<Pt>({ x: 0, y: 0 });
   const spaceRef = useRef(false);
   const gRef = useRef<Gesture>({ k: "none" });
+  const ptrsRef = useRef<Map<number, Pt>>(new Map());
   const hostSize = useRef({ w: 0, h: 0 });
   const wasEmptyClickRef = useRef(false);
 
@@ -748,6 +750,34 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     const p = propsRef.current;
     // clicking the canvas closes the object picker menu
     handlersRef.current.onObjectMenuOpenChange(false);
+
+    // multi-touch bookkeeping: record this pointer; a second finger becomes a
+    // pinch (zoom + pan), overriding whatever single-finger gesture is active.
+    ptrsRef.current.set(e.pointerId, sp);
+    if (ptrsRef.current.size === 2) {
+      const ids = [...ptrsRef.current.keys()] as [number, number];
+      const p1 = ptrsRef.current.get(ids[0])!;
+      const p2 = ptrsRef.current.get(ids[1])!;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      gRef.current = {
+        k: "pinch",
+        ids,
+        mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
+        startDist: Math.max(1, Math.hypot(p2.x - p1.x, p2.y - p1.y)),
+        cam: c,
+      };
+      // discard any in-progress single-finger draft so no ghost lingers
+      draftRef.current.clear();
+      gaasDraftRef.current.clear();
+      cropDraftRef.current.clear();
+      guidesRef.current = { v: [], h: [] };
+      cropGuidesRef.current = { v: [], h: [] };
+      wasEmptyClickRef.current = false;
+      doBusy(true);
+      return;
+    }
+    if (ptrsRef.current.size > 1) return; // ignore extra fingers beyond the pinch
+
     // middle mouse always pans
     if (e.button === 1) {
       wasEmptyClickRef.current = false;
@@ -875,15 +905,37 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       doBusy(true);
       return;
     }
-    // empty space: always a selection box (marquee) in edit mode. A plain click
-    // (no drag) deselects; dragging selects everything it intersects.
-    gRef.current = { k: "marquee", start: sp, end: sp };
+    // empty space: on touch, dragging pans the view (a plain tap deselects);
+    // on mouse it stays a selection box (marquee). A plain click deselects.
+    if (e.pointerType === "touch") {
+      wasEmptyClickRef.current = true;
+      gRef.current = { k: "pan", sx: sp.x, sy: sp.y, ox: c.x, oy: c.y };
+    } else {
+      gRef.current = { k: "marquee", start: sp, end: sp };
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     doBusy(true);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (ptrsRef.current.has(e.pointerId)) {
+      ptrsRef.current.set(e.pointerId, screenToLocal(e));
+    }
     const g = gRef.current;
+    if (g.k === "pinch") {
+      const spL = screenToLocal(e);
+      mouseRef.current = spL;
+      const p1 = ptrsRef.current.get(g.ids[0]);
+      const p2 = ptrsRef.current.get(g.ids[1]);
+      if (p1 && p2) {
+        const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        const dist = Math.max(1, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+        const zoom = Math.max(0.1, Math.min(3, g.cam.zoom * (dist / g.startDist)));
+        const wp = screenToWorld(g.mid, g.cam);
+        camRef.current = { zoom, x: mid.x - wp.x * zoom, y: mid.y - wp.y * zoom };
+      }
+      return;
+    }
     if (g.k === "none") {
       const sp = screenToLocal(e);
       mouseRef.current = sp;
@@ -1078,8 +1130,22 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     }
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (id: number) => {
+    ptrsRef.current.delete(id);
     const g = gRef.current;
+    if (g.k === "pinch") {
+      // one finger still down -> keep panning with it; none -> end
+      if (ptrsRef.current.size === 1) {
+        const [, pos] = [...ptrsRef.current.entries()][0];
+        const c = camRef.current;
+        gRef.current = { k: "pan", sx: pos.x, sy: pos.y, ox: c.x, oy: c.y };
+        wasEmptyClickRef.current = false;
+      } else {
+        gRef.current = { k: "none" };
+        doBusy(false);
+      }
+      return;
+    }
     doBusy(false);
     if (g.k === "drag") {
       const el = propsRef.current.elements.find((e) => e.id === g.id);
@@ -1841,8 +1907,8 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       className="gpu-host"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerUp={(e) => onPointerUp(e.pointerId)}
+      onPointerCancel={(e) => onPointerUp(e.pointerId)}
       onPointerLeave={() => { if (hostRef.current) hostRef.current.style.cursor = "default"; }}
       style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", touchAction: "none" }}
     >

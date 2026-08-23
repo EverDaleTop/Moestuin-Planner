@@ -1888,3 +1888,124 @@ select:focus {
   margin-top: 4px;
   color: var(--muted);
 }
+
+/* ---------- Touch / small-screen layout ---------- */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* On touch devices hover tooltips don't exist; don't let phantom ::after pop in. */
+@media (pointer: coarse) {
+  .ge-tools button[data-tooltip]::after {
+    display: none;
+  }
+  .ge-tools button {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (max-width: 768px) {
+  .ge-wrap {
+    height: 100dvh;
+  }
+
+  /* Header: compact top row + full-width tabs on a second row */
+  .ge-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .ge-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 16px;
+  }
+  .ge-editor-tabs {
+    order: 5;
+    width: 100%;
+    justify-content: space-between;
+    padding: 2px;
+  }
+  .ge-editor-tabs .nav-tab {
+    flex: 1;
+    justify-content: center;
+    font-size: 12px;
+    padding: 8px 4px;
+  }
+  .ge-spacer {
+    display: none;
+  }
+  .ge-presence {
+    display: none;
+  }
+
+  /* Body: canvas fills the whole area, inspector floats as a bottom sheet */
+  .ge-body {
+    position: relative;
+  }
+  .ge-canvas {
+    position: absolute;
+    inset: 0;
+    flex: none;
+  }
+
+  /* Toolbar: floating pill at the top of the canvas, wraps, larger buttons */
+  .ge-bottom-toolbar {
+    top: 10px;
+    bottom: auto;
+    transform: translateX(-50%);
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100% - 16px);
+  }
+  .ge-bottom-toolbar .ge-tools {
+    flex-wrap: nowrap;
+  }
+
+  /* Inspector: draggable-feeling bottom sheet over the canvas */
+  .insp {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 55vh;
+    z-index: 20;
+    border-left: none;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow-lg);
+    padding: 14px 14px 22px;
+  }
+
+  .insp-empty {
+    flex-direction: column;
+    padding: 16px 14px;
+    text-align: center;
+  }
+
+  /* Object picker: keep below the top toolbar */
+  .obj-menu {
+    top: 58px;
+    bottom: auto;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(300px, calc(100% - 16px));
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .ge-bottom-toolbar {
+    gap: 4px;
+    padding: 5px;
+    border-radius: 14px;
+  }
+  .ge-tools {
+    gap: 2px;
+    padding: 2px;
+  }
+}
