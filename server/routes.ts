@@ -109,6 +109,7 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       elements: [],
       harvests: [],
       expenses: [],
+      shopping: [],
       ownerId: me.id,
       sharedWith: [],
       inviteToken: randomToken(),

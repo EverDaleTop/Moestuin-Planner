@@ -15,9 +15,9 @@ export function ThemeToggle({
       aria-label={theme === "dark" ? "Schakel naar lichte modus" : "Schakel naar donkere modus"}
     >
       {theme === "dark" ? (
-        <span aria-hidden>☀️</span>
+        <i className="fa-solid fa-sun" aria-hidden />
       ) : (
-        <span aria-hidden>🌙</span>
+        <i className="fa-solid fa-moon" aria-hidden />
       )}
     </button>
   );

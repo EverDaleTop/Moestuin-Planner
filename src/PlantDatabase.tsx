@@ -93,7 +93,15 @@ export function PlantCatalog({
           className="btn-primary"
           onClick={() => setShowForm((s) => !s)}
         >
-          {showForm ? "Sluiten" : "+ Nieuw gewas"}
+          {showForm ? (
+            <>
+              <i className="fa-solid fa-xmark" /> Sluiten
+            </>
+          ) : (
+            <>
+              <i className="fa-solid fa-plus" /> Nieuw gewas
+            </>
+          )}
         </button>
       </div>
 
@@ -134,7 +142,7 @@ export function PlantCatalog({
             />
           </label>
           <button disabled={!canSave} className="btn-block" onClick={submit}>
-            Opslaan
+            <i className="fa-solid fa-check" /> Opslaan
           </button>
         </section>
       )}
@@ -172,7 +180,7 @@ export function PlantCatalog({
                     </div>
                   </div>
                   <div className="pd-card-actions">
-                    <button onClick={() => setEditingId(c.id)}>Bewerken</button>
+                    <button onClick={() => setEditingId(c.id)}><i className="fa-solid fa-pen" /> Bewerken</button>
                     {confirmId === c.id ? (
                       <>
                         <span className="gl-confirm">Verwijderen?</span>
@@ -193,7 +201,7 @@ export function PlantCatalog({
                         onClick={() => setConfirmId(c.id)}
                         title="Gewas verwijderen"
                       >
-                        🗑
+                        <i className="fa-solid fa-trash" />
                       </button>
                     )}
                   </div>
@@ -209,7 +217,6 @@ export function PlantCatalog({
 
 export function PlantDatabase({
   catalog,
-  gardenCount,
   theme,
   onToggleTheme,
   onBack,
@@ -218,7 +225,6 @@ export function PlantDatabase({
   onDelete,
 }: {
   catalog: Crop[];
-  gardenCount: number;
   theme: Theme;
   onToggleTheme: () => void;
   onBack: () => void;
@@ -229,23 +235,18 @@ export function PlantDatabase({
   return (
     <div className="gl-wrap">
       <header className="gl-header">
-        <div className="gl-header-top">
-          <div>
-            <button className="btn-ghost pd-back" onClick={onBack}>
-              ← Tuinen
-            </button>
-            <h1>🌱 Gewassen</h1>
-            <p>
-              Gedeelde plantendatabase · beschikbaar in al je{" "}
-              <strong>{gardenCount}</strong> tuin{gardenCount === 1 ? "" : "en"}.
-            </p>
-          </div>
+        <div className="gl-brand">
+          <span className="gl-mark">
+            <i className="fa-solid fa-seedling" />
+          </span>
+          <h1>Gewassen</h1>
+        </div>
+        <div className="gl-account">
+          <button className="btn-ghost" onClick={onBack}>
+            <i className="fa-solid fa-arrow-left" /> Tuinen
+          </button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
-        <nav className="gl-nav">
-          <button className="nav-tab" onClick={onBack}>Tuinen</button>
-          <button className="nav-tab nav-active" disabled>Gewassen</button>
-        </nav>
       </header>
 
       <PlantCatalog
@@ -298,9 +299,9 @@ function EditRow({
           disabled={!name.trim()}
           onClick={() => onSave({ name: name.trim(), color, rowSpacing: row, plantSpacing: plant, sowWindow: sow.trim() || undefined, icon })}
         >
-          Opslaan
+          <i className="fa-solid fa-check" /> Opslaan
         </button>
-        <button onClick={onCancel}>Annuleren</button>
+        <button onClick={onCancel}><i className="fa-solid fa-xmark" /> Annuleren</button>
       </div>
     </div>
   );

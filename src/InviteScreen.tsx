@@ -45,7 +45,7 @@ export function InviteScreen({ gardenId, token, onJoined, onCancel }: Props) {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <h1>🥕 Uitnodiging</h1>
+        <h1><i className="fa-solid fa-carrot" style={{ color: "var(--accent)" }} /> Uitnodiging</h1>
         {error ? (
           <>
             <p className="auth-sub">{error}</p>

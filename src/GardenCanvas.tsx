@@ -43,6 +43,8 @@ interface Props {
   objectMenuOpen: boolean;
   onObjectMenuOpenChange: (open: boolean) => void;
   onUpdateCrop: (eId: string, instanceId: string, patch: Partial<CropAssignment>) => void;
+  /** magnetisch uitlijnen aan/uit */
+  snap: boolean;
 }
 
 export function GardenCanvas({
@@ -65,6 +67,7 @@ export function GardenCanvas({
   objectMenuOpen,
   onObjectMenuOpenChange,
   onUpdateCrop,
+  snap,
 }: Props) {
   return (
     <GpuCanvas
@@ -87,6 +90,7 @@ export function GardenCanvas({
       onObjectMenuOpenChange={onObjectMenuOpenChange}
       onUpdateCrop={onUpdateCrop}
       onBusyChange={onBusyChange}
+      snap={snap}
     />
   );
 }

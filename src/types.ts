@@ -107,6 +107,20 @@ export interface Expense {
   date: string;
 }
 
+export interface ShoppingItem {
+  id: string;
+  title: string;
+  /** optionele productlink (webshop) */
+  url?: string;
+  /** aantal, bv. "2x" of "3 zakken" */
+  quantity?: string;
+  /** richtprijs per stuk / totaal */
+  price?: number;
+  note?: string;
+  done: boolean;
+  createdAt: number;
+}
+
 export interface Garden {
   id: string;
   name: string;
@@ -114,6 +128,7 @@ export interface Garden {
   elements: GardenElement[];
   harvests: HarvestEntry[];
   expenses: Expense[];
+  shopping: ShoppingItem[];
   /** user id of the garden's owner; only the owner can share/delete */
   ownerId: string;
   /** user ids that may view & edit this garden */

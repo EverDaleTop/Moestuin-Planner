@@ -6,6 +6,8 @@ import { objectDef } from "./gardenObjects";
 
 interface Props {
   element: GardenElement | null;
+  /** alle elementen in de tuin, voor het overzicht in de sidebar */
+  elements: GardenElement[];
   catalog: Crop[];
   /** planted crop currently selected on the canvas (only when a bed holds it) */
   crop: CropAssignment | null;
@@ -13,6 +15,7 @@ interface Props {
   cropInfo: Crop | null;
   onUpdate: (patch: Partial<GardenElement>) => void;
   onRemove: () => void;
+  onSelectElement: (id: string) => void;
   onAddCrop: (cropId: string) => void;
   onUpdateCrop: (
     iId: string,
@@ -21,6 +24,64 @@ interface Props {
   onRemoveCrop: (iId: string) => void;
   onDuplicateCrop: (iId: string) => void;
   onDeselectCrop: () => void;
+}
+
+/** Soortnaam voor in de sidebar-lijst. */
+function elementKindName(el: GardenElement): string {
+  if (el.type === "bed") return "Bed";
+  if (el.type === "path") return "Pad";
+  if (el.object === "gaas") return "Gaas";
+  return objectDef(el.object)?.name ?? "Voorwerp";
+}
+
+/** FontAwesome-icoon voor in de sidebar-lijst. */
+function elementIconClass(el: GardenElement): string {
+  if (el.type === "bed") return "fa-solid fa-table-cells-large";
+  if (el.type === "path") return "fa-solid fa-road";
+  if (el.object === "gaas") return "fa-solid fa-table-cells";
+  return objectDef(el.object)?.icon ?? "fa-solid fa-cube";
+}
+
+/** Compacte klikbare lijst van alle elementen in de tuin. */
+function ElementList({
+  elements,
+  activeId,
+  onSelect,
+}: {
+  elements: GardenElement[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  if (elements.length === 0) {
+    return <p className="insp-hint">Nog geen elementen. Teken hierboven een bed of pad.</p>;
+  }
+  return (
+    <div className="insp-list" role="listbox" aria-label="Alle elementen">
+      {elements.map((el) => (
+        <button
+          key={el.id}
+          type="button"
+          role="option"
+          aria-selected={el.id === activeId}
+          className={el.id === activeId ? "insp-row insp-row-active" : "insp-row"}
+          onClick={() => onSelect(el.id)}
+          title={`${el.label || elementKindName(el)} selecteren`}
+        >
+          <span className="insp-row-icon" style={{ background: `${el.color}1f`, color: el.color }}>
+            <i className={elementIconClass(el)} />
+          </span>
+          <span className="insp-row-main">
+            <span className="insp-row-title">{el.label || elementKindName(el)}</span>
+            <span className="insp-row-meta">
+              {elementKindName(el)}
+              {el.type === "bed" && el.crops.length > 0 && ` · ${el.crops.length} ${el.crops.length === 1 ? "gewas" : "gewassen"}`}
+            </span>
+          </span>
+          <i className="fa-solid fa-chevron-right insp-row-chevron" />
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function NumField({
@@ -86,7 +147,7 @@ function CropRow({
           title="Gewas uit dit bed verwijderen"
           onClick={() => onRemoveCrop(a.instanceId)}
         >
-          ✕
+          <i className="fa-solid fa-xmark" />
         </button>
       </div>
       <div className="crop-row-main">
@@ -157,11 +218,13 @@ function CropRow({
 
 export function Inspector({
   element,
+  elements,
   catalog,
   crop,
   cropInfo,
   onUpdate,
   onRemove,
+  onSelectElement,
   onAddCrop,
   onUpdateCrop,
   onRemoveCrop,
@@ -178,12 +241,14 @@ export function Inspector({
 
   if (!element) {
     return (
-      <aside className="insp insp-empty">
-        <h3>Niks geselecteerd</h3>
-        <p>
-          Klik op een bed, pad of voorwerp op de tekening om het te bewerken, of
-          voeg er hierboven een toe.
-        </p>
+      <aside className="insp">
+        <h4 className="insp-list-title">Elementen ({elements.length})</h4>
+        <ElementList elements={elements} activeId={null} onSelect={onSelectElement} />
+        {elements.length > 0 && (
+          <p className="insp-hint insp-list-hint">
+            Klik een element aan om het te bewerken.
+          </p>
+        )}
       </aside>
     );
   }
@@ -207,7 +272,7 @@ export function Inspector({
             className="btn-ghost insp-crop-back"
             onClick={onDeselectCrop}
           >
-            ← Terug
+            <i className="fa-solid fa-arrow-left" /> Terug
           </button>
           <div className="insp-crop-title">
             <i
@@ -237,7 +302,7 @@ export function Inspector({
             className="btn-ghost btn-block"
             onClick={() => onDuplicateCrop(crop.instanceId)}
           >
-            Dupliceren
+            <i className="fa-solid fa-copy" /> Dupliceren
           </button>
           <button
             type="button"
@@ -247,7 +312,7 @@ export function Inspector({
               onDeselectCrop();
             }}
           >
-            Gewas verwijderen
+            <i className="fa-solid fa-trash" /> Gewas verwijderen
           </button>
         </div>
       </aside>
@@ -369,7 +434,7 @@ export function Inspector({
             className="crops-open"
             onClick={() => setCropsOpen(true)}
           >
-            <span>Gewassen beheren</span>
+            <span><i className="fa-solid fa-seedling" /> Gewassen beheren</span>
             <span className="crops-open-count">{element.crops.length}</span>
           </button>
         </section>
@@ -388,12 +453,18 @@ export function Inspector({
       )}
 
       <button className="btn-danger btn-block" onClick={onRemove}>
+        <i className="fa-solid fa-trash" />{" "}
         {element.type === "bed"
           ? "Bed verwijderen"
           : element.type === "object"
             ? `${elementKind} verwijderen`
             : "Pad verwijderen"}
       </button>
+
+      <section className="insp-all">
+        <h4>Alle elementen ({elements.length})</h4>
+        <ElementList elements={elements} activeId={element.id} onSelect={onSelectElement} />
+      </section>
     </aside>
   );
 }
@@ -421,15 +492,16 @@ function Nudge({
         <button
           type="button"
           onClick={() => onChange(Math.max(min, round(value - step)))}
+          aria-label="Verlagen"
         >
-          −
+          <i className="fa-solid fa-minus" />
         </button>
         <span className="nudge-value">
           {value}
           {suffix}
         </span>
-        <button type="button" onClick={() => onChange(round(value + step))}>
-          +
+        <button type="button" onClick={() => onChange(round(value + step))} aria-label="Verhogen">
+          <i className="fa-solid fa-plus" />
         </button>
       </div>
     </label>
@@ -487,7 +559,7 @@ function CropsModal({
             onClick={onClose}
             aria-label="Sluiten"
           >
-            ✕
+            <i className="fa-solid fa-xmark" />
           </button>
         </header>
 
@@ -537,7 +609,7 @@ function CropsModal({
                       {n}×
                     </span>
                   )}
-                  <span className="crops-add-plus">+</span>
+                  <span className="crops-add-plus"><i className="fa-solid fa-plus" /></span>
                 </button>
               );
             })}

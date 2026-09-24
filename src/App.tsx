@@ -1,11 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, GardenObjectKey, GaasData, User } from "./types";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
 import { id } from "./storage";
 import { api, getToken, setToken, onUnauthorized, type MeResponse } from "./api";
 import { realtime, type LiveUpdate, type PreviewPayload } from "./realtime";
 import { GardenList } from "./GardenList";
 import { GardenEditor } from "./GardenEditor";
-import { PlantDatabase } from "./PlantDatabase";
 import { AuthScreen } from "./AuthScreen";
 import { InviteScreen } from "./InviteScreen";
 import { useTheme } from "./useTheme";
@@ -28,7 +27,6 @@ export default function App() {
   const [data, setData] = useState<AppData>({ gardens: [], cropCatalog: [] });
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [screen, setScreen] = useState<"gardens" | "plants">("gardens");
   const [presence, setPresence] = useState(0);
   const [livePreview, setLivePreview] = useState<{ gardenId: string; preview: PreviewPayload } | null>(null);
   const [invite, setInvite] = useState<InviteTarget | null>(() => parseInvite());
@@ -77,10 +75,11 @@ export default function App() {
     try {
       const res: MeResponse = await api.me();
       setUserNames(res.userNames);
-      setData({ gardens: res.gardens, cropCatalog: res.cropCatalog });
+      const gardens = res.gardens.map((g) => ({ ...g, shopping: (g as Garden).shopping ?? [] }));
+      setData({ gardens, cropCatalog: res.cropCatalog });
       lastSentCatalogRef.current = JSON.stringify(res.cropCatalog);
       const map = new Map<string, string>();
-      for (const g of res.gardens) map.set(g.id, JSON.stringify(g));
+      for (const g of gardens) map.set(g.id, JSON.stringify(g));
       lastSentRef.current = map;
     } catch {
       // token was cleared by the api layer
@@ -102,10 +101,11 @@ export default function App() {
       .then((res) => {
         setUser(res.user);
         setUserNames(res.userNames);
-        setData({ gardens: res.gardens, cropCatalog: res.cropCatalog });
+        const gardens = res.gardens.map((g) => ({ ...g, shopping: (g as Garden).shopping ?? [] }));
+        setData({ gardens, cropCatalog: res.cropCatalog });
         lastSentCatalogRef.current = JSON.stringify(res.cropCatalog);
         const map = new Map<string, string>();
-        for (const g of res.gardens) map.set(g.id, JSON.stringify(g));
+        for (const g of gardens) map.set(g.id, JSON.stringify(g));
         lastSentRef.current = map;
       })
       .catch(() => setUser(null))
@@ -134,15 +134,16 @@ export default function App() {
     realtime.connect();
     const off = realtime.onMessage((msg) => {
       if (msg.type === "garden") {
-        lastSentRef.current.set(msg.garden.id, JSON.stringify(msg.garden));
-        setLivePreview((cur) => (cur?.gardenId === msg.garden.id ? null : cur));
+        const incoming = { ...msg.garden, shopping: (msg.garden as Garden).shopping ?? [] };
+        lastSentRef.current.set(incoming.id, JSON.stringify(incoming));
+        setLivePreview((cur) => (cur?.gardenId === incoming.id ? null : cur));
         setData((prev) => {
-          const exists = prev.gardens.some((g) => g.id === msg.garden.id);
+          const exists = prev.gardens.some((g) => g.id === incoming.id);
           return {
             ...prev,
             gardens: exists
-              ? prev.gardens.map((g) => (g.id === msg.garden.id ? msg.garden : g))
-              : [...prev.gardens, msg.garden],
+              ? prev.gardens.map((g) => (g.id === incoming.id ? incoming : g))
+              : [...prev.gardens, incoming],
           };
         });
       } else if (msg.type === "move") {
@@ -659,6 +660,34 @@ export default function App() {
     [updateGarden]
   );
 
+  const addShopping = useCallback(
+    (gId: string, entry: Omit<ShoppingItem, "id" | "createdAt" | "done">) => {
+      const full: ShoppingItem = { ...entry, id: id(), createdAt: Date.now(), done: false };
+      updateGarden(gId, (g) => ({ ...g, shopping: [...(g.shopping ?? []), full] }));
+    },
+    [updateGarden]
+  );
+
+  const updateShopping = useCallback(
+    (gId: string, itemId: string, patch: Partial<ShoppingItem>) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        shopping: (g.shopping ?? []).map((s) => (s.id === itemId ? { ...s, ...patch } : s)),
+      }));
+    },
+    [updateGarden]
+  );
+
+  const removeShopping = useCallback(
+    (gId: string, itemId: string) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        shopping: (g.shopping ?? []).filter((s) => s.id !== itemId),
+      }));
+    },
+    [updateGarden]
+  );
+
   if (!booted) {
     return <div className="auth-wrap"><div className="auth-card">Bezig met laden…</div></div>;
   }
@@ -682,20 +711,6 @@ export default function App() {
   }
 
   if (!garden) {
-    if (screen === "plants") {
-      return (
-        <PlantDatabase
-          catalog={data.cropCatalog}
-          gardenCount={data.gardens.length}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          onBack={() => setScreen("gardens")}
-          onAdd={addCropToCatalog}
-          onUpdate={updateCropInCatalog}
-          onDelete={removeCropFromCatalog}
-        />
-      );
-    }
     return (
       <GardenList
         gardens={data.gardens}
@@ -709,7 +724,6 @@ export default function App() {
         onUnshare={unshareGarden}
         onGardenUpdated={onGardenUpdated}
         onLogout={logout}
-        onPlants={() => setScreen("plants")}
       />
     );
   }
@@ -743,6 +757,9 @@ export default function App() {
       onAddExpense={(entry) => addExpense(garden.id, entry)}
       onUpdateExpense={(eId, patch) => updateExpense(garden.id, eId, patch)}
       onRemoveExpense={(eId) => removeExpense(garden.id, eId)}
+      onAddShopping={(entry) => addShopping(garden.id, entry)}
+      onUpdateShopping={(itemId, patch) => updateShopping(garden.id, itemId, patch)}
+      onRemoveShopping={(itemId) => removeShopping(garden.id, itemId)}
       onUndo={undo}
       onRedo={redo}
       onLiveMove={(updates) => sendLiveMove(garden.id, updates)}

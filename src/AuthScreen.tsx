@@ -40,7 +40,7 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </header>
       <div className="auth-card">
-        <h1>🥕 Moestuin Planner</h1>
+        <h1><i className="fa-solid fa-carrot" style={{ color: "var(--accent)" }} /> Moestuin Planner</h1>
         <p className="auth-sub">
           Maak een account aan om je tuinen op te slaan en te delen met anderen.
         </p>

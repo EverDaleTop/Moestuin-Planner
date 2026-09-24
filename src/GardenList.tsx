@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Garden, User } from "./types";
 import type { Theme } from "./useTheme";
 import { ThemeToggle } from "./ThemeToggle";
@@ -16,7 +16,6 @@ interface Props {
   onUnshare: (gardenId: string, userId: string) => Promise<void>;
   onGardenUpdated: (garden: Garden) => void;
   onLogout: () => void;
-  onPlants: () => void;
 }
 
 export function GardenList({
@@ -31,9 +30,9 @@ export function GardenList({
   onUnshare,
   onGardenUpdated,
   onLogout,
-  onPlants,
 }: Props) {
   const [name, setName] = useState("");
+  const [query, setQuery] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [shareFor, setShareFor] = useState<Garden | null>(null);
   const [copied, setCopied] = useState(false);
@@ -93,25 +92,38 @@ export function GardenList({
 
   const isOwner = (g: Garden) => g.ownerId === user.id;
 
+  const visible = useMemo(() => {
+    const s = query.trim().toLowerCase();
+    if (!s) return gardens;
+    return gardens.filter((g) => g.name.toLowerCase().includes(s));
+  }, [gardens, query]);
+
+  const myGardens = useMemo(
+    () => visible.filter((g) => isOwner(g)).sort((a, b) => b.createdAt - a.createdAt),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, user.id]
+  );
+  const sharedGardens = useMemo(
+    () => visible.filter((g) => !isOwner(g)).sort((a, b) => b.createdAt - a.createdAt),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, user.id]
+  );
+
   return (
     <div className="gl-wrap">
       <header className="gl-header">
-        <div className="gl-header-top">
-          <div>
-            <h1>🥕 Moestuin Planner</h1>
-            <p>Plan je moestuinen, bedden en paden in meters.</p>
-          </div>
-          <div className="gl-account">
-            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-            <button className="btn-ghost" onClick={onLogout} title="Uitloggen">
-              {user.username} <i className="fa-solid fa-right-from-bracket" />
-            </button>
-          </div>
+        <div className="gl-brand">
+          <span className="gl-mark">
+            <i className="fa-solid fa-carrot" />
+          </span>
+          <h1>Moestuin Planner</h1>
         </div>
-        <nav className="gl-nav">
-          <button className="nav-tab nav-active" disabled>Tuinen</button>
-          <button className="nav-tab" onClick={onPlants}>Gewassen</button>
-        </nav>
+        <div className="gl-account">
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+          <button className="btn-ghost" onClick={onLogout} title="Uitloggen">
+            {user.username} <i className="fa-solid fa-right-from-bracket" />
+          </button>
+        </div>
       </header>
 
       <section className="gl-new">
@@ -122,102 +134,96 @@ export function GardenList({
           placeholder="Naam van de nieuwe tuin…"
           aria-label="Tuinnaam"
         />
-        <button onClick={submit} disabled={!name.trim()}>
-          Tuin toevoegen
+        <button className="btn-primary" onClick={submit} disabled={!name.trim()}>
+          <i className="fa-solid fa-plus" /> Toevoegen
         </button>
       </section>
 
-      <section className="gl-list">
-        {gardens.length === 0 && (
-          <p className="gl-empty">
-            Nog geen tuinen. Voeg je eerste tuin toe om te beginnen, of vraag iemand
-            om je een uitnodigingslink te sturen.
-          </p>
-        )}
-        {gardens.map((g) => (
-          <div key={g.id} className="gl-card" onClick={() => onOpen(g.id)}>
-            <div className="gl-card-main">
-              <div className="gl-card-title">{g.name}</div>
-              <div className="gl-card-meta">
-                {g.elements.filter((e) => e.type === "bed").length} bedden ·{" "}
-                {g.elements.filter((e) => e.type === "path").length} paden ·{" "}
-                {new Date(g.createdAt).toLocaleDateString("nl-NL")}
-                <br />
-                {isOwner(g) ? (
-                  g.sharedWith.length > 0 ? (
-                    <span>
-                      Gedeeld met{" "}
-                      {g.sharedWith
-                        .map((uid) => userNames[uid] ?? "?")
-                        .join(", ")}
-                    </span>
-                  ) : (
-                    <span>Nog niet gedeeld</span>
-                  )
-                ) : (
-                  <span>Van {userNames[g.ownerId] ?? "iemand"}</span>
-                )}
-              </div>
-            </div>
-            <div className="gl-card-actions">
-              {isOwner(g) && (
-                <button
-                  className="btn-share"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openShare(g);
-                  }}
-                  title="Tuin delen"
-                >
-                  <i className="fa-solid fa-user-plus" />
-                </button>
-              )}
-              {confirmId === g.id ? (
-                <>
-                  <span className="gl-confirm">Verwijderen?</span>
-                  <button
-                    className="btn-danger"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(g.id);
-                      setConfirmId(null);
-                    }}
-                  >
-                    Ja
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirmId(null);
-                    }}
-                  >
-                    Nee
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="btn-danger"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmId(g.id);
-                  }}
-                  title="Tuin verwijderen"
-                >
-                  🗑
-                </button>
-              )}
-            </div>
+      {gardens.length > 0 && (
+        <div className="gl-search">
+          <i className="fa-solid fa-magnifying-glass" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Zoek een tuin…"
+            aria-label="Zoek een tuin"
+          />
+          {query && (
+            <button
+              className="gl-search-clear"
+              onClick={() => setQuery("")}
+              aria-label="Zoekopdracht wissen"
+            >
+              <i className="fa-solid fa-xmark" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {gardens.length === 0 ? (
+        <p className="gl-empty">
+          Nog geen tuinen. Voeg hierboven je eerste tuin toe, of vraag iemand om
+          je een uitnodigingslink te sturen.
+        </p>
+      ) : (
+        visible.length === 0 && (
+          <p className="gl-empty">Geen tuinen gevonden voor “{query.trim()}”.</p>
+        )
+      )}
+
+      {myGardens.length > 0 && (
+        <section>
+          <h2 className="gl-section">
+            Mijn tuinen <span className="gl-section-count">{myGardens.length}</span>
+          </h2>
+          <div className="gl-group">
+            {myGardens.map((g) => (
+              <GardenRow
+                key={g.id}
+                garden={g}
+                userNames={userNames}
+                owner
+                confirmId={confirmId}
+                setConfirmId={setConfirmId}
+                onOpen={onOpen}
+                onDelete={onDelete}
+                onShare={openShare}
+              />
+            ))}
           </div>
-        ))}
-      </section>
+        </section>
+      )}
+
+      {sharedGardens.length > 0 && (
+        <section>
+          <h2 className="gl-section">
+            Gedeeld met mij <span className="gl-section-count">{sharedGardens.length}</span>
+          </h2>
+          <div className="gl-group">
+            {sharedGardens.map((g) => (
+              <GardenRow
+                key={g.id}
+                garden={g}
+                userNames={userNames}
+                owner={false}
+                confirmId={confirmId}
+                setConfirmId={setConfirmId}
+                onOpen={onOpen}
+                onDelete={onDelete}
+                onShare={openShare}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {shareFor && (
         <div className="share-overlay" onClick={() => setShareFor(null)}>
           <div className="share-modal" onClick={(e) => e.stopPropagation()}>
             <div className="share-head">
               <h3>Deel tuin</h3>
-              <button className="crops-close" onClick={() => setShareFor(null)}>
-                ×
+              <button className="crops-close" onClick={() => setShareFor(null)} aria-label="Sluiten">
+                <i className="fa-solid fa-xmark" />
               </button>
             </div>
             <p className="share-sub">
@@ -264,6 +270,108 @@ export function GardenList({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function GardenRow({
+  garden: g,
+  userNames,
+  owner,
+  confirmId,
+  setConfirmId,
+  onOpen,
+  onDelete,
+  onShare,
+}: {
+  garden: Garden;
+  userNames: Record<string, string>;
+  owner: boolean;
+  confirmId: string | null;
+  setConfirmId: (id: string | null) => void;
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+  onShare: (g: Garden) => void;
+}) {
+  const beds = g.elements.filter((e) => e.type === "bed").length;
+  const paths = g.elements.filter((e) => e.type === "path").length;
+
+  return (
+    <div className="gl-row" onClick={() => onOpen(g.id)}>
+      <div className="gl-row-main">
+        <div className="gl-row-title">{g.name}</div>
+        <div className="gl-row-meta">
+          {beds} {beds === 1 ? "bed" : "bedden"} · {paths}{" "}
+          {paths === 1 ? "pad" : "paden"} ·{" "}
+          {new Date(g.createdAt).toLocaleDateString("nl-NL")}
+          {" · "}
+          {owner ? (
+            g.sharedWith.length > 0 ? (
+              <span>
+                Gedeeld met {g.sharedWith.map((uid) => userNames[uid] ?? "?").join(", ")}
+              </span>
+            ) : (
+              <span>Niet gedeeld</span>
+            )
+          ) : (
+            <span>Van {userNames[g.ownerId] ?? "iemand"}</span>
+          )}
+        </div>
+      </div>
+      <div className="gl-row-actions">
+        {owner && (
+          <button
+            className="gl-icon-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onShare(g);
+            }}
+            title="Tuin delen"
+          >
+            <i className="fa-solid fa-user-plus" />
+          </button>
+        )}
+        {confirmId === g.id ? (
+          <>
+            <span className="gl-confirm">Verwijderen?</span>
+            <button
+              className="gl-icon-btn gl-icon-btn-danger"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(g.id);
+                setConfirmId(null);
+              }}
+              title="Ja, verwijderen"
+            >
+              <i className="fa-solid fa-check" />
+            </button>
+            <button
+              className="gl-icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmId(null);
+              }}
+              title="Annuleren"
+            >
+              <i className="fa-solid fa-xmark" />
+            </button>
+          </>
+        ) : (
+          owner && (
+            <button
+              className="gl-icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmId(g.id);
+              }}
+              title="Tuin verwijderen"
+            >
+              <i className="fa-solid fa-trash" />
+            </button>
+          )
+        )}
+        <i className="fa-solid fa-chevron-right gl-row-chevron" />
+      </div>
     </div>
   );
 }

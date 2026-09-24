@@ -4,7 +4,6 @@ import {
 	useMemo,
 	useRef,
 	useState,
-	type ReactNode,
 } from 'react'
 import type {
 	Crop,
@@ -14,103 +13,32 @@ import type {
 	GardenObjectKey,
 	HarvestEntry,
 	Expense,
+	ShoppingItem,
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
 import type { PreviewPayload } from './realtime'
 import { Inspector } from './Inspector'
 import { HarvestExpenseView } from './HarvestExpenseView'
+import { ShoppingListView } from './ShoppingListView'
 import { PlantCatalog } from './PlantDatabase'
 import type { Theme } from './useTheme'
 import { ThemeToggle } from './ThemeToggle'
 
-const icon = (paths: ReactNode) => (
-	<svg
-		width='18'
-		height='18'
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='1.8'
-		strokeLinecap='round'
-		strokeLinejoin='round'
-		aria-hidden='true'>
-		{paths}
-	</svg>
+const FaIcon = ({ cls }: { cls: string }) => (
+	<i className={cls} style={{ fontSize: 16 }} aria-hidden='true' />
 )
 
-const IconSelect = () => icon(<path d='M5 3l14 8-6 1.5L10 18l-2-8z' />)
-const IconMove = () =>
-	icon(
-		<g>
-			<path d='M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3 3M3 12l3-3M21 12l-3 3M21 12l-3-3' />
-		</g>,
-	)
-const IconFrame = () =>
-	icon(<rect x='4' y='4' width='16' height='16' rx='2' />)
-const IconBed = () =>
-	icon(
-		<g>
-			<path d='M4 18V9h16v9' />
-			<path d='M4 13h16' />
-			<circle cx='7' cy='11' r='1.2' />
-			<circle cx='10' cy='11' r='1.2' />
-		</g>,
-	)
-const IconPath = () =>
-	icon(
-		<g>
-			<circle cx='19' cy='5' r='1.4' />
-			<circle cx='12' cy='12' r='1.4' />
-			<circle cx='5' cy='19' r='1.4' />
-			<path d='M18 5l-12 12' />
-		</g>,
-	)
-const IconGaas = () =>
-	icon(
-		<g>
-			<circle cx='19' cy='6' r='1.5' />
-			<circle cx='5' cy='18' r='1.5' />
-			<path d='M17.5 7.2L6.5 16.8' strokeDasharray='3 2.4' />
-		</g>,
-	)
-const IconTrash = () =>
-	icon(
-		<g>
-			<path d='M4 7h16' />
-			<path d='M9 7V4h6v3' />
-			<path d='M6 7l1 13h10l1-13' />
-			<path d='M10 11v5M14 11v5' />
-		</g>,
-	)
-const IconCopy = () =>
-	icon(
-		<g>
-			<rect x='8' y='8' width='11' height='11' rx='2' />
-			<path d='M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3' />
-		</g>,
-	)
-const IconUndo = () =>
-	icon(
-		<g>
-			<path d='M9 7L4 12l5 5' />
-			<path d='M4 12h11a5 5 0 0 1 0 10' />
-		</g>,
-	)
-const IconRedo = () =>
-	icon(
-		<g>
-			<path d='M15 7l5 5-5 5' />
-			<path d='M20 12H9a5 5 0 0 0 0 10' />
-		</g>,
-	)
-const IconObject = () =>
-	icon(
-		<g>
-			<path d='M5 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2' />
-			<path d='M3 12v-2a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2' />
-			<path d='M5 12v6M19 12v6' />
-		</g>,
-	)
+const IconSelect = () => <FaIcon cls='fa-solid fa-arrow-pointer' />
+const IconMove = () => <FaIcon cls='fa-solid fa-arrows-up-down-left-right' />
+const IconFrame = () => <FaIcon cls='fa-solid fa-draw-polygon' />
+const IconBed = () => <FaIcon cls='fa-solid fa-table-cells-large' />
+const IconPath = () => <FaIcon cls='fa-solid fa-road' />
+const IconGaas = () => <FaIcon cls='fa-solid fa-table-cells' />
+const IconTrash = () => <FaIcon cls='fa-solid fa-trash' />
+const IconCopy = () => <FaIcon cls='fa-solid fa-copy' />
+const IconUndo = () => <FaIcon cls='fa-solid fa-rotate-left' />
+const IconRedo = () => <FaIcon cls='fa-solid fa-rotate-right' />
+const IconObject = () => <FaIcon cls='fa-solid fa-shapes' />
 
 interface Props {
 	garden: Garden
@@ -162,6 +90,9 @@ interface Props {
 	onAddExpense: (entry: Omit<Expense, 'id'>) => void
 	onUpdateExpense: (eId: string, patch: Partial<Expense>) => void
 	onRemoveExpense: (eId: string) => void
+	onAddShopping: (entry: Omit<ShoppingItem, 'id' | 'createdAt' | 'done'>) => void
+	onUpdateShopping: (itemId: string, patch: Partial<ShoppingItem>) => void
+	onRemoveShopping: (itemId: string) => void
 	onUndo: () => void
 	onRedo: () => void
 	onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: { instanceId: string; cropId: string; rows: number; rowSpacing?: number; plantSpacing?: number; cols?: number; padding?: number; area?: { x: number; y: number; w: number; h: number } }[] }[]) => void
@@ -199,6 +130,9 @@ export function GardenEditor(props: Props) {
 		onAddExpense,
 		onUpdateExpense,
 		onRemoveExpense,
+		onAddShopping,
+		onUpdateShopping,
+		onRemoveShopping,
 		onUndo,
 		onRedo,
 		onLiveMove,
@@ -208,7 +142,7 @@ export function GardenEditor(props: Props) {
 		onRemoveCropFromCatalog,
 	} = props
 
-	const [editorTab, setEditorTab] = useState<'canvas' | 'gewassen' | 'oogst'>(
+	const [editorTab, setEditorTab] = useState<'canvas' | 'gewassen' | 'oogst' | 'boodschappen'>(
 		'canvas',
 	)
 
@@ -222,6 +156,25 @@ export function GardenEditor(props: Props) {
 	const [tool, setTool] = useState<EditorTool>('select')
 	const [frameType, setFrameType] = useState<'bed' | 'path'>('bed')
 	const [objectMenu, setObjectMenu] = useState(false)
+	const [snap, setSnap] = useState(() => {
+		try {
+			return localStorage.getItem('mp_snap') !== '0'
+		} catch {
+			return true
+		}
+	})
+
+	const toggleSnap = useCallback(() => {
+		setSnap((s) => {
+			const next = !s
+			try {
+				localStorage.setItem('mp_snap', next ? '1' : '0')
+			} catch {
+				// privaatmodus o.i.d.: gewoon niet onthouden
+			}
+			return next
+		})
+	}, [])
 
 	// If a child plant is selected, remember which bed holds it so delete /
 	// duplicate can act on the child instead of the whole bed.
@@ -313,7 +266,8 @@ export function GardenEditor(props: Props) {
 		return () => window.removeEventListener('keydown', onKey)
 	}, [selectedIds, cropContext])
 
-	// Tool shortcuts: V = edit/select, R = draw. Finished drawing returns to edit.
+	// Tool shortcuts: V = edit/select, R = draw, S = snap aan/uit.
+	// Escape always drops back to select (and closes the object menu).
 	useEffect(() => {
 		const isEditable = (t: EventTarget | null) => {
 			const el = t as HTMLElement | null
@@ -327,6 +281,11 @@ export function GardenEditor(props: Props) {
 		}
 		const onKey = (e: KeyboardEvent) => {
 			if (isEditable(e.target)) return
+			if (e.key === 'Escape') {
+				setObjectMenu(false)
+				setTool('select')
+				return
+			}
 			const k = e.key.toLowerCase()
 			if (k === 'v') {
 				setObjectMenu(false)
@@ -335,11 +294,13 @@ export function GardenEditor(props: Props) {
 				setObjectMenu(false)
 				setTool('frame')
 				setSelectedIds([])
+			} else if (k === 's' && !e.ctrlKey && !e.metaKey) {
+				toggleSnap()
 			}
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
-	}, [])
+	}, [toggleSnap])
 
 	// Undo (Ctrl+Z) / redo (Ctrl+Y or Ctrl+Shift+Z).
 	useEffect(() => {
@@ -398,7 +359,7 @@ export function GardenEditor(props: Props) {
 					className='btn-ghost'
 					onClick={onBack}
 					title='Terug naar tuinen'>
-					← Tuinen
+					<i className='fa-solid fa-arrow-left' /> Tuinen
 				</button>
 				<input
 					className='ge-title'
@@ -428,6 +389,17 @@ export function GardenEditor(props: Props) {
 						onClick={() => setEditorTab('oogst')}>
 						<i className='fa-solid fa-coins' />
 						Oogst & Uitgaven
+					</button>
+					<button
+						className={`nav-tab ${editorTab === 'boodschappen' ? 'nav-active' : ''}`}
+						onClick={() => setEditorTab('boodschappen')}>
+						<i className='fa-solid fa-cart-shopping' />
+						Boodschappen
+						{(garden.shopping ?? []).filter((s) => !s.done).length > 0 && (
+							<span className='crops-open-count'>
+								{(garden.shopping ?? []).filter((s) => !s.done).length}
+							</span>
+						)}
 					</button>
 				</div>
 				{presence !== undefined && presence > 0 && (
@@ -465,9 +437,10 @@ export function GardenEditor(props: Props) {
 						onLiveMove={onLiveMove}
 						onLivePreview={onLivePreview}
 						livePreview={livePreview}
-						onAddFrame={handleAddFrame}
+							onAddFrame={handleAddFrame}
 							onAddObject={onAddObject}
 							onUpdateCrop={(eId, iId, patch) => onUpdateCrop(eId, iId, patch)}
+							snap={snap}
 						/>
 						<div
 							className='ge-bottom-toolbar'
@@ -494,8 +467,11 @@ export function GardenEditor(props: Props) {
 								<button
 									className={tool === 'frame' ? 'tool-active' : ''}
 									onClick={() => {
-										setTool('frame')
-										setSelectedIds([])
+										if (tool === 'frame') setTool('select')
+										else {
+											setTool('frame')
+											setSelectedIds([])
+										}
 									}}
 									aria-label='Tekenen'
 									data-tooltip='Tekenen (R)'>
@@ -507,24 +483,41 @@ export function GardenEditor(props: Props) {
 								role='group'
 								aria-label='Te tekenen element'>
 								<button
-									className={frameType === 'bed' ? 'tool-active' : ''}
-									onClick={() => setFrameType('bed')}
+									className={tool === 'frame' && frameType === 'bed' ? 'tool-active' : ''}
+									onClick={() => {
+										if (tool === 'frame' && frameType === 'bed') setTool('select')
+										else {
+											setFrameType('bed')
+											setTool('frame')
+											setSelectedIds([])
+										}
+									}}
 									aria-label='Bed'
-									data-tooltip='Bed'>
+									data-tooltip='Bed tekenen'>
 									<IconBed />
 								</button>
 							<button
-								className={frameType === 'path' ? 'tool-active' : ''}
-								onClick={() => setFrameType('path')}
+								className={tool === 'frame' && frameType === 'path' ? 'tool-active' : ''}
+								onClick={() => {
+									if (tool === 'frame' && frameType === 'path') setTool('select')
+									else {
+										setFrameType('path')
+										setTool('frame')
+										setSelectedIds([])
+									}
+								}}
 								aria-label='Pad'
-								data-tooltip='Pad'>
+								data-tooltip='Pad tekenen'>
 								<IconPath />
 							</button>
 							<button
 								className={tool === 'gaas' ? 'tool-active' : ''}
 								onClick={() => {
-									setTool('gaas')
-									setSelectedIds([])
+									if (tool === 'gaas') setTool('select')
+									else {
+										setTool('gaas')
+										setSelectedIds([])
+									}
 								}}
 								aria-label='Gaas tekenen'
 								data-tooltip='Gaas tekenen (trek een lijn, eindigt op een paal als die eronder zit)'>
@@ -583,10 +576,24 @@ export function GardenEditor(props: Props) {
 									<IconRedo />
 								</button>
 							</div>
+							<div
+								className='ge-tools'
+								role='group'
+								aria-label='Uitlijnen'>
+								<button
+									className={snap ? 'tool-active' : ''}
+									onClick={toggleSnap}
+									aria-label='Magnetisch uitlijnen'
+									aria-pressed={snap}
+									data-tooltip='Magnetisch uitlijnen (S)'>
+									<FaIcon cls='fa-solid fa-magnet' />
+								</button>
+							</div>
 						</div>
 					</div>
 					<Inspector
 						element={selected}
+						elements={garden.elements}
 						catalog={catalog}
 						crop={cropContext?.crop ?? null}
 						cropInfo={
@@ -599,6 +606,11 @@ export function GardenEditor(props: Props) {
 							selected && onUpdateElement(selected.id, patch)
 						}
 						onRemove={() => selected && onRemoveElement(selected.id)}
+						onSelectElement={(id) => {
+							const el = garden.elements.find((e) => e.id === id) ?? null
+							setSelectedIds([id])
+							if (!el || el.type !== 'bed') setSelectedCropId(null)
+						}}
 						onAddCrop={(cropId) =>
 							selected && onAddCrop(selected.id, cropId)
 						}
@@ -629,7 +641,7 @@ export function GardenEditor(props: Props) {
 						onDelete={onRemoveCropFromCatalog}
 					/>
 				</div>
-			) : (
+			) : editorTab === 'oogst' ? (
 				<HarvestExpenseView
 					catalog={catalog}
 					harvests={garden.harvests}
@@ -640,6 +652,13 @@ export function GardenEditor(props: Props) {
 					onAddExpense={onAddExpense}
 					onUpdateExpense={onUpdateExpense}
 					onRemoveExpense={onRemoveExpense}
+				/>
+			) : (
+				<ShoppingListView
+					items={garden.shopping ?? []}
+					onAdd={onAddShopping}
+					onUpdate={onUpdateShopping}
+					onRemove={onRemoveShopping}
 				/>
 			)}
 		</div>
