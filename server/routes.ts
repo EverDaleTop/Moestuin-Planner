@@ -7,6 +7,7 @@ import { publicUser, randomToken } from "./auth.ts";
 import type { StoredUser } from "./types.ts";
 import type { WsHub } from "./ws.ts";
 import type { MeResponse } from "./types.ts";
+import { scrapeProduct, clearCache, getCacheSize } from "./scraper.ts";
 
 export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Router {
   const router = Router();
@@ -79,6 +80,10 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       res.status(400).json({ error: "cropCatalog moet een lijst zijn." });
       return;
     }
+    if (catalog.length === 0) {
+      res.status(400).json({ error: "cropCatalog mag niet leeg zijn." });
+      return;
+    }
     await store.setCropCatalog(catalog);
     res.json({ cropCatalog: catalog });
   });
@@ -109,6 +114,7 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       elements: [],
       harvests: [],
       expenses: [],
+      incomes: [],
       shopping: [],
       ownerId: me.id,
       sharedWith: [],
@@ -225,7 +231,29 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
     garden.sharedWith = garden.sharedWith.filter((uid) => uid !== String(req.params.userId));
     await store.putGarden(garden);
     ws.broadcastGarden(garden);
+    // haal de gebruiker ook live uit de tuin als hij nu meekijkt
+    ws.kickUserFromGarden(garden.id, String(req.params.userId));
     res.json(garden);
+  });
+
+  // ---------- link preview (boodschappenlijst: plak link -> haal titel/prijs/afbeelding op) ----------
+  router.get("/api/preview-link", auth.requireAuth, async (req, res) => {
+    const raw = String(req.query.url ?? "").trim();
+    if (!raw) {
+      res.status(400).json({ error: "Geef een url mee." });
+      return;
+    }
+    try {
+      const data = await scrapeProduct(raw);
+      res.json(data);
+    } catch (err: any) {
+      res.status(502).json({ error: err?.message ?? "Kon productinfo niet ophalen. Vul handmatig aan." });
+    }
+  });
+
+  router.post("/api/preview-link/clear-cache", auth.requireAuth, async (_req, res) => {
+    clearCache();
+    res.json({ ok: true, cacheSize: getCacheSize() });
   });
 
   return router;

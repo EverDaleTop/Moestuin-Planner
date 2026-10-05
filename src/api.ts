@@ -143,6 +143,10 @@ export const api = {
     });
   },
 
+  /** Haal titel/prijs/afbeelding op van een productlink (server-side scraping). */
+  previewLink(url: string): Promise<{ title: string; price?: number; currency?: string; image?: string; description?: string; url: string; source: string }> {
+    return req(`/preview-link?url=${encodeURIComponent(url)}`);
+  },
   /** Generate a fresh invite link (owner only). */
   regenerateInvite(gardenId: string): Promise<Garden> {
     return req(`/gardens/${encodeURIComponent(gardenId)}/invite`, { method: "POST" });

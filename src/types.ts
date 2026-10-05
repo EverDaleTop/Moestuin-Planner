@@ -93,11 +93,20 @@ export interface GardenElement {
 
 export interface HarvestEntry {
   id: string;
-  cropId: string;
+  /** Gewasnaam als vrije tekst, zoals de gebruiker die zelf intikt. */
+  cropName: string;
+  /** Optionele koppeling met de catalogus; alleen nog aanwezig bij oudere regels. */
+  cropId?: string;
   quantity: number;
   date: string;
   pricePerKg: number;
   isOrganic: boolean;
+  /** productlink van dezelfde oogst in een supermarkt, voor de besparingvergelijking */
+  productUrl?: string;
+  /** prijs van die verpakking, zoals opgehaald van de productlink */
+  storePrice?: number;
+  /** gewicht van die verpakking in kg (supermarkten verkopen per verpakking) */
+  storeWeightKg?: number;
 }
 
 export interface Expense {
@@ -105,6 +114,20 @@ export interface Expense {
   description: string;
   amount: number;
   date: string;
+  /** automatisch aangemaakt vanuit een afgevinkt boodschap-item */
+  shoppingItemId?: string;
+  /** gekozen categorie, zie src/expenseCategories.ts */
+  category?: string;
+}
+
+/** Geld dat binnenkomt, bv. verkoop van oogst of plantjes. */
+export interface Income {
+  id: string;
+  description: string;
+  amount: number;
+  date: string;
+  /** gekozen categorie, zie src/expenseCategories.ts (INCOME_CATEGORIES) */
+  category?: string;
 }
 
 export interface ShoppingItem {
@@ -116,6 +139,12 @@ export interface ShoppingItem {
   quantity?: string;
   /** richtprijs per stuk / totaal */
   price?: number;
+  /** automatisch opgehaalde productafbeelding (og:image) */
+  imageUrl?: string;
+  /** herkende webshop (temu, aliexpress, bol.com, …) */
+  source?: string;
+  /** gekozen categorie, zie src/expenseCategories.ts */
+  category?: string;
   note?: string;
   done: boolean;
   createdAt: number;
@@ -128,6 +157,7 @@ export interface Garden {
   elements: GardenElement[];
   harvests: HarvestEntry[];
   expenses: Expense[];
+  incomes: Income[];
   shopping: ShoppingItem[];
   /** user id of the garden's owner; only the owner can share/delete */
   ownerId: string;

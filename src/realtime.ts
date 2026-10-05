@@ -16,12 +16,18 @@ export type PreviewPayload =
   | { kind: "gaas"; a: { x: number; y: number }; b: { x: number; y: number } }
   | { kind: "clear" };
 
+export interface PresenceMember {
+  userId: string;
+  username: string;
+}
+
 export type RealtimeMessage =
   | { type: "joined"; gardenId: string }
   | { type: "garden"; garden: Garden }
   | { type: "move"; gardenId: string; updates: LiveUpdate[] }
   | { type: "preview"; gardenId: string; preview: PreviewPayload }
-  | { type: "presence"; gardenId: string; count: number }
+  | { type: "presence"; gardenId: string; count: number; members: PresenceMember[] }
+  | { type: "kicked"; gardenId: string }
   | { type: "error"; message: string };
 
 type Handler = (msg: RealtimeMessage) => void;

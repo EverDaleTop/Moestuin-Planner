@@ -126,17 +126,23 @@ export function GardenList({
         </div>
       </header>
 
-      <section className="gl-new">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="Naam van de nieuwe tuin…"
-          aria-label="Tuinnaam"
-        />
-        <button className="btn-primary" onClick={submit} disabled={!name.trim()}>
-          <i className="fa-solid fa-plus" /> Toevoegen
-        </button>
+      <section className="gl-create">
+        <label className="gl-create-label" htmlFor="gl-new-name">
+          <i className="fa-solid fa-seedling" /> Nieuwe tuin
+        </label>
+        <div className="gl-create-row">
+          <input
+            id="gl-new-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder="Bijv. Moestuin achter het huis"
+            aria-label="Naam van de nieuwe tuin"
+          />
+          <button className="btn-primary gl-create-btn" onClick={submit} disabled={!name.trim()}>
+            <i className="fa-solid fa-plus" /> Toevoegen
+          </button>
+        </div>
       </section>
 
       {gardens.length > 0 && (
@@ -161,20 +167,27 @@ export function GardenList({
       )}
 
       {gardens.length === 0 ? (
-        <p className="gl-empty">
-          Nog geen tuinen. Voeg hierboven je eerste tuin toe, of vraag iemand om
-          je een uitnodigingslink te sturen.
-        </p>
+        <div className="gl-empty">
+          <i className="fa-solid fa-carrot" />
+          <p>
+            Nog geen tuinen. Voeg hierboven je eerste tuin toe, of vraag iemand om je een
+            uitnodigingslink te sturen.
+          </p>
+        </div>
       ) : (
         visible.length === 0 && (
-          <p className="gl-empty">Geen tuinen gevonden voor “{query.trim()}”.</p>
+          <div className="gl-empty">
+            <i className="fa-solid fa-magnifying-glass" />
+            <p>Geen tuinen gevonden voor “{query.trim()}”.</p>
+          </div>
         )
       )}
 
       {myGardens.length > 0 && (
         <section>
           <h2 className="gl-section">
-            Mijn tuinen <span className="gl-section-count">{myGardens.length}</span>
+            <i className="fa-solid fa-house" /> Mijn tuinen
+            <span className="gl-section-count">{myGardens.length}</span>
           </h2>
           <div className="gl-group">
             {myGardens.map((g) => (
@@ -197,7 +210,8 @@ export function GardenList({
       {sharedGardens.length > 0 && (
         <section>
           <h2 className="gl-section">
-            Gedeeld met mij <span className="gl-section-count">{sharedGardens.length}</span>
+            <i className="fa-solid fa-user-group" /> Gedeeld met mij
+            <span className="gl-section-count">{sharedGardens.length}</span>
           </h2>
           <div className="gl-group">
             {sharedGardens.map((g) => (
@@ -295,26 +309,72 @@ function GardenRow({
 }) {
   const beds = g.elements.filter((e) => e.type === "bed").length;
   const paths = g.elements.filter((e) => e.type === "path").length;
+  const objects = g.elements.filter((e) => e.type === "object").length;
+  const plants = g.elements.reduce((s, e) => s + e.crops.length, 0);
+  const shareNames = g.sharedWith.map((uid) => userNames[uid] ?? "?");
 
   return (
     <div className="gl-row" onClick={() => onOpen(g.id)}>
+      <span className="gl-row-mark" aria-hidden="true">
+        <i className="fa-solid fa-carrot" />
+      </span>
       <div className="gl-row-main">
         <div className="gl-row-title">{g.name}</div>
-        <div className="gl-row-meta">
-          {beds} {beds === 1 ? "bed" : "bedden"} · {paths}{" "}
-          {paths === 1 ? "pad" : "paden"} ·{" "}
-          {new Date(g.createdAt).toLocaleDateString("nl-NL")}
-          {" · "}
+        <div className="gl-chips">
+          {/* nullen zijn ruis: toon alleen wat er echt is */}
+          {beds > 0 && (
+            <span className="gl-chip">
+              <i className="fa-solid fa-table-cells-large" />
+              {beds} {beds === 1 ? "bed" : "bedden"}
+            </span>
+          )}
+          {paths > 0 && (
+            <span className="gl-chip">
+              <i className="fa-solid fa-road" />
+              {paths} {paths === 1 ? "pad" : "paden"}
+            </span>
+          )}
+          {plants > 0 && (
+            <span className="gl-chip">
+              <i className="fa-solid fa-seedling" />
+              {plants} {plants === 1 ? "gewas" : "gewassen"}
+            </span>
+          )}
+          {objects > 0 && (
+            <span className="gl-chip">
+              <i className="fa-solid fa-shapes" />
+              {objects} {objects === 1 ? "object" : "objecten"}
+            </span>
+          )}
+          {beds === 0 && paths === 0 && (
+            <span className="gl-chip gl-chip-muted">
+              <i className="fa-solid fa-circle-info" /> Nog leeg
+            </span>
+          )}
+          <span className="gl-chip gl-chip-date">
+            <i className="fa-solid fa-calendar" />
+            {new Date(g.createdAt).toLocaleDateString("nl-NL", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}
+          </span>
           {owner ? (
-            g.sharedWith.length > 0 ? (
-              <span>
-                Gedeeld met {g.sharedWith.map((uid) => userNames[uid] ?? "?").join(", ")}
+            shareNames.length > 0 ? (
+              <span className="gl-chip gl-chip-shared">
+                <i className="fa-solid fa-user-group" />
+                {shareNames.join(", ")}
               </span>
             ) : (
-              <span>Niet gedeeld</span>
+              <span className="gl-chip gl-chip-muted">
+                <i className="fa-solid fa-lock" /> Privé
+              </span>
             )
           ) : (
-            <span>Van {userNames[g.ownerId] ?? "iemand"}</span>
+            <span className="gl-chip gl-chip-shared">
+              <i className="fa-solid fa-user" />
+              Van {userNames[g.ownerId] ?? "iemand"}
+            </span>
           )}
         </div>
       </div>

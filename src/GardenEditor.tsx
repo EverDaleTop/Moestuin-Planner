@@ -13,12 +13,16 @@ import type {
 	GardenObjectKey,
 	HarvestEntry,
 	Expense,
+	Income,
 	ShoppingItem,
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
 import type { PreviewPayload } from './realtime'
 import { Inspector } from './Inspector'
-import { HarvestExpenseView } from './HarvestExpenseView'
+import type { PresenceMember } from './realtime'
+import { PresenceModal } from './PresenceModal'
+import { HarvestView } from './HarvestExpenseView'
+import { ExpensesView } from './ExpensesView'
 import { ShoppingListView } from './ShoppingListView'
 import { PlantCatalog } from './PlantDatabase'
 import type { Theme } from './useTheme'
@@ -45,6 +49,10 @@ interface Props {
 	catalog: Crop[]
 	theme: Theme
 	presence?: number
+	presenceMembers?: PresenceMember[]
+	currentUserId: string
+	userNames: Record<string, string>
+	onUnshareMember: (userId: string) => Promise<void>
 	onToggleTheme: () => void
 	onNameChange: (name: string) => void
 	onBack: () => void
@@ -90,9 +98,13 @@ interface Props {
 	onAddExpense: (entry: Omit<Expense, 'id'>) => void
 	onUpdateExpense: (eId: string, patch: Partial<Expense>) => void
 	onRemoveExpense: (eId: string) => void
+	onAddIncome: (entry: Omit<Income, 'id'>) => void
+	onUpdateIncome: (iId: string, patch: Partial<Income>) => void
+	onRemoveIncome: (iId: string) => void
 	onAddShopping: (entry: Omit<ShoppingItem, 'id' | 'createdAt' | 'done'>) => void
 	onUpdateShopping: (itemId: string, patch: Partial<ShoppingItem>) => void
 	onRemoveShopping: (itemId: string) => void
+	onToggleShoppingDone: (item: ShoppingItem, done: boolean) => void
 	onUndo: () => void
 	onRedo: () => void
 	onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: { instanceId: string; cropId: string; rows: number; rowSpacing?: number; plantSpacing?: number; cols?: number; padding?: number; area?: { x: number; y: number; w: number; h: number } }[] }[]) => void
@@ -109,6 +121,10 @@ export function GardenEditor(props: Props) {
 		catalog,
 		theme,
 		presence,
+		presenceMembers = [],
+		currentUserId,
+		userNames,
+		onUnshareMember,
 		onToggleTheme,
 		onNameChange,
 		onBack,
@@ -130,9 +146,13 @@ export function GardenEditor(props: Props) {
 		onAddExpense,
 		onUpdateExpense,
 		onRemoveExpense,
+		onAddIncome,
+		onUpdateIncome,
+		onRemoveIncome,
 		onAddShopping,
 		onUpdateShopping,
 		onRemoveShopping,
+	onToggleShoppingDone,
 		onUndo,
 		onRedo,
 		onLiveMove,
@@ -142,9 +162,47 @@ export function GardenEditor(props: Props) {
 		onRemoveCropFromCatalog,
 	} = props
 
-	const [editorTab, setEditorTab] = useState<'canvas' | 'gewassen' | 'oogst' | 'boodschappen'>(
-		'canvas',
-	)
+	const [presenceOpen, setPresenceOpen] = useState(false)
+	const isOwner = garden.ownerId === currentUserId
+
+	/**
+	 * De server stuurt de volledige ledenlijst mee. Valt die om de een of
+	 * andere reden weg terwijl de teller wél groter is dan 1 (bv. een oudere,
+	 * niet-herstartte server die alleen `count` stuurt), dan zorgen we
+	 * ervoor dat je jezelf in elk geval als online ziet — anders zou je
+	 * terwijl je in de tuin bent als "offline" verschijnen.
+	 */
+	const onlineMembers: PresenceMember[] = useMemo(() => {
+		if (presenceMembers.length > 0) return presenceMembers
+		const count = presence ?? 0
+		if (count < 1) return []
+		return [
+			{
+				userId: currentUserId,
+				username: userNames[currentUserId] ?? 'Jij',
+			},
+		]
+	}, [presenceMembers, presence, currentUserId, userNames])
+
+	const onlineCount = onlineMembers.length
+
+	const [editorTab, setEditorTab] = useState<
+		'canvas' | 'gewassen' | 'oogst' | 'uitgaven' | 'boodschappen'
+	>(() => {
+		try {
+			const saved = localStorage.getItem('mp_editor_tab')
+			if (
+				saved === 'canvas' ||
+				saved === 'gewassen' ||
+				saved === 'oogst' ||
+				saved === 'uitgaven' ||
+				saved === 'boodschappen'
+			) {
+				return saved
+			}
+		} catch { /* ignore */ }
+		return 'canvas'
+	})
 
 	const [selectedIds, setSelectedIds] = useState<string[]>([])
 	const [selectedCropId, setSelectedCropId] = useState<string | null>(null)
@@ -187,6 +245,12 @@ export function GardenEditor(props: Props) {
 		}
 		return null
 	}, [garden.elements, selectedCropId])
+
+	useEffect(() => {
+		try {
+			localStorage.setItem('mp_editor_tab', editorTab)
+		} catch { /* ignore */ }
+	}, [editorTab])
 
 	// Delete / Backspace removes the selected elements, or the selected child.
 	useEffect(() => {
@@ -355,23 +419,28 @@ export function GardenEditor(props: Props) {
 	return (
 		<div className='ge-wrap'>
 			<header className='ge-header'>
-				<button
-					className='btn-ghost'
-					onClick={onBack}
-					title='Terug naar tuinen'>
-					<i className='fa-solid fa-arrow-left' /> Tuinen
-				</button>
-				<input
-					className='ge-title'
-					value={name}
-					onChange={(e) => setName(e.target.value)}
-					onBlur={() => name.trim() && onNameChange(name.trim())}
-					onKeyDown={(e) =>
-						e.key === 'Enter' && name.trim() && onNameChange(name.trim())
-					}
-				/>
-				<div className='ge-spacer' />
-				<div className='ge-editor-tabs'>
+				<div className='ge-brand'>
+					<button
+						className='btn-ghost ge-back'
+						onClick={onBack}
+						title='Terug naar tuinen'>
+						<i className='fa-solid fa-arrow-left' />
+						<span>Tuinen</span>
+					</button>
+					<span className='ge-divider' aria-hidden='true' />
+					<input
+						className='ge-title'
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+						onBlur={() => name.trim() && onNameChange(name.trim())}
+						onKeyDown={(e) =>
+							e.key === 'Enter' && name.trim() && onNameChange(name.trim())
+						}
+						aria-label='Tuinnaam'
+					/>
+				</div>
+				<div className='ge-tabs-slot'>
+					<div className='ge-editor-tabs'>
 					<button
 						className={`nav-tab ${editorTab === 'canvas' ? 'nav-active' : ''}`}
 						onClick={() => setEditorTab('canvas')}>
@@ -387,8 +456,14 @@ export function GardenEditor(props: Props) {
 					<button
 						className={`nav-tab ${editorTab === 'oogst' ? 'nav-active' : ''}`}
 						onClick={() => setEditorTab('oogst')}>
-						<i className='fa-solid fa-coins' />
-						Oogst & Uitgaven
+						<i className='fa-solid fa-carrot' />
+						Oogst
+					</button>
+					<button
+						className={`nav-tab ${editorTab === 'uitgaven' ? 'nav-active' : ''}`}
+						onClick={() => setEditorTab('uitgaven')}>
+						<i className='fa-solid fa-receipt' />
+						Uitgaven
 					</button>
 					<button
 						className={`nav-tab ${editorTab === 'boodschappen' ? 'nav-active' : ''}`}
@@ -402,13 +477,34 @@ export function GardenEditor(props: Props) {
 						)}
 					</button>
 				</div>
-				{presence !== undefined && presence > 0 && (
-					<span className='ge-presence' title='Aantal personen dat deze tuin nu bewerkt'>
-						<i className='fa-solid fa-users' /> {presence}
-					</span>
-				)}
-				<ThemeToggle theme={theme} onToggle={onToggleTheme} />
+				</div>
+				<div className='ge-actions'>
+					{onlineCount > 0 && (
+						<button
+							className='ge-presence'
+							onClick={() => setPresenceOpen(true)}
+							title='Bekijk wie er online is'>
+							<i className='fa-solid fa-users' />
+							<span>{onlineCount}</span>
+							<i className='fa-solid fa-chevron-down ge-presence-caret' />
+						</button>
+					)}
+					<ThemeToggle theme={theme} onToggle={onToggleTheme} />
+				</div>
 			</header>
+			{presenceOpen && (
+				<PresenceModal
+					gardenName={garden.name}
+					members={onlineMembers}
+					ownerId={garden.ownerId}
+					sharedWith={garden.sharedWith}
+					userNames={userNames}
+					currentUserId={currentUserId}
+					isOwner={isOwner}
+					onClose={() => setPresenceOpen(false)}
+					onKick={onUnshareMember}
+				/>
+			)}
 
 			{editorTab === 'canvas' ? (
 				<div className='ge-body'>
@@ -642,24 +738,38 @@ export function GardenEditor(props: Props) {
 					/>
 				</div>
 			) : editorTab === 'oogst' ? (
-				<HarvestExpenseView
-					catalog={catalog}
-					harvests={garden.harvests}
-					expenses={garden.expenses}
-					onAddHarvest={onAddHarvest}
-					onUpdateHarvest={onUpdateHarvest}
-					onRemoveHarvest={onRemoveHarvest}
-					onAddExpense={onAddExpense}
-					onUpdateExpense={onUpdateExpense}
-					onRemoveExpense={onRemoveExpense}
-				/>
+				<div className='shop-scroll'>
+					<HarvestView
+						catalog={catalog}
+						harvests={garden.harvests}
+						onAdd={onAddHarvest}
+						onUpdate={onUpdateHarvest}
+						onRemove={onRemoveHarvest}
+					/>
+				</div>
+			) : editorTab === 'uitgaven' ? (
+				<div className='shop-scroll'>
+					<ExpensesView
+						expenses={garden.expenses}
+						incomes={garden.incomes ?? []}
+						onAdd={onAddExpense}
+						onUpdate={onUpdateExpense}
+						onRemove={onRemoveExpense}
+						onAddIncome={onAddIncome}
+						onUpdateIncome={onUpdateIncome}
+						onRemoveIncome={onRemoveIncome}
+					/>
+				</div>
 			) : (
+				<div className='shop-scroll'>
 				<ShoppingListView
 					items={garden.shopping ?? []}
 					onAdd={onAddShopping}
 					onUpdate={onUpdateShopping}
 					onRemove={onRemoveShopping}
+					onToggleDone={onToggleShoppingDone}
 				/>
+				</div>
 			)}
 		</div>
 	)

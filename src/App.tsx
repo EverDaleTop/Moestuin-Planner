@@ -1,19 +1,41 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, Income, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
 import { id } from "./storage";
 import { api, getToken, setToken, onUnauthorized, type MeResponse } from "./api";
-import { realtime, type LiveUpdate, type PreviewPayload } from "./realtime";
+import { realtime, type LiveUpdate, type PreviewPayload, type PresenceMember } from "./realtime";
 import { GardenList } from "./GardenList";
 import { GardenEditor } from "./GardenEditor";
 import { AuthScreen } from "./AuthScreen";
 import { InviteScreen } from "./InviteScreen";
 import { useTheme } from "./useTheme";
 import { objectDef } from "./gardenObjects";
+import { lineTotal } from "./shopping";
+import { guessCategory } from "./expenseCategories";
 import "./App.css";
 
 interface InviteTarget {
   gardenId: string;
   token: string;
+}
+
+/** Zodat een refresh terugbrengt naar dezelfde tuin i.p.v. de tuinlijst. */
+const LAST_GARDEN_KEY = "mp_last_garden";
+
+function readLastGarden(): string | null {
+  try {
+    return localStorage.getItem(LAST_GARDEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastGarden(gardenId: string | null): void {
+  try {
+    if (gardenId) localStorage.setItem(LAST_GARDEN_KEY, gardenId);
+    else localStorage.removeItem(LAST_GARDEN_KEY);
+  } catch {
+    // privaatmodus o.i.d.: gewoon niet onthouden
+  }
 }
 
 function parseInvite(): InviteTarget | null {
@@ -26,8 +48,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<AppData>({ gardens: [], cropCatalog: [] });
   const [userNames, setUserNames] = useState<Record<string, string>>({});
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() => readLastGarden());
   const [presence, setPresence] = useState(0);
+  const [presenceMembers, setPresenceMembers] = useState<PresenceMember[]>([]);
   const [livePreview, setLivePreview] = useState<{ gardenId: string; preview: PreviewPayload } | null>(null);
   const [invite, setInvite] = useState<InviteTarget | null>(() => parseInvite());
   const [theme, toggleTheme] = useTheme();
@@ -178,17 +201,40 @@ export default function App() {
         );
       } else if (msg.type === "presence") {
         setPresence(msg.count);
+        setPresenceMembers(msg.members ?? []);
+      } else if (msg.type === "kicked") {
+        // toegang ingetrokken terwijl je meekeek: terug naar de lijst
+        setActiveId((a) => (a === msg.gardenId ? null : a));
+        setPresence(0);
+        setPresenceMembers([]);
+        void loadList();
       }
     });
     return () => {
       off();
       realtime.disconnect();
     };
-  }, [user]);
+  }, [user, loadList]);
 
   useEffect(() => {
     realtime.setGarden(activeId);
+    if (activeId === null) {
+      setPresence(0);
+      setPresenceMembers([]);
+    }
   }, [activeId]);
+
+  // Onthoud de geopende tuin, en vergeet hem zodra je teruggaat naar de lijst.
+  useEffect(() => {
+    writeLastGarden(activeId);
+  }, [activeId]);
+
+  // Een herstelde tuin die niet (meer) in je account zit mag niet blijven hangen.
+  // `booted` zorgt dat dit pas ná het laden van de tuinlijst gechecked wordt.
+  useEffect(() => {
+    if (!booted || !activeId) return;
+    if (!data.gardens.some((g) => g.id === activeId)) setActiveId(null);
+  }, [booted, data.gardens, activeId]);
 
   // Re-fetch the list when returning to it, so newly shared gardens (and name
   // changes from others) appear.
@@ -205,10 +251,14 @@ export default function App() {
       lastSentRef.current.set(g.id, key);
       api.putGarden(g).catch(() => {});
     }
-    const catKey = JSON.stringify(data.cropCatalog);
-    if (lastSentCatalogRef.current !== catKey) {
-      lastSentCatalogRef.current = catKey;
-      api.putCatalog(data.cropCatalog).catch(() => {});
+    // Een lege catalogus is nog nooit geladen; die mag niet naar de server,
+    // anders wist het opgeslagen gewassenassortiment bij het opstarten.
+    if (data.cropCatalog.length > 0) {
+      const catKey = JSON.stringify(data.cropCatalog);
+      if (lastSentCatalogRef.current !== catKey) {
+        lastSentCatalogRef.current = catKey;
+        api.putCatalog(data.cropCatalog).catch(() => {});
+      }
     }
   }, [data]);
 
@@ -660,6 +710,34 @@ export default function App() {
     [updateGarden]
   );
 
+  const addIncome = useCallback(
+    (gId: string, entry: Omit<Income, "id">) => {
+      const full: Income = { ...entry, id: id() };
+      updateGarden(gId, (g) => ({ ...g, incomes: [...(g.incomes ?? []), full] }));
+    },
+    [updateGarden]
+  );
+
+  const updateIncome = useCallback(
+    (gId: string, iId: string, patch: Partial<Income>) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        incomes: (g.incomes ?? []).map((i) => (i.id === iId ? { ...i, ...patch } : i)),
+      }));
+    },
+    [updateGarden]
+  );
+
+  const removeIncome = useCallback(
+    (gId: string, iId: string) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        incomes: (g.incomes ?? []).filter((i) => i.id !== iId),
+      }));
+    },
+    [updateGarden]
+  );
+
   const addShopping = useCallback(
     (gId: string, entry: Omit<ShoppingItem, "id" | "createdAt" | "done">) => {
       const full: ShoppingItem = { ...entry, id: id(), createdAt: Date.now(), done: false };
@@ -678,14 +756,41 @@ export default function App() {
     [updateGarden]
   );
 
-  const removeShopping = useCallback(
+const removeShopping = useCallback(
     (gId: string, itemId: string) => {
       updateGarden(gId, (g) => ({
         ...g,
         shopping: (g.shopping ?? []).filter((s) => s.id !== itemId),
       }));
     },
-    [updateGarden]
+    [updateGarden],
+  );
+
+  /**
+   * Afvinken op de boodschappenlijst boekt het product meteen als uitgave.
+   * terugzetten haalt die uitgave er weer uit, zodat er geen dubbelingen
+   * of weesuitgaven ontstaan.
+   */
+  const toggleShoppingDone = useCallback(
+    (gId: string, item: ShoppingItem, done: boolean) => {
+      if (done) {
+        const amount = lineTotal(item);
+        if (amount <= 0) return;
+        addExpense(gId, {
+          description: item.title,
+          amount,
+          date: new Date().toISOString().slice(0, 10),
+          shoppingItemId: item.id,
+          category: guessCategory(item.title),
+        });
+        return;
+      }
+      const garden = data.gardens.find((g) => g.id === gId);
+      for (const e of garden?.expenses ?? []) {
+        if (e.shoppingItemId === item.id) removeExpense(gId, e.id);
+      }
+    },
+    [addExpense, data.gardens, removeExpense],
   );
 
   if (!booted) {
@@ -734,6 +839,10 @@ export default function App() {
       catalog={data.cropCatalog}
       theme={theme}
       presence={presence}
+      presenceMembers={presenceMembers}
+      currentUserId={user.id}
+      userNames={userNames}
+      onUnshareMember={(userId) => unshareGarden(garden.id, userId)}
       onToggleTheme={toggleTheme}
       onNameChange={(name) => updateGarden(garden.id, (g) => ({ ...g, name }))}
       onBack={() => setActiveId(null)}
@@ -757,9 +866,13 @@ export default function App() {
       onAddExpense={(entry) => addExpense(garden.id, entry)}
       onUpdateExpense={(eId, patch) => updateExpense(garden.id, eId, patch)}
       onRemoveExpense={(eId) => removeExpense(garden.id, eId)}
+      onAddIncome={(entry) => addIncome(garden.id, entry)}
+      onUpdateIncome={(iId, patch) => updateIncome(garden.id, iId, patch)}
+      onRemoveIncome={(iId) => removeIncome(garden.id, iId)}
       onAddShopping={(entry) => addShopping(garden.id, entry)}
       onUpdateShopping={(itemId, patch) => updateShopping(garden.id, itemId, patch)}
       onRemoveShopping={(itemId) => removeShopping(garden.id, itemId)}
+      onToggleShoppingDone={(item, done) => toggleShoppingDone(garden.id, item, done)}
       onUndo={undo}
       onRedo={redo}
       onLiveMove={(updates) => sendLiveMove(garden.id, updates)}

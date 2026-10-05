@@ -69,6 +69,7 @@ export class JsonStore implements DataStore {
           elements: g.elements ?? [],
           harvests: g.harvests ?? [],
           expenses: g.expenses ?? [],
+          incomes: g.incomes ?? [],
           shopping: g.shopping ?? [],
           sharedWith: g.sharedWith ?? [],
           inviteToken: g.inviteToken ?? randomToken(),

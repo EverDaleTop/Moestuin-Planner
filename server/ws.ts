@@ -3,10 +3,11 @@ import type { Server as HttpServer } from "node:http";
 import type { Garden } from "../src/types.ts";
 import type { DataStore } from "./db.ts";
 import type { AuthService } from "./auth.ts";
-import type { WsMessage } from "./types.ts";
+import type { PresenceMember, WsMessage } from "./types.ts";
 
 interface SocketState {
   userId: string;
+  username: string;
   gardenId: string | null;
 }
 
@@ -33,7 +34,7 @@ export class WsHub {
       socket.close(4001, "unauthorized");
       return;
     }
-    this.sockets.set(socket, { userId: user.id, gardenId: null });
+    this.sockets.set(socket, { userId: user.id, username: user.username, gardenId: null });
 
     socket.on("message", (raw) => {
       void this.onMessage(socket, raw.toString());
@@ -142,8 +143,40 @@ export class WsHub {
   }
 
   private broadcastPresence(gardenId: string): void {
-    const count = this.rooms.get(gardenId)?.size ?? 0;
-    this.broadcast(gardenId, { type: "presence", gardenId, count });
+    const room = this.rooms.get(gardenId);
+    const seen = new Set<string>();
+    const members: PresenceMember[] = [];
+    for (const socket of room ?? []) {
+      const state = this.sockets.get(socket);
+      if (!state || seen.has(state.userId)) continue;
+      seen.add(state.userId);
+      members.push({ userId: state.userId, username: state.username });
+    }
+    members.sort((a, b) => a.username.localeCompare(b.username));
+    this.broadcast(gardenId, { type: "presence", gardenId, count: members.length, members });
+  }
+
+  /**
+   * Verwijder iemand live uit een tuin (na unshare): stuur eerst een
+   * "kicked"-bericht zodat de client netjes teruggaat naar de lijst, en
+   * verbreek daarna de socket zodat presence meteen klopt en er geen
+   * updates meer binnenkomen.
+   */
+  kickUserFromGarden(gardenId: string, userId: string): void {
+    const room = this.rooms.get(gardenId);
+    if (!room) return;
+    for (const socket of room) {
+      if (this.sockets.get(socket)?.userId !== userId) continue;
+      this.send(socket, { type: "kicked", gardenId });
+      // even de tijd geven om het bericht te verwerken voor de socket sluit
+      setTimeout(() => {
+        try {
+          socket.close(4002, "kicked");
+        } catch {
+          // al weg
+        }
+      }, 250);
+    }
   }
 
   private send(socket: WebSocket, msg: WsMessage): void {
