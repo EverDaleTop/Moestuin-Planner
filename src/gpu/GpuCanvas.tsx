@@ -79,7 +79,8 @@ interface Pt {
 }
 /** One snap guide line. `at` is the aligned coordinate; `a`..`b` is the extent
  *  along the perpendicular axis (so the line spans both involved objects);
- *  `center` marks a centre-alignment (drawn solid + dot) vs an edge (dashed). */
+ *  `center` marks a centre alignment (drawn solid + dot) vs an edge alignment
+ *  (drawn dashed). */
 interface SnapLine {
   at: number;
   center: boolean;
@@ -175,32 +176,107 @@ function scaleCropAreas(crops: CropAssignment[], sx: number, sy: number): CropAs
 
 
 
-function snapRect(moved: R, others: R[], th: number): { x: number; y: number; v: SnapLine[]; h: SnapLine[] } {
-  // Alleen midden-op-midden: het centrum van het versleepte blok tegen het
-  // centrum van een ander blok, per as. `th` is het fangebied in wereld-px.
-  const cx = moved.x + moved.w / 2;
-  const cy = moved.y + moved.h / 2;
-  let nx = moved.x;
-  let ny = moved.y;
-  let v: SnapLine[] = [];
-  let h: SnapLine[] = [];
-  let bestX = th;
-  let bestY = th;
-  for (const o of others) {
-    const ocx = o.x + o.w / 2;
-    const ocy = o.y + o.h / 2;
-    if (Math.abs(ocx - cx) < bestX) {
-      bestX = Math.abs(ocx - cx);
-      nx = ocx - moved.w / 2;
-      v = [centerGuide({ x: nx, y: moved.y, w: moved.w, h: moved.h }, o, "y")];
-    }
-    if (Math.abs(ocy - cy) < bestY) {
-      bestY = Math.abs(ocy - cy);
-      ny = ocy - moved.h / 2;
-      h = [centerGuide({ x: moved.x, y: ny, w: moved.w, h: moved.h }, o, "x")];
+/** An anchor on one axis: `kind` 0 = start edge, 1 = end edge, 2 = centre. */
+interface Anchor {
+  at: number;
+  kind: 0 | 1 | 2;
+}
+/** A snap target: an anchor of `o`, the rect the guide line spans towards. */
+interface AxisFix extends Anchor {
+  o: R;
+}
+
+/** The three anchors of a rect along one axis: start edge, centre, end edge. */
+function rectAnchors(r: R, axis: "x" | "y"): Anchor[] {
+  const a = axis === "x" ? r.x : r.y;
+  const s = axis === "x" ? r.w : r.h;
+  return [
+    { at: a, kind: 0 },
+    { at: a + s / 2, kind: 2 },
+    { at: a + s, kind: 1 },
+  ];
+}
+
+/** Which pairing should win when several snap targets are in range; lower is
+ *  better. Centre-on-centre, then matching edges, then butt-jointed edges,
+ *  and only then an edge landing on somebody else's centre. */
+function anchorRank(m: Anchor, f: Anchor): number {
+  if (m.kind === 2 && f.kind === 2) return 0;
+  if (m.kind !== 2 && f.kind !== 2) return m.kind === f.kind ? 1 : 2;
+  return 3;
+}
+
+/** Snap a single axis. `moving` are the anchors that travel with the gesture,
+ *  `fixed` the available targets, `th` the catch radius in world px. Returns the
+ *  correction for the moving anchors plus a guide for every target that lines up
+ *  once that correction is applied. `self` is the rect the moving anchors belong
+ *  to and only feeds the guide extent. */
+function snapAxis(
+  moving: Anchor[],
+  fixed: AxisFix[],
+  th: number,
+  self: R,
+  axis: "x" | "y"
+): { delta: number; guides: SnapLine[] } | null {
+  if (moving.length === 0 || fixed.length === 0) return null;
+  let delta = 0;
+  let found = false;
+  for (let rank = 0; rank <= 3 && !found; rank++) {
+    let best = Infinity;
+    for (const m of moving) {
+      for (const f of fixed) {
+        if (anchorRank(m, f) !== rank) continue;
+        const d = f.at - m.at;
+        if (Math.abs(d) >= th) continue;
+        if (Math.abs(d) < best) {
+          best = Math.abs(d);
+          delta = d;
+          found = true;
+        }
+      }
     }
   }
-  return { x: nx, y: ny, v, h };
+  if (!found) return null;
+  // Every target that lines up after the correction gets its own guide.
+  const guides: SnapLine[] = [];
+  const seen = new Set<number>();
+  for (const m of moving) {
+    const at = m.at + delta;
+    for (const f of fixed) {
+      if (Math.abs(f.at - at) > 0.5) continue;
+      const key = Math.round(f.at * 10);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      guides.push({
+        at: f.at,
+        center: m.kind === 2 && f.kind === 2,
+        ...guideExtent(self, f.o, axis === "x" ? "y" : "x"),
+      });
+    }
+  }
+  return { delta, guides };
+}
+
+/** Collect every snap target on one axis: all three anchors of each rect. */
+function axisFixes(others: R[], axis: "x" | "y"): AxisFix[] {
+  const out: AxisFix[] = [];
+  for (const o of others) {
+    for (const a of rectAnchors(o, axis)) out.push({ ...a, o });
+  }
+  return out;
+}
+
+/** Snap a dragged element: its centre *and* its edges against every other
+ *  element, per axis independently. */
+function snapRect(moved: R, others: R[], th: number): { x: number; y: number; v: SnapLine[]; h: SnapLine[] } {
+  const ax = snapAxis(rectAnchors(moved, "x"), axisFixes(others, "x"), th, moved, "x");
+  const ay = snapAxis(rectAnchors(moved, "y"), axisFixes(others, "y"), th, moved, "y");
+  return {
+    x: ax ? moved.x + ax.delta : moved.x,
+    y: ay ? moved.y + ay.delta : moved.y,
+    v: ax ? ax.guides : [],
+    h: ay ? ay.guides : [],
+  };
 }
 
 function resizeRect(origin: R, dir: Dir, p: Pt): R {
@@ -221,59 +297,124 @@ function resizeRect(origin: R, dir: Dir, p: Pt): R {
   return { x, y, w, h };
 }
 
-/** Snap the resize so the dragged edge keeps the centre on another centre. */
-function snapResize(rect: R, dir: Dir, anchor: R, others: R[], th: number): { r: R; v: SnapLine[]; h: SnapLine[] } {
-  let { x, y, w, h } = rect;
-  const vGuides: SnapLine[] = [];
-  const hGuides: SnapLine[] = [];
-  // Alleen centra: het midden van het formaat dat je sleept tegen het midden
-  // van een ander blok.
-  const candX: Cand[] = [];
-  const candY: Cand[] = [];
-  for (const o of others) {
-    candX.push({ at: o.x + o.w / 2, center: true, o });
-    candY.push({ at: o.y + o.h / 2, center: true, o });
-  }
-  const fixedRight = anchor.x + anchor.w;
-  const fixedBottom = anchor.y + anchor.h;
+/** A travelling anchor while resizing, described in terms of the size change.
+ *  `at` is where the anchor sits now, `kind` its anchor kind, and `scale` how far
+ *  it travels per unit of size change. The dragged edge follows the size change
+ *  1:1 while the centre only moves half as far, so a single correction cannot
+ *  serve both — each anchor needs its own conversion. */
+interface Travelling {
+  at: number;
+  kind: 0 | 1 | 2;
+  scale: number;
+}
 
-  if (dir.includes("e")) {
-    const center = x + w / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candX) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) {
-      w = Math.max(MIN, (s.at - x) * 2);
-      vGuides.push(centerGuide({ x, y, w, h }, s.o, "y"));
+/** The anchors that travel when one side of a rect is dragged: the dragged edge
+ *  itself and the centre. `moving` is the dragged edge, `fixed` the opposite one,
+ *  `growing` says whether the drag is on the high side. */
+function resizeTravellers(moving: number, fixed: number, growing: boolean): Travelling[] {
+  return [
+    { at: moving, kind: growing ? 1 : 0, scale: 1 },
+    { at: (moving + fixed) / 2, kind: 2, scale: 0.5 },
+  ];
+}
+
+/** Snap a resize. Only the anchors that actually travel are candidates, and each
+ *  is converted through its own `scale` so the size change lands it exactly on the
+ *  target. `apply` folds the size change back into the rect. */
+function snapResizeAxis(
+  travellers: Travelling[],
+  fixed: AxisFix[],
+  th: number,
+  self: R,
+  axis: "x" | "y",
+  apply: (r: R, ds: number) => R
+): { r: R; guides: SnapLine[] } {
+  const out: SnapLine[] = [];
+  let bestDs = 0;
+  let hitAny = false;
+  for (let rank = 0; rank <= 3; rank++) {
+    bestDs = 0;
+    hitAny = false;
+    for (const m of travellers) {
+      for (const f of fixed) {
+        if (anchorRank(m, f) !== rank) continue;
+        // catch radius is measured on the visible gap, not the size change
+        const gap = f.at - m.at;
+        if (Math.abs(gap) >= th) continue;
+        const ds = gap / m.scale;
+        if (Math.abs(ds) < Math.abs(bestDs) || !hitAny) {
+          bestDs = ds;
+          hitAny = true;
+        }
+      }
+    }
+    if (hitAny) break;
+  }
+  if (!hitAny) return { r: self, guides: out };
+  const finalAt = new Map<Travelling, number>();
+  for (const m of travellers) finalAt.set(m, m.at + m.scale * bestDs);
+  const seen = new Set<number>();
+  for (const m of travellers) {
+    const at = finalAt.get(m)!;
+    for (const f of fixed) {
+      if (Math.abs(f.at - at) > 0.5) continue;
+      const key = Math.round(f.at * 10);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        at: f.at,
+        center: m.kind === 2 && f.kind === 2,
+        ...guideExtent(self, f.o, axis === "x" ? "y" : "x"),
+      });
     }
   }
-  if (dir.includes("w")) {
-    const center = x + w / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candX) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) {
-      x = Math.min(2 * s.at - fixedRight, fixedRight - MIN); w = fixedRight - x;
-      vGuides.push(centerGuide({ x, y, w, h }, s.o, "y"));
-    }
+  return { r: apply(self, bestDs), guides: out };
+}
+
+/** Snap the dragged edge(s) of a resize to another element's centres or edges.
+ *  The sides that were not grabbed never move. */
+function snapResize(rect: R, dir: Dir, others: R[], th: number): { r: R; v: SnapLine[]; h: SnapLine[] } {
+  let r = rect;
+  let v: SnapLine[] = [];
+  let h: SnapLine[] = [];
+  if (dir.includes("e") || dir.includes("w")) {
+    const east = dir.includes("e");
+    // the dragged edge travels, the opposite one is glued to its side
+    const moving = east ? r.x + r.w : r.x;
+    const fixed = east ? r.x : r.x + r.w;
+    const s = snapResizeAxis(
+      resizeTravellers(moving, fixed, east),
+      axisFixes(others, "x"),
+      th,
+      r,
+      "x",
+      (cur, ds) =>
+        east
+          ? { ...cur, w: Math.max(MIN, cur.w + ds) }
+          : { ...cur, x: cur.x + ds, w: Math.max(MIN, cur.w - ds) }
+    );
+    r = s.r;
+    v = s.guides;
   }
-  if (dir.includes("s")) {
-    const center = y + h / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candY) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) {
-      h = Math.max(MIN, (s.at - y) * 2);
-hGuides.push(centerGuide({ x, y, w, h }, s.o, "x"));
-    }
+  if (dir.includes("s") || dir.includes("n")) {
+    const south = dir.includes("s");
+    const moving = south ? r.y + r.h : r.y;
+    const fixed = south ? r.y : r.y + r.h;
+    const s = snapResizeAxis(
+      resizeTravellers(moving, fixed, south),
+      axisFixes(others, "y"),
+      th,
+      r,
+      "y",
+      (cur, ds) =>
+        south
+          ? { ...cur, h: Math.max(MIN, cur.h + ds) }
+          : { ...cur, y: cur.y + ds, h: Math.max(MIN, cur.h - ds) }
+    );
+    r = s.r;
+    h = s.guides;
   }
-  if (dir.includes("n")) {
-    const center = y + h / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candY) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) {
-      y = Math.min(2 * s.at - fixedBottom, fixedBottom - MIN); h = fixedBottom - y;
-hGuides.push(centerGuide({ x, y, w, h }, s.o, "x"));
-    }
-  }
-  return { r: { x, y, w, h }, v: vGuides, h: hGuides };
+  return { r, v, h };
 }
 
 const CROP_GRID = 5; // 5px == 5cm fine grid when nothing else snaps
@@ -288,114 +429,109 @@ function guideExtent(m: R, o: R, perpendicular: "x" | "y"): { a: number; b: numb
   return { a: Math.min(ma, oa), b: Math.max(ms, os) };
 }
 
-/** Centre guide: the snap is always centre-to-centre, so the guide is always
- *  drawn exactly through the two centres, spanning both objects fully. */
-function centerGuide(r: R, o: R, perpendicular: "x" | "y"): SnapLine {
-  // Een verticale lijn (perpendicular "y") staat op de x-positie van de centra;
-  // een horizontale lijn (perpendicular "x") op de y-positie van de centra.
-  const at = perpendicular === "x" ? r.y + r.h / 2 : r.x + r.w / 2;
-  return { at, center: true, ...guideExtent(r, o, perpendicular) };
-}
-
-interface Cand {
-  at: number;
-  center: boolean;
-  o: R;
-}
-
 /** Snap a plant rectangle being dragged.
  *  Targets are ONLY the parent bed and the plant's own siblings plus a fine grid
- *  (never unrelated elements). Alleen midden-op-midden.
- */
+ *  (never unrelated elements). Centres *and* edges align. */
 function snapCropRect(moved: R, bed: R, others: R[], th: number): { x: number; y: number; v: SnapLine[]; h: SnapLine[] } {
-  const candX: Cand[] = [];
-  const candY: Cand[] = [];
-  const push = (o: R) => {
-    // Alleen midden-op-midden, net als bij elementen.
-    candX.push({ at: o.x + o.w / 2, center: true, o });
-    candY.push({ at: o.y + o.h / 2, center: true, o });
-  };
-  push(bed);
-  for (const o of others) push(o);
-  const cx = moved.x + moved.w / 2;
-  const cy = moved.y + moved.h / 2;
-  let nx = moved.x, ny = moved.y;
-  let vGrp: SnapLine[] = [], hGrp: SnapLine[] = [];
-  let bestX = th, bestY = th;
-  for (const c of candX) {
-    const d = Math.abs(c.at - cx);
-    if (d < bestX) {
-      bestX = d; nx = c.at - moved.w / 2;
-      vGrp = [centerGuide({ x: nx, y: moved.y, w: moved.w, h: moved.h }, c.o, "y")];
-    }
-  }
-  for (const c of candY) {
-    const d = Math.abs(c.at - cy);
-    if (d < bestY) {
-      bestY = d; ny = c.at - moved.h / 2;
-      hGrp = [centerGuide({ x: moved.x, y: ny, w: moved.w, h: moved.h }, c.o, "x")];
-    }
-  }
-  if (vGrp.length === 0) nx = Math.round(nx / CROP_GRID) * CROP_GRID;
-  if (hGrp.length === 0) ny = Math.round(ny / CROP_GRID) * CROP_GRID;
-  nx = Math.max(bed.x, Math.min(bed.x + bed.w - moved.w, nx));
-  ny = Math.max(bed.y, Math.min(bed.y + bed.h - moved.h, ny));
-  return { x: nx, y: ny, v: vGrp, h: hGrp };
+  const targets = [bed, ...others];
+  const ax = snapAxis(rectAnchors(moved, "x"), axisFixes(targets, "x"), th, moved, "x");
+  const ay = snapAxis(rectAnchors(moved, "y"), axisFixes(targets, "y"), th, moved, "y");
+  const c = clampToBed(
+    {
+      x: ax ? moved.x + ax.delta : snapToGrid(moved.x, bed.x),
+      y: ay ? moved.y + ay.delta : snapToGrid(moved.y, bed.y),
+      w: moved.w,
+      h: moved.h,
+    },
+    bed
+  );
+  return { x: c.x, y: c.y, v: ax ? ax.guides : [], h: ay ? ay.guides : [] };
 }
 
-/** Snap the dragged edge(s) of a plant resize to bed/sibling centres. */
-function snapCropResize(rect: R, dir: Dir, anchor: R, bed: R, others: R[], th: number): { r: R; v: SnapLine[]; h: SnapLine[] } {
-  let { x, y, w, h } = rect;
-  const vGuides: SnapLine[] = [];
-  const hGuides: SnapLine[] = [];
-  const candX: Cand[] = [];
-  const candY: Cand[] = [];
-  for (const o of [bed, ...others]) {
-    candX.push({ at: o.x + o.w / 2, center: true, o });
-    candY.push({ at: o.y + o.h / 2, center: true, o });
-  }
-  const fixedRight = anchor.x + anchor.w;
-  const fixedBottom = anchor.y + anchor.h;
+/** Snap the dragged edge(s) of a plant resize to the bed's or a sibling plant's
+ *  centres and edges, falling back to the fine 5 cm grid. */
+function snapCropResize(rect: R, dir: Dir, bed: R, others: R[], th: number): { r: R; v: SnapLine[]; h: SnapLine[] } {
+  const targets = [bed, ...others];
+  const fixedX = axisFixes(targets, "x");
+  const fixedY = axisFixes(targets, "y");
+  let r = rect;
+  let v: SnapLine[] = [];
+  let h: SnapLine[] = [];
 
-  if (dir.includes("e")) {
-    const center = x + w / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candX) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) { w = Math.max(MIN, (s.at - x) * 2); vGuides.push(centerGuide({ x, y, w, h }, s.o, "y")); }
-    else w = Math.max(MIN, Math.round(w / CROP_GRID) * CROP_GRID);
+  if (dir.includes("e") || dir.includes("w")) {
+    const east = dir.includes("e");
+    const s = snapResizeAxis(
+      resizeTravellers(east ? r.x + r.w : r.x, east ? r.x : r.x + r.w, east),
+      fixedX,
+      th,
+      r,
+      "x",
+      (cur, ds) =>
+        east
+          ? { ...cur, w: Math.max(MIN, cur.w + ds) }
+          : { ...cur, x: cur.x + ds, w: Math.max(MIN, cur.w - ds) }
+    );
+    r = s.r;
+    v = s.guides;
+    if (v.length === 0) {
+      r = east
+        ? { ...r, w: Math.max(MIN, Math.round(r.w / CROP_GRID) * CROP_GRID) }
+        : (() => {
+            const x = snapToGrid(r.x, bed.x);
+            return { ...r, x, w: r.x + r.w - x };
+          })();
+    }
   }
-  if (dir.includes("w")) {
-    const center = x + w / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candX) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) { x = Math.min(2 * s.at - fixedRight, fixedRight - MIN); w = fixedRight - x; vGuides.push(centerGuide({ x, y, w, h }, s.o, "y")); }
-    else { x = Math.round(x / CROP_GRID) * CROP_GRID; w = fixedRight - x; }
+  if (dir.includes("s") || dir.includes("n")) {
+    const south = dir.includes("s");
+    const s = snapResizeAxis(
+      resizeTravellers(south ? r.y + r.h : r.y, south ? r.y : r.y + r.h, south),
+      fixedY,
+      th,
+      r,
+      "y",
+      (cur, ds) =>
+        south
+          ? { ...cur, h: Math.max(MIN, cur.h + ds) }
+          : { ...cur, y: cur.y + ds, h: Math.max(MIN, cur.h - ds) }
+    );
+    r = s.r;
+    h = s.guides;
+    if (h.length === 0) {
+      r = south
+        ? { ...r, h: Math.max(MIN, Math.round(r.h / CROP_GRID) * CROP_GRID) }
+        : (() => {
+            const y = snapToGrid(r.y, bed.y);
+            return { ...r, y, h: r.y + r.h - y };
+          })();
+    }
   }
-  if (dir.includes("s")) {
-    const center = y + h / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candY) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) { h = Math.max(MIN, (s.at - y) * 2); hGuides.push(centerGuide({ x, y, w, h }, s.o, "x")); }
-    else h = Math.max(MIN, Math.round(h / CROP_GRID) * CROP_GRID);
-  }
-  if (dir.includes("n")) {
-    const center = y + h / 2;
-    let best = th, s: Cand | null = null;
-    for (const c of candY) { const d = Math.abs(c.at - center); if (d < best) { best = d; s = c; } }
-    if (s !== null) { y = Math.min(2 * s.at - fixedBottom, fixedBottom - MIN); h = fixedBottom - y; hGuides.push(centerGuide({ x, y, w, h }, s.o, "x")); }
-    else { y = Math.round(y / CROP_GRID) * CROP_GRID; h = fixedBottom - y; }
-  }
-  w = Math.max(MIN, w);
-  h = Math.max(MIN, h);
-  if (x < bed.x) { w = Math.max(MIN, w - (bed.x - x)); x = bed.x; }
-  if (y < bed.y) { h = Math.max(MIN, h - (bed.y - y)); y = bed.y; }
-  if (x + w > bed.x + bed.w) w = Math.max(MIN, bed.x + bed.w - x);
-  if (y + h > bed.y + bed.h) h = Math.max(MIN, bed.y + bed.h - y);
+
+  const c = clampToBed(r, bed);
   return {
-    r: { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) },
-    v: vGuides,
-    h: hGuides,
+    r: { x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h) },
+    v,
+    h,
   };
+}
+
+/** Keep a plant rectangle inside its bed. Containment is not an alignment
+ *  concern, so this runs whether or not snapping is enabled. */
+function clampToBed(r: R, bed: R): R {
+  const w = Math.min(r.w, bed.w);
+  const h = Math.min(r.h, bed.h);
+  return {
+    w,
+    h,
+    x: Math.max(bed.x, Math.min(r.x, bed.x + bed.w - w)),
+    y: Math.max(bed.y, Math.min(r.y, bed.y + bed.h - h)),
+  };
+}
+
+/** Snap to the 5 cm grid, measured from `origin` so the fine grid follows the
+ *  bed instead of the world's zero point. */
+function snapToGrid(v: number, origin: number): number {
+  return origin + Math.round((v - origin) / CROP_GRID) * CROP_GRID;
 }
 
 function dirCursor(dir: Dir): string {
@@ -715,7 +851,12 @@ export function GpuCanvas({
     bed: GardenElement
   ): { a: CropAssignment; dir: Dir } | null => {
     const p = propsRef.current;
-    for (const a of bed.crops) {
+    // The selected plant is tested first so its handles can never be stolen by an
+    // overlapping neighbour; the rest are tested topmost-first.
+    const rest = bed.crops.filter((a) => a.instanceId !== p.selectedCropId).reverse();
+    const sel = p.selectedCropId ? bed.crops.find((a) => a.instanceId === p.selectedCropId) : undefined;
+    const order = sel ? [sel, ...rest] : rest;
+    for (const a of order) {
       const r = cropRectOf(bed, a);
       const p0 = worldToScreen({ x: r.x, y: r.y }, c);
       const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
@@ -854,7 +995,30 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     // Resize handles win first (they sit on the bbox of the selection and would
     // otherwise be eaten by the object/line hit-test); then garden objects take
     // priority over beds and plants.
+    //
+    // A plant inside a fully-selected bed is the exception: plantings are often
+    // flush with the bed border, so their own corners and edges sit exactly on
+    // the bed's bbox handles. The plant handles are therefore tested first and
+    // suppress the bed handles, otherwise a planting could only ever be resized
+    // by dragging the bed around it.
+    const bedSel = selectedBedEl();
+    const bedPlantable = bedSel !== null && bedSel.crops.length > 0;
+    const cropHandleHit = bedPlantable ? hitCropHandle(sp, c, bedSel!) : null;
     if (p.tool === "select") {
+      if (cropHandleHit) {
+        handlersRef.current.onSelectCrop(cropHandleHit.a.instanceId);
+        gRef.current = {
+          k: "cropResize",
+          eId: bedSel!.id,
+          instanceId: cropHandleHit.a.instanceId,
+          dir: cropHandleHit.dir,
+          origin: cropRectOf(bedSel!, cropHandleHit.a),
+          bed: bedRefOf(bedSel!),
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        doBusy(true);
+        return;
+      }
       const dirH = hitHandle(sp, c);
       if (dirH && p.selectedIds.length > 0) {
         const origins = new Map<string, R>();
@@ -902,34 +1066,18 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         return;
       }
     }
-    // Plants inside a fully-selected bed take priority over the bed itself.
-    const bedSel = selectedBedEl();
-    if (bedSel && bedSel.crops.length > 0) {
-      const cHandle = hitCropHandle(sp, c, bedSel);
-      if (cHandle) {
-        handlersRef.current.onSelectCrop(cHandle.a.instanceId);
-        gRef.current = {
-          k: "cropResize",
-          eId: bedSel.id,
-          instanceId: cHandle.a.instanceId,
-          dir: cHandle.dir,
-          origin: cropRectOf(bedSel, cHandle.a),
-          bed: bedRefOf(bedSel),
-        };
-        e.currentTarget.setPointerCapture(e.pointerId);
-        doBusy(true);
-        return;
-      }
-      const cHit = hitCrop(screenToWorld(sp, c), bedSel);
+    // Dragging a plant body beats grabbing the bed it sits in.
+    if (bedPlantable) {
+      const cHit = hitCrop(screenToWorld(sp, c), bedSel!);
       if (cHit) {
         handlersRef.current.onSelectCrop(cHit.instanceId);
         gRef.current = {
           k: "cropDrag",
-          eId: bedSel.id,
+          eId: bedSel!.id,
           instanceId: cHit.instanceId,
           sp,
-          origin: cropRectOf(bedSel, cHit),
-          bed: bedRefOf(bedSel),
+          origin: cropRectOf(bedSel!, cHit),
+          bed: bedRefOf(bedSel!),
         };
         e.currentTarget.setPointerCapture(e.pointerId);
         doBusy(true);
@@ -1175,7 +1323,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         .filter((el) => !sel.has(el.id))
         .map((el) => rOf(el));
       const sn = propsRef.current.snap
-        ? snapResize(nr, g.dir, g.union, others, SNAP_SCREEN / c.zoom)
+        ? snapResize(nr, g.dir, others, SNAP_SCREEN / c.zoom)
         : { r: nr, v: [], h: [] };
       const fx = sn.r.w / g.union.w;
       const fy = sn.r.h / g.union.h;
@@ -1224,12 +1372,12 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const res = propsRef.current.snap
         ? snapCropRect(moved, g.bed, others, SNAP_SCREEN / c.zoom)
         : { x: moved.x, y: moved.y, v: [], h: [] };
-      cropDraftRef.current.set(g.instanceId, {
-        x: Math.round(res.x),
-        y: Math.round(res.y),
-        w: g.origin.w,
-        h: g.origin.h,
-      });
+      // Containment holds with snapping off too: it is not an alignment concern.
+      const fit = clampToBed(
+        { x: Math.round(res.x), y: Math.round(res.y), w: g.origin.w, h: g.origin.h },
+        g.bed
+      );
+      cropDraftRef.current.set(g.instanceId, fit);
       cropGuidesRef.current = { v: res.v, h: res.h };
       emitLiveCropMoves(g.eId, g.instanceId);
       return;
@@ -1244,8 +1392,15 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         : [];
       const nr = resizeRect(g.origin, g.dir, wcur);
       const sn = propsRef.current.snap
-        ? snapCropResize(nr, g.dir, g.origin, g.bed, others, SNAP_SCREEN / c.zoom)
-        : { r: nr, v: [], h: [] };
+        ? snapCropResize(nr, g.dir, g.bed, others, SNAP_SCREEN / c.zoom)
+        : {
+            r: (() => {
+              const c = clampToBed(nr, g.bed);
+              return { x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h) };
+            })(),
+            v: [] as SnapLine[],
+            h: [] as SnapLine[],
+          };
       cropDraftRef.current.set(g.instanceId, sn.r);
       cropGuidesRef.current = { v: sn.v, h: sn.h };
       emitLiveCropMoves(g.eId, g.instanceId);
@@ -1851,12 +2006,11 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         }
       }
 
-      // snap guides (elements) — solid lines through both centres
+      // snap guides — solid + dot for a centre alignment, dashed for edges
       const drawGuide = (line: SnapLine, axis: "v" | "h") => {
-        // Alle snaps zijn midden-op-midden: stevige, doorgetrokken lijn door
-        // beide middelpunten.
-        ctx.lineWidth = 1.6;
+        ctx.lineWidth = line.center ? 1.6 : 1.2;
         ctx.strokeStyle = "#f24822";
+        ctx.setLineDash(line.center ? [] : [5, 4]);
         if (axis === "v") {
           const sx = worldToScreen({ x: line.at, y: 0 }, c).x;
           const ay = worldToScreen({ x: 0, y: line.a }, c).y;
@@ -1865,6 +2019,12 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           ctx.moveTo(sx, ay);
           ctx.lineTo(sx, by);
           ctx.stroke();
+          if (line.center) {
+            ctx.beginPath();
+            ctx.arc(sx, (ay + by) / 2, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = "#f24822";
+            ctx.fill();
+          }
         } else {
           const sy = worldToScreen({ x: 0, y: line.at }, c).y;
           const ax = worldToScreen({ x: line.a, y: 0 }, c).x;
@@ -1873,7 +2033,14 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           ctx.moveTo(ax, sy);
           ctx.lineTo(bx, sy);
           ctx.stroke();
+          if (line.center) {
+            ctx.beginPath();
+            ctx.arc((ax + bx) / 2, sy, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = "#f24822";
+            ctx.fill();
+          }
         }
+        ctx.setLineDash([]);
       };
       for (const gv of guidesRef.current.v) drawGuide(gv, "v");
       for (const gh of guidesRef.current.h) drawGuide(gh, "h");
@@ -2097,6 +2264,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
               ctx.strokeStyle = col;
               ctx.lineWidth = 1.5;
               ctx.strokeRect(p0.x + 1, p0.y + 1, p1.x - p0.x - 2, p1.y - p0.y - 2);
+              ctx.setLineDash([]);
             }
           }
         }
