@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Crop, CropAssignment, GardenElement } from "./types";
 import { fmtM } from "./storage";
-import { cropIconClass } from "./cropIcons";
+import { cropLabel, fitCropCounts, cropAreaForCounts } from "./cropIcons";
+import { CropGlyph } from "./CropIconPicker";
 import { objectDef } from "./gardenObjects";
 
 interface Props {
@@ -24,6 +25,9 @@ interface Props {
   onRemoveCrop: (iId: string) => void;
   onDuplicateCrop: (iId: string) => void;
   onDeselectCrop: () => void;
+  /** gewas dat het gewas-gereedschap gebruikt */
+  activeCropId: string | null;
+  onSelectActiveCrop: (cropId: string) => void;
 }
 
 /** Soortnaam voor in de sidebar-lijst. */
@@ -116,102 +120,331 @@ function NumField({
   );
 }
 
-/** One planted crop, shown both inside the "Gewassen beheren" popup and as the
- *  single-crop panel in the inspector. */
+/** Custom dropdown om het gewas van een stuk te veranderen, met icoontje
+ *  en kleur per optie (een native <select> kan geen icons tonen). */
+function CropSelect({
+  value,
+  catalog,
+  onChange,
+}: {
+  value: string;
+  catalog: Crop[];
+  onChange: (newId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const current = catalog.find((c) => c.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDocDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+
+  const q = query.trim().toLowerCase();
+  const options = q.length === 0
+    ? catalog
+    : catalog.filter((c) => c.name.toLowerCase().includes(q));
+
+  return (
+    <div className="crop-select" ref={rootRef}>
+      <button
+        type="button"
+        className="crop-select-btn"
+        onClick={() => {
+          setQuery("");
+          setOpen((o) => !o);
+        }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Ander gewas kiezen"
+      >
+        <CropGlyph iconKey={current?.icon} cropName={current?.name} color={current?.color} />
+        <span className="crop-select-name">
+                  {current ? cropLabel(current) : value}
+                </span>
+        <i className={`fa-solid fa-chevron-down crop-select-caret${open ? " open" : ""}`} />
+      </button>
+      {open && (
+        <div className="crop-select-pop" role="listbox" aria-label="Gewas kiezen">
+          {catalog.length > 6 && (
+            <input
+              className="crop-select-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Zoek gewas…"
+              autoFocus
+            />
+          )}
+          <div className="crop-select-list">
+            {options.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                role="option"
+                aria-selected={c.id === value}
+                className={c.id === value ? "crop-select-item selected" : "crop-select-item"}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(c.id);
+                }}
+              >
+                  <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
+                <span className="crop-select-name">{cropLabel(c)}</span>
+                {c.id === value && <i className="fa-solid fa-check crop-select-check" />}
+              </button>
+            ))}
+            {options.length === 0 && (
+              <div className="cp-empty">Geen resultaten.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Eén stuk gewas: overzichtelijke kaart met samenvatting, gegroepeerde
+ *  instellingen en acties. Wordt zowel in de "Gewassen beheren" popup als in
+ *  het enkele-gewas paneel gebruikt. */
 function CropRow({
   a,
   crop,
   bed,
+  catalog,
   onUpdateCrop,
   onRemoveCrop,
+  onDuplicateCrop,
 }: {
   a: CropAssignment;
   crop: Crop | undefined;
   bed: GardenElement;
+  catalog: Crop[];
   onUpdateCrop: (iId: string, patch: Partial<CropAssignment>) => void;
   onRemoveCrop: (iId: string) => void;
+  onDuplicateCrop?: (iId: string) => void;
 }) {
-  const areaW = a.area ? a.area.w : bed.widthM;
-  const areaH = a.area ? a.area.h : bed.heightM;
+  const area = a.area ?? { x: 0, y: 0, w: bed.widthM, h: bed.heightM };
+  const areaW = area.w;
+  const areaH = area.h;
   const rowSpacing = a.rowSpacing ?? crop?.rowSpacing ?? 0.3;
   const plantSpacing = a.plantSpacing ?? crop?.plantSpacing ?? 0.2;
-  const effCols = a.cols ?? Math.max(1, Math.round(areaW / plantSpacing));
-  const total = a.rows * effCols;
+  const padding = a.padding ?? 0.1;
+  // De tussenafstand is heilig: rijen/kolommen volgen uit maat + afstand.
+  // Groter vlak = meer rijen, nooit dichter op elkaar.
+  const fit = fitCropCounts(areaW, areaH, rowSpacing, plantSpacing, padding);
+  const dispRows = fit.rows;
+  const dispCols = fit.cols;
+  const total = dispRows * dispCols;
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+
+  /** Vlak opslaan en rijen/kolommen erbij herberekenen (vaste afstand). */
+  const applyArea = (
+    nx: number,
+    ny: number,
+    nw: number,
+    nh: number,
+    rs = rowSpacing,
+    ps = plantSpacing,
+    pad = padding
+  ) => {
+    const f = fitCropCounts(nw, nh, rs, ps, pad);
+    onUpdateCrop(a.instanceId, {
+      area: { x: r2(nx), y: r2(ny), w: r2(nw), h: r2(nh) },
+      rows: f.rows,
+      cols: f.cols,
+    });
+  };
+
+  const setSize = (w: number | undefined, h: number | undefined) => {
+    const nw = Math.max(0.1, Math.min(w ?? areaW, bed.widthM));
+    const nh = Math.max(0.1, Math.min(h ?? areaH, bed.heightM));
+    const nx = Math.max(0, Math.min(area.x, bed.widthM - nw));
+    const ny = Math.max(0, Math.min(area.y, bed.heightM - nh));
+    applyArea(nx, ny, nw, nh);
+  };
+
+  /** Meer/minder rijen = het vlak hoger/lager maken met één rijafstand. */
+  const setRows = (req: number) => {
+    const r = Math.max(1, Math.round(req));
+    const need = cropAreaForCounts(r, dispCols, rowSpacing, plantSpacing, padding);
+    const nh = Math.max(0.1, Math.min(need.h, bed.heightM));
+    const ny = Math.max(0, Math.min(area.y, bed.heightM - nh));
+    const nx = Math.max(0, Math.min(area.x, bed.widthM - areaW));
+    applyArea(nx, ny, areaW, nh);
+  };
+
+  /** Meer/minder kolommen = het vlak breder/smaler maken met één plantafstand. */
+  const setCols = (req: number) => {
+    const c = Math.max(1, Math.round(req));
+    const need = cropAreaForCounts(dispRows, c, rowSpacing, plantSpacing, padding);
+    const nw = Math.max(0.1, Math.min(need.w, bed.widthM));
+    const nx = Math.max(0, Math.min(area.x, bed.widthM - nw));
+    const ny = Math.max(0, Math.min(area.y, bed.heightM - areaH));
+    applyArea(nx, ny, nw, areaH);
+  };
+
+  const setSpacings = (rs?: number, ps?: number, pad?: number) => {
+    const nrs = rs ?? rowSpacing;
+    const nps = ps ?? plantSpacing;
+    const npad = pad ?? padding;
+    const f = fitCropCounts(areaW, areaH, nrs, nps, npad);
+    onUpdateCrop(a.instanceId, {
+      rowSpacing: nrs,
+      plantSpacing: nps,
+      padding: npad,
+      rows: f.rows,
+      cols: f.cols,
+    });
+  };
+
+  const switchCrop = (newId: string) => {
+    if (!newId || newId === a.cropId) return;
+    const next = catalog.find((c) => c.id === newId);
+    const nrs = next?.rowSpacing ?? rowSpacing;
+    const nps = next?.plantSpacing ?? plantSpacing;
+    const f = fitCropCounts(areaW, areaH, nrs, nps, padding);
+    onUpdateCrop(a.instanceId, {
+      cropId: newId,
+      // neem de afstanden van het nieuwe gewas over, tel opnieuw bij vaste afstand
+      rowSpacing: nrs,
+      plantSpacing: nps,
+      rows: f.rows,
+      cols: f.cols,
+    });
+  };
 
   return (
-    <div className="crop-row">
-      <div className="crop-row-actions">
+    <div className="crop-card">
+      <div className="crop-card-head">
+        <CropSelect value={a.cropId} catalog={catalog} onChange={switchCrop} />
         <button
           type="button"
           className="crop-row-remove"
           title="Gewas uit dit bed verwijderen"
           onClick={() => onRemoveCrop(a.instanceId)}
         >
-          <i className="fa-solid fa-xmark" />
+          <i className="fa-solid fa-trash" />
         </button>
       </div>
-      <div className="crop-row-main">
-        <div className="crop-row-title">
-          <i
-            className={`crop-icon ${cropIconClass(crop?.icon)}`}
-            style={{ color: crop?.color ?? "#999" }}
+
+      <dl className="crop-stats">
+        <div className="crop-stat">
+          <dt>Grootte</dt>
+          <dd>
+            {fmtM(areaW)} × {fmtM(areaH)}
+          </dd>
+        </div>
+        <div className="crop-stat">
+          <dt>Indeling</dt>
+          <dd>
+            {dispRows} × {dispCols}
+          </dd>
+        </div>
+        <div className="crop-stat">
+          <dt>Planten</dt>
+          <dd>±{total}</dd>
+        </div>
+        <div className="crop-stat">
+          <dt>Rij / plant</dt>
+          <dd>
+            {Math.round(rowSpacing * 100) / 100} / {Math.round(plantSpacing * 100) / 100} m
+          </dd>
+        </div>
+      </dl>
+
+      <div className="crop-sec">
+        <h5><i className="fa-solid fa-ruler-combined" /> Afmeting</h5>
+        <div className="crop-grid">
+          <Nudge
+            label="Breedte"
+            value={Math.round(areaW * 100) / 100}
+            min={0.1}
+            step={0.1}
+            suffix=" m"
+            onChange={(v) => setSize(v, undefined)}
           />
-          <span>{crop?.name ?? a.cropId}</span>
+          <Nudge
+            label="Lengte"
+            value={Math.round(areaH * 100) / 100}
+            min={0.1}
+            step={0.1}
+            suffix=" m"
+            onChange={(v) => setSize(undefined, v)}
+          />
         </div>
-        <div className="crop-row-info">
-          {fmtM(areaW)} × {fmtM(areaH)} · rij{" "}
-          {Math.round(rowSpacing * 100) / 100} m · plant{" "}
-          {Math.round(plantSpacing * 100) / 100} m · ±{total} planten
-        </div>
-        <div className="crop-row-controls">
+      </div>
+
+      <div className="crop-sec">
+        <h5><i className="fa-solid fa-table-cells" /> Indeling</h5>
+        <div className="crop-grid">
           <Nudge
             label="Rijen"
-            value={a.rows}
-            onChange={(v) =>
-              onUpdateCrop(a.instanceId, {
-                rows: Math.max(1, Math.round(v)),
-              })
-            }
+            value={dispRows}
+            onChange={(v) => setRows(v)}
           />
           <Nudge
             label="Kolommen"
-            value={effCols}
-            onChange={(v) =>
-              onUpdateCrop(a.instanceId, {
-                cols: Math.max(1, Math.round(v)),
-              })
-            }
-          />
-          <Nudge
-            label="Opruim (m)"
-            value={a.padding ?? 0.1}
-            min={0}
-            step={0.05}
-            suffix=" m"
-            onChange={(v) =>
-              onUpdateCrop(a.instanceId, { padding: v })
-            }
-          />
-          <Nudge
-            label="Rijafst. (m)"
-            value={rowSpacing}
-            step={0.05}
-            suffix=" m"
-            onChange={(v) =>
-              onUpdateCrop(a.instanceId, { rowSpacing: v })
-            }
-          />
-          <Nudge
-            label="Plantafst. (m)"
-            value={plantSpacing}
-            step={0.05}
-            suffix=" m"
-            onChange={(v) =>
-              onUpdateCrop(a.instanceId, { plantSpacing: v })
-            }
+            value={dispCols}
+            onChange={(v) => setCols(v)}
           />
         </div>
       </div>
+
+      <div className="crop-sec">
+        <h5><i className="fa-solid fa-arrows-left-right" /> Afstanden</h5>
+        <div className="crop-grid crop-grid-3">
+          <Nudge
+            label="Rijafstand"
+            value={Math.round(rowSpacing * 100) / 100}
+            min={0.05}
+            step={0.05}
+            suffix=" m"
+            onChange={(v) => setSpacings(Math.max(0.01, v), undefined, undefined)}
+          />
+          <Nudge
+            label="Plantafstand"
+            value={Math.round(plantSpacing * 100) / 100}
+            min={0.01}
+            step={0.05}
+            suffix=" m"
+            onChange={(v) => setSpacings(undefined, Math.max(0.01, v), undefined)}
+          />
+          <Nudge
+            label="Marge"
+            value={Math.round(padding * 100) / 100}
+            min={0}
+            step={0.05}
+            suffix=" m"
+            onChange={(v) => setSpacings(undefined, undefined, Math.max(0, v))}
+          />
+        </div>
+      </div>
+
+      {onDuplicateCrop && (
+        <div className="crop-card-foot">
+          <button
+            type="button"
+            className="btn-ghost btn-block"
+            onClick={() => onDuplicateCrop(a.instanceId)}
+          >
+            <i className="fa-solid fa-copy" /> Dupliceren
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -230,6 +463,8 @@ export function Inspector({
   onRemoveCrop,
   onDuplicateCrop,
   onDeselectCrop,
+  activeCropId,
+  onSelectActiveCrop,
 }: Props) {
   const [cropsOpen, setCropsOpen] = useState(false);
 
@@ -274,16 +509,7 @@ export function Inspector({
           >
             <i className="fa-solid fa-arrow-left" /> Terug
           </button>
-          <div className="insp-crop-title">
-            <i
-              className={`crop-icon ${cropIconClass(cropInfo?.icon)}`}
-              style={{ color: cropInfo?.color ?? "#999" }}
-            />
-            <div>
-              <div className="insp-kind">{cropInfo?.name ?? crop.cropId}</div>
-              <div className="insp-size">in {element.label}</div>
-            </div>
-          </div>
+          <div className="insp-size">Gewas in {element.label}</div>
         </div>
 
         <div className="insp-crop-body">
@@ -291,29 +517,14 @@ export function Inspector({
             a={crop}
             crop={cropInfo ?? undefined}
             bed={element}
+            catalog={catalog}
             onUpdateCrop={onUpdateCrop}
-            onRemoveCrop={onRemoveCrop}
-          />
-        </div>
-
-        <div className="insp-crop-actions">
-          <button
-            type="button"
-            className="btn-ghost btn-block"
-            onClick={() => onDuplicateCrop(crop.instanceId)}
-          >
-            <i className="fa-solid fa-copy" /> Dupliceren
-          </button>
-          <button
-            type="button"
-            className="btn-danger btn-block"
-            onClick={() => {
-              onRemoveCrop(crop.instanceId);
+            onRemoveCrop={(iId) => {
+              onRemoveCrop(iId);
               onDeselectCrop();
             }}
-          >
-            <i className="fa-solid fa-trash" /> Gewas verwijderen
-          </button>
+            onDuplicateCrop={onDuplicateCrop}
+          />
         </div>
       </aside>
     );
@@ -411,17 +622,47 @@ export function Inspector({
         <section className="insp-crops">
           <h4>Gewassen</h4>
 
+          {/* Kies welk gewas je tekent; elk stuk toont daarna het icoontje. */}
+          <div className="insp-pick-crop">
+            <span className="icon-picker-label">Gewas om te tekenen</span>
+            <div className="crop-picker-grid">
+              {catalog.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  title={c.name}
+                  aria-label={c.name}
+                  aria-pressed={c.id === activeCropId}
+                  className={
+                    c.id === activeCropId ? "icon-opt icon-opt-active" : "icon-opt"
+                  }
+                  onClick={() => onSelectActiveCrop(c.id)}
+                >
+                  <CropGlyph iconKey={c.icon} cropName={c.name} label={c.name} color={c.color} />
+                </button>
+              ))}
+            </div>
+          </div>
+          {catalog.length === 0 && (
+            <p className="insp-hint">Voeg eerst een gewas toe aan je database.</p>
+          )}
+
           {element.crops.length === 0 ? (
-            <p className="insp-hint">Nog geen gewassen in dit bed.</p>
+            <p className="insp-hint">
+              Nog geen gewassen. Kies hierboven een gewas en sleep in het bed om
+              een stuk te tekenen.
+            </p>
           ) : (
             <div className="crop-chips">
               {element.crops.map((c) => {
                 const crop = cropById.get(c.cropId);
                 return (
                   <span key={c.instanceId} className="crop-chip">
-                    <i
-                      className={`crop-chip-icon ${cropIconClass(crop?.icon)}`}
-                      style={{ color: crop?.color ?? "#999" }}
+                    <CropGlyph
+                      iconKey={crop?.icon}
+                      cropName={crop?.name}
+                      className="crop-chip-icon"
+                      color={crop?.color}
                     />
                   </span>
                 );
@@ -449,6 +690,7 @@ export function Inspector({
           onAddCrop={onAddCrop}
           onUpdateCrop={onUpdateCrop}
           onRemoveCrop={onRemoveCrop}
+          onDuplicateCrop={onDuplicateCrop}
         />
       )}
 
@@ -516,6 +758,7 @@ function CropsModal({
   onAddCrop,
   onUpdateCrop,
   onRemoveCrop,
+  onDuplicateCrop,
 }: {
   bed: GardenElement;
   catalog: Crop[];
@@ -527,6 +770,7 @@ function CropsModal({
     patch: Partial<CropAssignment>
   ) => void;
   onRemoveCrop: (iId: string) => void;
+  onDuplicateCrop: (iId: string) => void;
 }) {
   const [addQ, setAddQ] = useState("");
   const query = addQ.trim().toLowerCase();
@@ -575,8 +819,10 @@ function CropsModal({
               a={a}
               crop={cropById.get(a.cropId)}
               bed={bed}
+              catalog={catalog}
               onUpdateCrop={onUpdateCrop}
               onRemoveCrop={onRemoveCrop}
+              onDuplicateCrop={onDuplicateCrop}
             />
           ))}
         </div>
@@ -599,11 +845,8 @@ function CropsModal({
                   className="crops-add-item"
                   onClick={() => onAddCrop(c.id)}
                 >
-                  <i
-                    className={`crop-icon ${cropIconClass(c.icon)}`}
-                    style={{ color: c.color }}
-                  />
-                  <span className="crops-add-name">{c.name}</span>
+                <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
+                  <span className="crops-add-name">{cropLabel(c)}</span>
                   {n > 0 && (
                     <span className="crops-add-count" title={`Al ${n}× in dit bed`}>
                       {n}×

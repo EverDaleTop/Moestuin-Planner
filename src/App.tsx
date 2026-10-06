@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, Expense, Income, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
-import { id } from "./storage";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, SowingEntry, Expense, Income, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
+import { id, findFreeCropArea, roundM, PX_PER_M } from "./storage";
+import { fitCropCounts } from "./cropIcons";
 import { api, getToken, setToken, onUnauthorized, type MeResponse } from "./api";
 import { realtime, type LiveUpdate, type PreviewPayload, type PresenceMember } from "./realtime";
 import { GardenList } from "./GardenList";
@@ -98,7 +99,7 @@ export default function App() {
     try {
       const res: MeResponse = await api.me();
       setUserNames(res.userNames);
-      const gardens = res.gardens.map((g) => ({ ...g, shopping: (g as Garden).shopping ?? [] }));
+      const gardens = res.gardens.map((g) => ({ ...g, shopping: (g as Garden).shopping ?? [], sowings: (g as Garden).sowings ?? [] }));
       setData({ gardens, cropCatalog: res.cropCatalog });
       lastSentCatalogRef.current = JSON.stringify(res.cropCatalog);
       const map = new Map<string, string>();
@@ -124,7 +125,7 @@ export default function App() {
       .then((res) => {
         setUser(res.user);
         setUserNames(res.userNames);
-        const gardens = res.gardens.map((g) => ({ ...g, shopping: (g as Garden).shopping ?? [] }));
+        const gardens = res.gardens.map((g) => ({ ...g, shopping: (g as Garden).shopping ?? [], sowings: (g as Garden).sowings ?? [] }));
         setData({ gardens, cropCatalog: res.cropCatalog });
         lastSentCatalogRef.current = JSON.stringify(res.cropCatalog);
         const map = new Map<string, string>();
@@ -157,7 +158,7 @@ export default function App() {
     realtime.connect();
     const off = realtime.onMessage((msg) => {
       if (msg.type === "garden") {
-        const incoming = { ...msg.garden, shopping: (msg.garden as Garden).shopping ?? [] };
+        const incoming = { ...msg.garden, shopping: (msg.garden as Garden).shopping ?? [], sowings: (msg.garden as Garden).sowings ?? [] };
         lastSentRef.current.set(incoming.id, JSON.stringify(incoming));
         setLivePreview((cur) => (cur?.gardenId === incoming.id ? null : cur));
         setData((prev) => {
@@ -534,29 +535,54 @@ export default function App() {
     [data.gardens, updateGarden]
   );
 
-  const addCrop = useCallback(
-    (gId: string, eId: string, cropId: string) => {
+  /** Voegt een stuk gewas toe. Zonder `at` wordt automatisch het eerste vrije
+   *  plekje in het bed gezocht; met `at` (in meters, bed-relatief) wordt het
+   *  stuk daar geplaatst. */
+  const addCropAt = useCallback(
+    (
+      gId: string,
+      eId: string,
+      cropId: string,
+      at?: { x: number; y: number; w: number; h: number }
+    ) => {
       const crop = data.cropCatalog.find((c) => c.id === cropId);
       if (!crop) return;
       const bed = data.gardens
         .find((g) => g.id === gId)
         ?.elements.find((e) => e.id === eId);
-      const bedW = bed?.widthM ?? 1;
-      const bedH = bed?.heightM ?? 1;
-      const count = bed?.crops.length ?? 0;
-      const bandH = Math.max(0.1, bedH / (count + 1));
-      const area = {
-        x: 0,
-        y: Math.max(0, Math.min(count * bandH, bedH - bandH)),
-        w: bedW,
-        h: bandH,
-      };
+      if (!bed || bed.type !== "bed") return;
+
+      const bedW = bed.widthM;
+      const bedH = bed.heightM;
+      const taken = bed.crops.map((c) => c.area).filter(Boolean) as {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+      }[];
+
+      let area: { x: number; y: number; w: number; h: number };
+      if (at) {
+        // binnen het bed klemmen en op 5 cm afronden
+        const w = roundM(Math.max(0.1, Math.min(at.w, bedW)));
+        const h = roundM(Math.max(0.1, Math.min(at.h, bedH)));
+        const x = roundM(Math.max(0, Math.min(at.x, bedW - w)));
+        const y = roundM(Math.max(0, Math.min(at.y, bedH - h)));
+        area = { x, y, w, h };
+      } else {
+        area = findFreeCropArea(bedW, bedH, taken);
+      }
+
+      // Aantal bij vaste tussenafstand uit de maat afleiden (groter = meer).
+      const fit = fitCropCounts(area.w, area.h, crop.rowSpacing, crop.plantSpacing, 0.1);
       const assignment: CropAssignment = {
         instanceId: id(),
         cropId,
-        rows: 1,
+        rows: fit.rows,
+        cols: fit.cols,
         rowSpacing: crop.rowSpacing,
         plantSpacing: crop.plantSpacing,
+        padding: 0.1,
         area,
       };
       updateGarden(gId, (g) => ({
@@ -565,8 +591,16 @@ export default function App() {
           e.id === eId ? { ...e, crops: [...e.crops, assignment] } : e
         ),
       }));
+      return assignment.instanceId;
     },
     [data.cropCatalog, data.gardens, updateGarden]
+  );
+
+  const addCrop = useCallback(
+    (gId: string, eId: string, cropId: string) => {
+      addCropAt(gId, eId, cropId);
+    },
+    [addCropAt]
   );
 
   const updateCrop = useCallback(
@@ -682,6 +716,34 @@ export default function App() {
     [updateGarden]
   );
 
+  const addSowing = useCallback(
+    (gId: string, entry: Omit<SowingEntry, "id">) => {
+      const full: SowingEntry = { ...entry, id: id() };
+      updateGarden(gId, (g) => ({ ...g, sowings: [...(g.sowings ?? []), full] }));
+    },
+    [updateGarden]
+  );
+
+  const updateSowing = useCallback(
+    (gId: string, sId: string, patch: Partial<SowingEntry>) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        sowings: (g.sowings ?? []).map((s) => (s.id === sId ? { ...s, ...patch } : s)),
+      }));
+    },
+    [updateGarden]
+  );
+
+  const removeSowing = useCallback(
+    (gId: string, sId: string) => {
+      updateGarden(gId, (g) => ({
+        ...g,
+        sowings: (g.sowings ?? []).filter((s) => s.id !== sId),
+      }));
+    },
+    [updateGarden]
+  );
+
   const addExpense = useCallback(
     (gId: string, entry: Omit<Expense, "id">) => {
       const full: Expense = { ...entry, id: id() };
@@ -737,6 +799,14 @@ export default function App() {
     },
     [updateGarden]
   );
+
+  /** gewas dat met het gewas-gereedschap in bedden getekend wordt */
+  const [activeCropId, setActiveCropId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!activeCropId && data.cropCatalog.length > 0) {
+      setActiveCropId(data.cropCatalog[0].id);
+    }
+  }, [activeCropId, data.cropCatalog]);
 
   const addShopping = useCallback(
     (gId: string, entry: Omit<ShoppingItem, "id" | "createdAt" | "done">) => {
@@ -863,12 +933,29 @@ const removeShopping = useCallback(
       onAddHarvest={(entry) => addHarvest(garden.id, entry)}
       onUpdateHarvest={(hId, patch) => updateHarvest(garden.id, hId, patch)}
       onRemoveHarvest={(hId) => removeHarvest(garden.id, hId)}
+      onAddSowing={(entry) => addSowing(garden.id, entry)}
+      onUpdateSowing={(sId, patch) => updateSowing(garden.id, sId, patch)}
+      onRemoveSowing={(sId) => removeSowing(garden.id, sId)}
       onAddExpense={(entry) => addExpense(garden.id, entry)}
       onUpdateExpense={(eId, patch) => updateExpense(garden.id, eId, patch)}
       onRemoveExpense={(eId) => removeExpense(garden.id, eId)}
       onAddIncome={(entry) => addIncome(garden.id, entry)}
       onUpdateIncome={(iId, patch) => updateIncome(garden.id, iId, patch)}
       onRemoveIncome={(iId) => removeIncome(garden.id, iId)}
+      onAddCropAt={(eId, wx, wy, w, h) => {
+        const bed = garden.elements.find((e) => e.id === eId);
+        if (!bed) return undefined;
+        const cropId = activeCropId ?? data.cropCatalog[0]?.id;
+        if (!cropId) return undefined;
+        return addCropAt(garden.id, eId, cropId, {
+          x: (wx - bed.x) / PX_PER_M,
+          y: (wy - bed.y) / PX_PER_M,
+          w: w / PX_PER_M,
+          h: h / PX_PER_M,
+        });
+      }}
+      activeCropId={activeCropId}
+      onSelectActiveCrop={setActiveCropId}
       onAddShopping={(entry) => addShopping(garden.id, entry)}
       onUpdateShopping={(itemId, patch) => updateShopping(garden.id, itemId, patch)}
       onRemoveShopping={(itemId) => removeShopping(garden.id, itemId)}

@@ -623,22 +623,37 @@ select:focus {
   min-width: 0;
 }
 
+/* Tuinnaam als een echte titel: scherp, compacter, met een subtiele
+   onderstreep-hint dat hij bewerkbaar is. */
 .ge-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
   border: none;
+  border-bottom: 1.5px dashed transparent;
   background: transparent;
   min-width: 0;
-  width: 200px;
+  width: 180px;
   max-width: 100%;
-  border-radius: 8px;
-  padding: 4px 8px;
-  margin-left: -8px;
+  border-radius: 0;
+  padding: 3px 2px;
+  transition: border-color 0.15s ease, width 0.2s ease;
 }
 
-.ge-title:hover,
+.ge-title::placeholder {
+  color: var(--muted);
+}
+
+.ge-title:hover {
+  border-bottom-color: var(--border);
+}
+
 .ge-title:focus {
-  background: var(--surface-2);
+  outline: none;
+  width: min(280px, 100%);
+  border-bottom-color: var(--accent);
+  border-bottom-style: solid;
 }
 
 .ge-spacer {
@@ -1045,6 +1060,308 @@ select:focus {
   margin-top: 10px;
 }
 
+/* Gewas kiezen voor het gewas-gereedschap */
+.insp-pick-crop {
+  margin-bottom: 12px;
+}
+
+.crop-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+/* Stuk gewas bijplaatsen naast verwijderen */
+.crop-row-add {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  line-height: 1;
+}
+
+.crop-row-add:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+/* Overzichtelijke gewaskaart (vervangt het rommelige crop-row blokje) */
+.crop-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-1, transparent);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 10px 0;
+}
+
+.crop-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Custom gewas-dropdown met icons */
+.crop-select {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.crop-select-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.crop-select-btn:hover {
+  border-color: var(--accent);
+}
+
+.crop-select-btn .crop-icon {
+  font-size: 18px;
+  flex: none;
+}
+
+.crop-select-btn .crop-select-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crop-select-caret {
+  font-size: 11px;
+  color: var(--muted);
+  transition: transform 0.15s;
+  flex: none;
+}
+
+.crop-select-caret.open {
+  transform: rotate(180deg);
+}
+
+.crop-select-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  min-width: 220px;
+  transform-origin: top center;
+  animation: crop-select-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes crop-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crop-select-pop {
+    animation: none;
+  }
+}
+
+.crop-select-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.crop-select-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* eigen ruimte voor de scrollbar, zodat hij nooit over de opties heen valt */
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.crop-select-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.crop-select-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.crop-select-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.crop-select-list::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.crop-select-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.crop-select-item:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.crop-select-item.selected {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.crop-select-item .crop-icon {
+  font-size: 16px;
+  flex: none;
+}
+
+.crop-select-item .crop-select-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crop-select-check {
+  color: var(--accent);
+  font-size: 12px;
+  flex: none;
+}
+
+.crop-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.crop-stat {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+}
+
+.crop-stat dt {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.crop-stat dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.crop-sec {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.crop-sec h5 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.crop-sec h5 i {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.crop-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.crop-grid-3 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.crop-grid-3 .nudge:last-child {
+  grid-column: 1 / -1;
+}
+
+.crop-grid .nudge {
+  min-width: 0;
+}
+
+.crop-grid .nudge-controls {
+  justify-content: space-between;
+}
+
+.crop-card-foot {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.crop-card-foot .btn-block {
+  width: 100%;
+}
+
 .insp-all {
   border-top: 1px solid var(--border);
   margin-top: 4px;
@@ -1200,11 +1517,12 @@ select:focus {
   min-width: 0;
 }
 
-/* Flat-coloured crop icon glyphs */
+/* Echte gewas-icoontjes (emoji) */
 .crop-icon {
   font-size: 17px;
   width: 1em;
   height: 1em;
+  line-height: 1;
   text-align: center;
   flex-shrink: 0;
   display: inline-block;
@@ -1231,29 +1549,36 @@ select:focus {
 
 .icon-picker-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 6px;
 }
 
 .icon-opt {
   border: 1px solid var(--border);
   background: var(--surface);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0;
   aspect-ratio: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
 }
 
-.icon-opt i {
-  font-size: 15px;
+.icon-opt .crop-icon {
+  font-size: 22px;
   width: auto;
   height: auto;
 }
 
 .icon-opt:hover {
   border-color: var(--accent);
+  transform: scale(1.08);
+}
+
+.icon-opt:active {
+  transform: scale(0.94);
 }
 
 .icon-opt-active {
@@ -1264,16 +1589,17 @@ select:focus {
 
 /* --------- Plant database icon swatch ---------- */
 .pd-icon {
-  font-size: 22px;
-  width: 34px;
-  height: 34px;
+  font-size: 27px;
+  width: 40px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   flex: none;
+  line-height: 1;
 }
 
 /* ---------- Crops overview + popup ---------- */
@@ -1664,6 +1990,7 @@ select:focus {
   gap: 10px;
   align-items: center;
   margin-bottom: 18px;
+  animation: shop-fade-in 0.3s ease-out;
 }
 
 .pd-search {
@@ -1674,6 +2001,13 @@ select:focus {
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pd-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--surface-2);
 }
 
 .pd-form {
@@ -1687,8 +2021,94 @@ select:focus {
   gap: 10px;
 }
 
+/* in de smooth hoogte-collapse: geen eigen marge/animatie, de .shop-form
+   overgang (grid-rows) doet het werk — net als op de andere pagina's */
+.shop-form-inner > .pd-form {
+  flex: none;
+  margin-bottom: 0;
+}
+
+@keyframes pd-form-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .pd-field {
   margin: 0;
+}
+
+/* Zadenpagina ophalen in het gewasformulier */
+.pd-seedurl {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--surface-2);
+}
+
+.pd-seedurl-row {
+  display: flex;
+  gap: 8px;
+}
+
+.pd-seedurl-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.pd-seedurl-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pd-seedurl-row .btn-primary {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pd-seedurl-msg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.pd-seedurl-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pd-seedurl-msg.is-ok .pd-seedurl-tag {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pd-seedurl-msg.is-err {
+  color: var(--danger);
 }
 
 .pd-list {
@@ -1698,13 +2118,46 @@ select:focus {
 }
 
 .pd-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  animation: shop-fade-in 0.3s ease-out backwards;
+}
+
+.pd-card-view {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* verspringend binnenkomen, net als de kaarten op de andere pagina's */
+.pd-list .pd-card:nth-child(1) { animation-delay: 0.02s; }
+.pd-list .pd-card:nth-child(2) { animation-delay: 0.05s; }
+.pd-list .pd-card:nth-child(3) { animation-delay: 0.08s; }
+.pd-list .pd-card:nth-child(4) { animation-delay: 0.11s; }
+.pd-list .pd-card:nth-child(5) { animation-delay: 0.14s; }
+.pd-list .pd-card:nth-child(6) { animation-delay: 0.17s; }
+.pd-list .pd-card:nth-child(7) { animation-delay: 0.2s; }
+.pd-list .pd-card:nth-child(8) { animation-delay: 0.23s; }
+.pd-list .pd-card:nth-child(n+9) { animation-delay: 0.26s; }
+
+.pd-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pd-toolbar,
+  .pd-form,
+  .pd-card {
+    animation: none;
+  }
+  .pd-card:hover {
+    transform: none;
+  }
 }
 
 .pd-dot {
@@ -1745,6 +2198,15 @@ select:focus {
   background: var(--bg);
   color: var(--text);
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.pd-card-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.pd-card-actions button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .pd-card-actions button.btn-danger {
@@ -1757,12 +2219,747 @@ select:focus {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+  animation: pd-form-in 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .pd-edit-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+
+/* ---------- Zaaikalender ---------- */
+.cal-page .shop-hero {
+  margin-bottom: 18px;
+}
+
+/* Tijdens het opbouwen van de pagina verschijnen de panelen en tabel één voor
+   één; de hoogte groeit dan per frame. De custom scrollbar zou daardoor
+   blijven verschijnen en verdwijnen. Geef de pagina daarom meteen een
+   schermvullende hoogte, zodat hij pas scrollt als de inhoud écht te hoog is. */
+.cal-page {
+  min-height: calc(100vh - 48px);
+}
+
+/* huidige maand, groot en duidelijk */
+.cal-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.cal-now-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 16%, var(--panel)),
+    var(--panel) 70%
+  );
+}
+
+.cal-now-num {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent);
+  min-width: 34px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-now-txt {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.cal-now-txt strong {
+  font-size: 14px;
+}
+
+.cal-now-txt span {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* panelen */
+.cal-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+  animation: shop-fade-in 0.3s ease-out backwards;
+}
+
+.cal-now-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.cal-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.cal-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.cal-panel-head .cal-h {
+  margin: 0;
+}
+
+.cal-h i {
+  color: var(--accent);
+}
+
+.cal-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* filters */
+.cal-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cal-seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.cal-seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cal-seg-btn:hover {
+  color: var(--ink);
+}
+
+.cal-seg-btn.on {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
+.cal-search {
+  width: 180px;
+  flex: none;
+  padding: 8px 12px;
+}
+
+/* chips */
+.cal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cal-chip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+  animation: shop-fade-in 0.3s ease-out backwards;
+}
+
+.cal-chip:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.cal-chip > span[role="img"] {
+  font-size: 19px;
+  line-height: 1;
+  flex: none;
+}
+
+.cal-chip-txt {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.cal-chip-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cal-chip-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cal-chip-add {
+  font-size: 11px;
+  color: var(--accent);
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.cal-chip:hover .cal-chip-add {
+  opacity: 1;
+}
+
+.cal-chip-harvest {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+/* legenda */
+.cal-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cal-lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-lg-sw {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+
+.cal-lg-sow {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  border-color: var(--accent);
+}
+
+.cal-lg-harv {
+  background: color-mix(in srgb, #f0a336 60%, transparent);
+  border-color: #d98324;
+}
+
+.cal-lg-both {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent) 40%, transparent) 0 50%,
+    color-mix(in srgb, #f0a336 60%, transparent) 50% 100%
+  );
+}
+
+.cal-lg-now {
+  background: transparent;
+  border: 2px solid var(--accent);
+}
+
+/* tabel */
+.cal-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.cal-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: 620px;
+  font-size: 12px;
+}
+
+.cal-table th,
+.cal-table td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cal-table thead th {
+  padding: 7px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--surface-2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.cal-table thead th.cal-th-now {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cal-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Alleen de gewaskolom en lege cellen krijgen de hover-tint; de
+   zaaien/oogsten-cellen houden hun eigen kleur (background op de cel). */
+.cal-table tbody tr:hover td:not(
+    .cal-cell-sow,
+    .cal-cell-harv,
+    .cal-cell-both,
+    .cal-cell-cycle
+  ) {
+  background-color: var(--surface-2);
+}
+
+.cal-crop-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 140px;
+  min-width: 140px;
+  max-width: 180px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.cal-table thead .cal-crop-col {
+  z-index: 3;
+  background: var(--surface-2);
+}
+
+.cal-crop-cell {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.cal-crop-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 4px 8px 10px;
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  border-radius: 0;
+}
+
+.cal-crop-btn:hover {
+  background: var(--surface-2);
+}
+
+/* vizier: spring naar waar dit gewas in de tuin staat */
+.cal-locate-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.13s ease, border-color 0.13s ease, background 0.13s ease;
+}
+
+.cal-locate-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.cal-crop-emoji {
+  font-size: 18px;
+  line-height: 1;
+  flex: none;
+}
+
+/* naam alleen, één regel; ras en vensters staan in de tooltip */
+.cal-crop-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-row {
+  animation: shop-fade-in 0.3s ease-out backwards;
+}
+
+.cal-cell {
+  height: 40px;
+  min-width: 34px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* zaaien = accent (groen), oogsten = warm oranje: duidelijk twee kleuren.
+   Celkleuren staan op de cel zelf (background-color) zodat hover van de rij
+   ze niet kan overschrijven. */
+.cal-cell-sow {
+  background-color: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.cal-cell-harv {
+  background-color: color-mix(in srgb, #f0a336 52%, transparent);
+}
+
+/* Zaaien én oogsten in dezelfde maanden: cel is links zaaigroen, rechts
+   oogstoranje — geen aparte derde kleur, want het blijft "beide". */
+.cal-cell-both,
+.cal-cell-cycle {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent) 30%, transparent) 0 50%,
+    color-mix(in srgb, #f0a336 55%, transparent) 50% 100%
+  );
+}
+
+/* huidige maand: verticale lijnen + dikke lijn onder de rij */
+.cal-cell-now {
+  position: relative;
+}
+
+.cal-table td.cal-cell-now::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  pointer-events: none;
+}
+
+.cal-table tr:last-child td.cal-cell-now::after {
+  border-bottom: 2px solid var(--accent);
+}
+
+.cal-mark {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* log-lijst */
+.cal-log {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.cal-log .pd-icon {
+  width: 34px;
+  height: 34px;
+  font-size: 20px;
+  border-radius: 9px;
+}
+
+.cal-log .pd-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cal-log .pd-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-log .pd-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+}
+
+/* datum staat in de tekst, alleen een potloodje om te wijzigen */
+.cal-log-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.cal-log-date i {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cal-log-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.cal-log-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.cal-log-edit {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.cal-log-edit:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cal-log-edit:active {
+  transform: scale(0.94);
+}
+
+.cal-log-del:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.cal-log-confirm {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.cal-log-confirm.btn-danger {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+}
+
+.cal-date-edit {
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-date-edit:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.cal-notify {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  margin-bottom: 12px;
+}
+
+.cal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cal-toggle input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+}
+
+.cal-days {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cal-days input {
+  width: 64px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.cal-bell {
+  padding: 0;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease,
+    transform 0.1s ease;
+}
+
+.cal-bell i {
+  display: block;
+  line-height: 1;
+}
+
+.cal-bell:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--surface-2);
+}
+
+.cal-bell:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.cal-bell-on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+/* meldingen aan: kleine groene stip, zodat het direct te zien is */
+.cal-bell-on::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+@media (max-width: 820px) {
+  .cal-now-grid {
+    grid-template-columns: 1fr;
+  }
+  .cal-panel-head {
+    align-items: flex-start;
+  }
+  .cal-tools {
+    width: 100%;
+  }
+  .cal-search {
+    flex: 1;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cal-panel,
+  .cal-chip,
+  .cal-row {
+    animation: none;
+  }
 }
 
 .btn-primary {
@@ -1878,68 +3075,211 @@ select:focus {
 }
 
 /* ---------- Editor tabs (navbar) ----------
-   E�n samenhangende pil met de kleuren van de boodschappenpagina:
-   hover = accent-tint, actief = accentvulling met witte tekst. */
+   Losse spooktabs met een accent-onderstreep voor actief. De container heeft
+   géén overflow-knip meer, zodat dropdowns er vrij onderuit kunnen vouwen. */
 .ge-editor-tabs {
   display: flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  align-items: stretch;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
   flex: 0 1 auto;
   max-width: 100%;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .ge-editor-tabs .nav-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 13px;
-  font-size: 13px;
-  font-weight: 500;
+  gap: 7px;
+  padding: 8px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 11px;
   background: transparent;
   color: var(--muted);
   white-space: nowrap;
-  transition: background 0.18s ease, color 0.18s ease;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
 .ge-editor-tabs .nav-tab:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .ge-editor-tabs .nav-tab.nav-active,
 .ge-editor-tabs .nav-tab.nav-active:hover:not(:disabled) {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent);
   cursor: default;
 }
 
-.ge-editor-tabs .nav-tab.nav-active:hover:not(:disabled) {
-  background: var(--accent-2);
-  border-color: var(--accent-2);
+/* tellers op de navbar-tab: altijd dezelfde neutrale pil; het icoontje
+   ervoor vertelt wat het getal betekent (zaaien / oogsten) */
+.ge-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.ge-tab-badge i {
+  font-size: 10px;
 }
 
 .ge-editor-tabs .nav-tab i {
   font-size: 13px;
 }
 
-/* ---------- Harvest & Expense view ---------- */
-.he-wrap {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-  max-width: var(--page-w);
-  margin: 0 auto;
-  width: 100%;
+/* ---------- Navbar dropdowns ---------- */
+.ge-menu {
+  position: relative;
+  display: inline-flex;
 }
 
+.ge-menu .nav-tab {
+  gap: 6px;
+}
+
+.ge-menu-caret {
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.ge-menu-caret.open {
+  transform: rotate(180deg);
+}
+
+.ge-menu-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 230px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  transform-origin: top left;
+  animation: ge-menu-in 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ge-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ge-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.13s ease, border-color 0.13s ease;
+}
+
+.ge-menu-item:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.ge-menu-item.is-active {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.ge-menu-item > i:first-child {
+  font-size: 14px;
+  color: var(--muted);
+  flex: none;
+}
+
+.ge-menu-item.is-active > i:first-child {
+  color: var(--accent);
+}
+
+.ge-menu-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ge-menu-hint {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.ge-menu-check {
+  font-size: 12px;
+  color: var(--accent);
+  flex: none;
+}
+
+.ge-menu-count {
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ge-menu-count i {
+  font-size: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ge-menu-pop {
+    animation: none;
+  }
+}
+
+/* ---------- Harvest & Expense view ---------- */
 .he-summary {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -2806,8 +4146,8 @@ html {
     flex: 1 1 100%;
     width: 100%;
     justify-content: flex-start;
-    padding: 2px;
-    overflow-x: auto;
+    padding: 0 2px;
+    overflow: visible;
   }
   .ge-editor-tabs .nav-tab {
     flex: 1 0 auto;
@@ -2815,6 +4155,13 @@ html {
     font-size: 12px;
     padding: 8px 10px;
     white-space: nowrap;
+  }
+  .ge-editor-tabs .ge-menu {
+    flex: 1 0 auto;
+    display: flex;
+  }
+  .ge-editor-tabs .ge-menu .nav-tab {
+    flex: 1;
   }
   .ge-spacer {
     display: none;
@@ -2902,12 +4249,6 @@ html {
 
 .ge-editor-tabs .nav-tab .crops-open-count {
   margin-left: 4px;
-}
-
-/* op een accentvulling is een accent-badge onleesbaar -> witte kontrast */
-.ge-editor-tabs .nav-tab.nav-active .crops-open-count {
-  background: #fff;
-  color: var(--accent);
 }
 
 @media (max-width: 768px) {
@@ -3881,6 +5222,7 @@ html {
   margin: 0 auto;
   padding: 24px 24px 64px;
   animation: shop-fade-in 0.3s ease-out;
+  box-sizing: border-box;
 }
 
 @keyframes shop-fade-in {
@@ -4309,6 +5651,13 @@ html {
   display: flex;
   gap: 8px;
   align-items: center;
+  /* Velden hebben zelf geen onder marge, dus zonder dit plakt de knop tegen
+     het laatste veld. */
+  margin-top: 16px;
+}
+
+.shop-form-footer .btn-primary {
+  justify-content: center;
 }
 
 .shop-toolbar {

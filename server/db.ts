@@ -63,11 +63,17 @@ export class JsonStore implements DataStore {
       db = {
         users: parsed.users ?? base.users,
         sessions: parsed.sessions ?? base.sessions,
-        cropCatalog: parsed.cropCatalog ?? base.cropCatalog,
+        // Een lege catalogus breekt het planten volledig (er valt niks te
+        // kiezen), dus zaai in dat geval de standaardgewassen opnieuw.
+        cropCatalog:
+          parsed.cropCatalog && parsed.cropCatalog.length > 0
+            ? parsed.cropCatalog
+            : base.cropCatalog,
         gardens: (parsed.gardens ?? []).map((g: any) => ({
           ...g,
           elements: g.elements ?? [],
           harvests: g.harvests ?? [],
+          sowings: g.sowings ?? [],
           expenses: g.expenses ?? [],
           incomes: g.incomes ?? [],
           shopping: g.shopping ?? [],

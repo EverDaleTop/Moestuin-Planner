@@ -45,6 +45,12 @@ interface Props {
   onUpdateCrop: (eId: string, instanceId: string, patch: Partial<CropAssignment>) => void;
   /** magnetisch uitlijnen aan/uit */
   snap: boolean;
+  /** tekent een nieuw stuk gewas in een bed (wereld-px) */
+  onAddCropAt: (bedId: string, wx: number, wy: number, w: number, h: number) => void;
+  /** gewas dat voor nieuwe stukken gebruikt wordt */
+  activeCropId: string | null;
+  /** centreer de camera op een wereldpunt (bv. na "toon in tuin") */
+  focusSignal?: { x: number; y: number; n: number } | null;
 }
 
 export function GardenCanvas({
@@ -68,6 +74,9 @@ export function GardenCanvas({
   onObjectMenuOpenChange,
   onUpdateCrop,
   snap,
+  onAddCropAt,
+  activeCropId,
+  focusSignal,
 }: Props) {
   return (
     <GpuCanvas
@@ -91,6 +100,9 @@ export function GardenCanvas({
       onUpdateCrop={onUpdateCrop}
       onBusyChange={onBusyChange}
       snap={snap}
+      onAddCropAt={onAddCropAt}
+      activeCropId={activeCropId}
+      focusSignal={focusSignal}
     />
   );
 }

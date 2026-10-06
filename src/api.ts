@@ -147,6 +147,10 @@ export const api = {
   previewLink(url: string): Promise<{ title: string; price?: number; currency?: string; image?: string; description?: string; url: string; source: string }> {
     return req(`/preview-link?url=${encodeURIComponent(url)}`);
   },
+  /** Zadenpagina opzoeken en vertalen naar gewasvelden (naam, ras, zaaimaanden). */
+  lookupSeed(url: string): Promise<import("./seedLookup").SeedLookup> {
+    return req(`/seed-lookup?url=${encodeURIComponent(url)}`);
+  },
   /** Generate a fresh invite link (owner only). */
   regenerateInvite(gardenId: string): Promise<Garden> {
     return req(`/gardens/${encodeURIComponent(gardenId)}/invite`, { method: "POST" });

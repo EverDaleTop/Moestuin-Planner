@@ -34,6 +34,10 @@ export interface ProductData {
   currency?: string;
   image?: string;
   description?: string;
+  /** label/waarde-paren uit de productspecificaties (bv. "Rijafstand: 40 cm") */
+  specs?: { label: string; value: string }[];
+  /** losse tekstfragmenten die over zaaien/veredelen gaan, voor de kalender */
+  growText?: string;
   url: string;
   source: string;
   cachedAt: number;

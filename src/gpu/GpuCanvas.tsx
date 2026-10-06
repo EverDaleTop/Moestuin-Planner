@@ -11,7 +11,7 @@ import type {
 } from "../types";
 import { PX_PER_M, fmtM } from "../storage";
 import type { PreviewPayload } from "../realtime";
-import { plantPositions, cropIconChar } from "../cropIcons";
+import { plantPositions, cropEmoji, fitCropCounts } from "../cropIcons";
 import {
   GARDEN_OBJECTS,
   objectChar,
@@ -50,6 +50,10 @@ interface Props {
   onAddFrame: (type: "bed" | "path", x: number, y: number, wM: number, hM: number) => string;
   /** adds a garden object as a sibling element, returns its id; "gaas" carries its pin anchors */
   onAddObject: (key: GardenObjectKey, x: number, y: number, gaas?: GaasData) => string;
+  /** draws a new planting piece inside a bed; area is in world px, bed-relative */
+  onAddCropAt: (bedId: string, wx: number, wy: number, w: number, h: number) => void;
+  /** crop used for new pieces (catalog id) */
+  activeCropId: string | null;
   objectMenuOpen: boolean;
   onObjectMenuOpenChange: (open: boolean) => void;
   /** magnetisch uitlijnen (snap guides); uit te zetten via de toolbar */
@@ -60,6 +64,8 @@ interface Props {
     patch: Partial<CropAssignment>
   ) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** centreer de camera op een wereldpunt (bv. na "toon in tuin" vanuit de kalender) */
+  focusSignal?: { x: number; y: number; n: number } | null;
 }
 
 interface Cam {
@@ -107,6 +113,7 @@ type Gesture =
   | { k: "groupDrag"; ids: string[]; sp: Pt; origins: Map<string, R>; leadId: string }
   | { k: "groupResize"; ids: string[]; dir: Dir; union: R; origins: Map<string, R> }
   | { k: "frame"; start: Pt; end: Pt }
+  | { k: "cropFrame"; start: Pt; end: Pt }
   | { k: "ga"; start: Pt; end: Pt }
   | { k: "gaasEnd"; id: string; end: "a" | "b"; origin: GaasData }
   | { k: "cropDrag"; eId: string; instanceId: string; sp: Pt; origin: R; bed: R }
@@ -560,20 +567,45 @@ export function GpuCanvas({
   livePreview,
   onAddFrame,
   onAddObject,
+  onAddCropAt,
   objectMenuOpen,
   onObjectMenuOpenChange,
   onUpdateCrop,
   onBusyChange,
   snap,
+  activeCropId,
+  focusSignal,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const gpuRef = useRef<HTMLCanvasElement | null>(null);
   const ovRef = useRef<HTMLCanvasElement | null>(null);
 
-  const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap });
-  propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap };
-  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
-  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
+  const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap, activeCropId });
+  propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap, activeCropId };
+  /** focus-signaal dat nog toegepast moet worden zodra de canvas een maat heeft */
+  const pendingFocusRef = useRef<{ x: number; y: number; n: number } | null>(null);
+
+  const applyFocus = (fx: number, fy: number) => {
+    const { w, h } = hostSize.current;
+    if (w === 0 || h === 0) return false;
+    const cam = camRef.current;
+    const zoom = Math.max(cam.zoom, 1);
+    camRef.current = { zoom, x: w / 2 - fx * zoom, y: h / 2 - fy * zoom };
+    return true;
+  };
+
+  // "Toon in tuin": centreer op het gevraagde punt. Werkt ook als het
+  // signaal binnenkomt terwijl de canvas nog geen maat heeft (tab net
+  // geopend): dan blijft het hangen tot de eerste ResizeObserver-meting.
+  useEffect(() => {
+    if (!focusSignal) return;
+    pendingFocusRef.current = focusSignal;
+    if (applyFocus(focusSignal.x, focusSignal.y)) {
+      pendingFocusRef.current = null;
+    }
+  }, [focusSignal]);
+  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onAddCropAt, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
+  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onAddCropAt, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
 
   const [objSearch, setObjSearch] = useState("");
 
@@ -804,6 +836,18 @@ export function GpuCanvas({
     return null;
   };
 
+  /** The bed under a world point (topmost first), if any. */
+  const bedAt = (wp: Pt): GardenElement | null => {
+    const els = propsRef.current.elements;
+    for (let i = els.length - 1; i >= 0; i--) {
+      const el = els[i];
+      if (el.type !== "bed") continue;
+      const r = rOf(el);
+      if (wp.x >= r.x && wp.x <= r.x + r.w && wp.y >= r.y && wp.y <= r.y + r.h) return el;
+    }
+    return null;
+  };
+
   /** Endpoint of the singly-selected gaas line under the pointer (screen px),
    *  so a line can be made longer/shorter by dragging its ends. */
   const hitGaasEndpoint = (sp: Pt, c: Cam): { id: string; end: "a" | "b" } | null => {
@@ -980,6 +1024,20 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     if (p.tool === "frame") {
       const start = screenToWorld(sp, c);
       gRef.current = { k: "frame", start, end: start };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      doBusy(true);
+      return;
+    }
+    if (p.tool === "crop") {
+      // Een stuk gewas zetten: sleep een rechthoek (mag vanuit/in een bed
+      // starten; bij loslaten wordt het bed onder start óf eind gebruikt).
+      const start = screenToWorld(sp, c);
+      const bed = bedAt(start);
+      if (bed) {
+        handlersRef.current.onSelect([bed.id]);
+        handlersRef.current.onSelectCrop(null);
+      }
+      gRef.current = { k: "cropFrame", start, end: start };
       e.currentTarget.setPointerCapture(e.pointerId);
       doBusy(true);
       return;
@@ -1162,7 +1220,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
             else if (hitItem(screenToWorld(sp, c))) cur = "move";
           }
         }
-      } else if (p.tool === "frame" || p.tool === "gaas") {
+      } else if (p.tool === "frame" || p.tool === "gaas" || p.tool === "crop") {
         cur = "crosshair";
       }
       if (hostRef.current) hostRef.current.style.cursor = cur;
@@ -1212,14 +1270,13 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       return;
     }
     if (g.k === "frame") {
-      gRef.current = { ...g, end: screenToWorld(sp, c) };
-      const a = g.start;
-      const b = gRef.current.end;
+      const b = screenToWorld(sp, c);
+      gRef.current = { k: "frame", start: g.start, end: b };
       const rect = {
-        x: Math.round(Math.min(a.x, b.x)),
-        y: Math.round(Math.min(a.y, b.y)),
-        w: Math.round(Math.abs(b.x - a.x)),
-        h: Math.round(Math.abs(b.y - a.y)),
+        x: Math.round(Math.min(g.start.x, b.x)),
+        y: Math.round(Math.min(g.start.y, b.y)),
+        w: Math.round(Math.abs(b.x - g.start.x)),
+        h: Math.round(Math.abs(b.y - g.start.y)),
       };
       handlersRef.current.onLivePreview?.({ kind: "frame", rect });
       return;
@@ -1229,6 +1286,12 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const a = g.start;
       const b = gRef.current.end;
       handlersRef.current.onLivePreview?.({ kind: "gaas", a: { x: Math.round(a.x), y: Math.round(a.y) }, b: { x: Math.round(b.x), y: Math.round(b.y) } });
+      return;
+    }
+    if (g.k === "cropFrame") {
+      // Tijdens het slepen de grootte live bijwerken, zodat je het stuk
+      // gewas direct op maat tekent (preview in de draw-loop volgt vanzelf).
+      gRef.current = { k: "cropFrame", start: g.start, end: screenToWorld(sp, c) };
       return;
     }
     if (g.k === "gaasEnd") {
@@ -1538,7 +1601,22 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         ar.y = Math.round(ar.y * 100) / 100;
         ar.w = Math.round(ar.w * 100) / 100;
         ar.h = Math.round(ar.h * 100) / 100;
-        handlersRef.current.onUpdateCrop(g.eId, g.instanceId, { area: ar });
+        // Vaste tussenafstand: na slepen/ resizen het aantal rijen/kolommen
+        // herberekenen uit de nieuwe maat (groter vlak = meer rijen).
+        const a = bed.crops.find((c) => c.instanceId === g.instanceId);
+        const cat = propsRef.current.catalog.find((cr) => cr.id === a?.cropId);
+        const f = fitCropCounts(
+          ar.w,
+          ar.h,
+          a?.rowSpacing ?? cat?.rowSpacing ?? 0.3,
+          a?.plantSpacing ?? cat?.plantSpacing ?? 0.2,
+          a?.padding ?? 0.1
+        );
+        handlersRef.current.onUpdateCrop(g.eId, g.instanceId, {
+          area: ar,
+          rows: f.rows,
+          cols: f.cols,
+        });
       }
       cropDraftRef.current.delete(g.instanceId);
       cropGuidesRef.current = { v: [], h: [] };
@@ -1554,6 +1632,31 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         const wM = Math.max(0.05, Math.round((w / PX_PER_M) * 20) / 20);
         const hM = Math.max(0.05, Math.round((h / PX_PER_M) * 20) / 20);
         handlersRef.current.onAddFrame(p.frameType, Math.round(x), Math.round(y), wM, hM);
+      }
+    } else if (g.k === "cropFrame") {
+      // stuk gewas: kleiner dan een kwart van het bed = klik, dus een gangbare
+      // stukgrootte zetten; anders precies het getekende vierkant gebruiken.
+      const bed = bedAt(g.start) ?? bedAt(g.end);
+      if (bed) {
+        let x = Math.min(g.start.x, g.end.x);
+        let y = Math.min(g.start.y, g.end.y);
+        let w = Math.abs(g.end.x - g.start.x);
+        let h = Math.abs(g.end.y - g.start.y);
+        const br = rOf(bed);
+        if (w < 12 || h < 12) {
+          w = Math.min(br.w * 0.45, 0.5 * PX_PER_M);
+          h = Math.min(br.h * 0.45, 0.4 * PX_PER_M);
+          x = Math.max(br.x, Math.min(br.x + br.w - w, x));
+          y = Math.max(br.y, Math.min(br.y + br.h - h, y));
+        }
+        // binnen het bed klemmen
+        const nx = Math.max(br.x, Math.min(br.x + br.w - w, x));
+        const ny = Math.max(br.y, Math.min(br.y + br.h - h, y));
+        w = Math.min(w, br.x + br.w - nx);
+        h = Math.min(h, br.y + br.h - ny);
+        if (w > MIN && h > MIN) {
+          handlersRef.current.onAddCropAt(bed.id, nx, ny, w, h);
+        }
       }
     } else if (g.k === "ga") {
       const snap = (pt: Pt): GaasPin => {
@@ -1611,6 +1714,10 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       if (!fitted) {
         fitted = true;
         fitView();
+        const pending = pendingFocusRef.current;
+        if (pending && applyFocus(pending.x, pending.y)) {
+          pendingFocusRef.current = null;
+        }
       }
     });
     ro.observe(host_);
@@ -1675,14 +1782,19 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, bw - 1, bh - 1);
 
           // flat plant icons arranged in the chosen layout, spacing from the
-          // crop's row/plant spacing
+          // crop's row/plant spacing. Tijdens het resizen live het maximum
+          // tonen dat past (vaste afstand), zodat je rijen er al tijdens het
+          // slepen bij ziet komen; bij loslaten wordt de telling opgeslagen.
           const rowSpacingM = a.rowSpacing ?? crop?.rowSpacing ?? 0.3;
           const plantSpacingM = a.plantSpacing ?? crop?.plantSpacing ?? 0.2;
-          const icon = cropIconChar(crop?.icon);
+          const icon = cropEmoji(crop?.icon, crop?.name);
+          const gest = gRef.current;
+          const liveResize =
+            gest.k === "cropResize" && gest.instanceId === a.instanceId;
           const { spots, size } = plantPositions(
             { x: r.x, y: r.y, w: r.w, h: r.h },
-            a.rows,
-            a.cols,
+            liveResize ? 0 : a.rows,
+            liveResize ? undefined : a.cols,
             rowSpacingM,
             plantSpacingM,
             a.padding ?? 0.1,
@@ -1691,7 +1803,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           if (spots.length > 0 && bw >= 16 && bh >= 16) {
             ctx.globalAlpha = p.selectedCropId && !isSel ? 0.45 : 1;
             ctx.fillStyle = col;
-            ctx.font = `900 ${size * c.zoom}px "Font Awesome 7 Free", sans-serif`;
+            ctx.font = `${size * c.zoom}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             for (const s of spots) {
@@ -2064,6 +2176,95 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         ctx.fillStyle = "rgba(13,153,255,0.10)";
         ctx.fillRect(x, y, mw, mh);
         ctx.strokeRect(x, y, mw, mh);
+      }
+
+      // crop piece preview (drawing a new planting inside a bed): toont meteen de
+      // planten die erin passen, met de icoontjes van het gekozen gewas.
+      if (gRef.current.k === "cropFrame") {
+        const g = gRef.current as { k: "cropFrame"; start: Pt; end: Pt };
+        const bed = bedAt(g.start) ?? bedAt(g.end);
+        if (bed) {
+          const br = rOf(bed);
+          let rx = Math.min(g.start.x, g.end.x);
+          let ry = Math.min(g.start.y, g.end.y);
+          let rw = Math.abs(g.end.x - g.start.x);
+          let rh = Math.abs(g.end.y - g.start.y);
+          if (rw < 12 || rh < 12) {
+            rw = Math.min(br.w * 0.45, 0.5 * PX_PER_M);
+            rh = Math.min(br.h * 0.45, 0.4 * PX_PER_M);
+            rx = Math.max(br.x, Math.min(br.x + br.w - rw, rx));
+            ry = Math.max(br.y, Math.min(br.y + br.h - rh, ry));
+          }
+          const nx = Math.max(br.x, Math.min(br.x + br.w - rw, rx));
+          const ny = Math.max(br.y, Math.min(br.y + br.h - rh, ry));
+          rw = Math.min(rw, br.x + br.w - nx);
+          rh = Math.min(rh, br.y + br.h - ny);
+          const s0 = worldToScreen({ x: nx, y: ny }, c);
+          const s1 = worldToScreen({ x: nx + rw, y: ny + rh }, c);
+          const pw = s1.x - s0.x;
+          const ph = s1.y - s0.y;
+          const crop = p.catalog.find((cr) => cr.id === p.activeCropId);
+          const col = crop?.color ?? accent(p.theme);
+          ctx.globalAlpha = 0.16;
+          ctx.fillStyle = col;
+          ctx.fillRect(s0.x, s0.y, pw, ph);
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([5, 4]);
+          ctx.strokeRect(s0.x, s0.y, pw, ph);
+          ctx.setLineDash([]);
+          // preview van de plant-icoontjes
+          if (pw > 6 && ph > 6) {
+            const rowSpacingM = crop?.rowSpacing ?? 0.3;
+            const plantSpacingM = crop?.plantSpacing ?? 0.2;
+            const { spots, size } = plantPositions(
+              { x: nx, y: ny, w: rw, h: rh },
+              0,
+              undefined,
+              rowSpacingM,
+              plantSpacingM,
+              0.1,
+              PX_PER_M
+            );
+            if (spots.length > 0 && pw >= 16 && ph >= 16) {
+              ctx.fillStyle = col;
+              ctx.font = `${size * c.zoom}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillText(
+                cropEmoji(crop?.icon, crop?.name),
+                s0.x + pw / 2,
+                s0.y + ph / 2 + 1
+              );
+              ctx.textAlign = "left";
+              ctx.textBaseline = "top";
+            }
+          }
+          if (pw > MIN && ph > MIN) {
+            const wM = Math.max(0.05, Math.round((rw / PX_PER_M) * 20) / 20);
+            const hM = Math.max(0.05, Math.round((rh / PX_PER_M) * 20) / 20);
+            const txt = `${fmtM(wM)} × ${fmtM(hM)}${crop ? ` · ${crop.name}` : ""}`;
+            const fs = Math.max(10, Math.min(13, 11 * c.zoom));
+            ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+            const tw = ctx.measureText(txt).width + 16;
+            const th = fs + 7;
+            // Label direct onder het getekende vlakje, binnen de canvas
+            // geklemd (w/h zijn hier de canvas-afmetingen, niet de rechthoek).
+            const lx = Math.max(2, Math.min(w - tw - 2, s0.x));
+            const below = s0.y + ph + 8;
+            const above = s0.y - th - 8;
+            const ly = below + th <= h - 2 ? below : Math.max(2, above);
+            ctx.fillStyle = col;
+            ctx.beginPath();
+            ctx.roundRect(lx, ly, tw, th, 4);
+            ctx.fill();
+            ctx.fillStyle = "hsla(0,0%,100%,0.95)";
+            ctx.textBaseline = "middle";
+            ctx.fillText(txt, lx + 8, ly + th / 2 + 1);
+            ctx.textBaseline = "top";
+          }
+        }
       }
 
       // frame preview (drawing a new bed/path)

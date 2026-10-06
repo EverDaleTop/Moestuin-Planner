@@ -32,11 +32,14 @@ export type GardenObjectShape = "rect" | "circle";
  *  - "frame": drag out a rectangle on the canvas to create a new bed/path.
  *  - "gaas": draw a mesh line on the canvas between two points (or poles).
  *  Holding Space temporarily acts as the "move" tool from any tool. */
-export type EditorTool = "select" | "move" | "frame" | "gaas";
+export type EditorTool = "select" | "move" | "frame" | "gaas" | "crop";
 
 export interface Crop {
   id: string;
+  /** crop name, e.g. "Sla" */
   name: string;
+  /** variety/cultivar, e.g. "Sparta" — shown as "Sla · Sparta" */
+  variety?: string;
   color: string;
   /** centres between rows in metres */
   rowSpacing: number;
@@ -44,9 +47,30 @@ export interface Crop {
   plantSpacing: number;
   /** recommended sowing window, e.g. "apr–jun" */
   sowWindow?: string;
+  /** structured sowing window as months 1–12; may wrap the year (e.g. 9 → 2) */
+  sowStart?: number;
+  sowEnd?: number;
+  /** days between sowing and harvest; used to plan the harvest window when no
+   *  explicit harvest window is known */
+  daysToHarvest?: number;
+  /** explicit harvest window (months 1–12), e.g. taken from the seed packet */
+  harvestStart?: number;
+  harvestEnd?: number;
   notes?: string;
   /** flat icon key for this crop, see src/cropIcons.ts */
   icon?: string;
+}
+
+/** A logged sowing ("gezaaid"): what was sown and when. */
+export interface SowingEntry {
+  id: string;
+  /** link with the catalog when known */
+  cropId?: string;
+  /** crop name as free text, like HarvestEntry */
+  cropName: string;
+  /** sowing date as yyyy-mm-dd */
+  date: string;
+  note?: string;
 }
 
 /** A crop instance planted in a bed. */
@@ -156,6 +180,7 @@ export interface Garden {
   createdAt: number;
   elements: GardenElement[];
   harvests: HarvestEntry[];
+  sowings: SowingEntry[];
   expenses: Expense[];
   incomes: Income[];
   shopping: ShoppingItem[];

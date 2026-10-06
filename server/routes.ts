@@ -8,6 +8,7 @@ import type { StoredUser } from "./types.ts";
 import type { WsHub } from "./ws.ts";
 import type { MeResponse } from "./types.ts";
 import { scrapeProduct, clearCache, getCacheSize } from "./scraper.ts";
+import { interpretSeedPage } from "../src/seedLookup.ts";
 
 export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Router {
   const router = Router();
@@ -113,6 +114,7 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       createdAt: Date.now(),
       elements: [],
       harvests: [],
+      sowings: [],
       expenses: [],
       incomes: [],
       shopping: [],
@@ -254,6 +256,23 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
   router.post("/api/preview-link/clear-cache", auth.requireAuth, async (_req, res) => {
     clearCache();
     res.json({ ok: true, cacheSize: getCacheSize() });
+  });
+
+  // ---------- zadenpagina -> gewasgegevens ----------
+  router.get("/api/seed-lookup", auth.requireAuth, async (req, res) => {
+    const raw = String(req.query.url ?? "").trim();
+    if (!raw) {
+      res.status(400).json({ error: "Geef een url mee." });
+      return;
+    }
+    try {
+      const page = await scrapeProduct(raw);
+      res.json(interpretSeedPage(page));
+    } catch (err: any) {
+      res.status(502).json({
+        error: err?.message ?? "Kon de zadenpagina niet lezen. Vul de velden zelf aan.",
+      });
+    }
   });
 
   return router;

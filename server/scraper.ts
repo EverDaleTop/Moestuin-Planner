@@ -97,6 +97,85 @@ function parsePrice(text: string): { price: number; currency: string } | null {
   return null;
 }
 
+/**
+ * Haal de productspecificaties uit de pagina (label/waarde-paren). Tuin- en
+ * zaadwebsites zetten hier "Zaaien", "Rijafstand", "Plantafstand", "Oogst"
+ * enz. neer, dus dit levert de echte gegevens op in plaats van gokken uit de
+ * producttitel.
+ */
+/**
+ * De browsercode staat bewust als STRING en niet als arrow-functie: esbuild
+ * (via tsx) injecteert daar __name-helpers in, en die bestaan niet in de
+ * pagina — page.evaluate zou dan met "ReferenceError: __name" klappen.
+ */
+const SPECS_SCRIPT = `(() => {
+  const doc = document;
+  const out = [];
+  const clean = (s) => (s && s.textContent ? s.textContent.replace(/\\s+/g, ' ').trim() : '');
+
+  doc.querySelectorAll('dl').forEach((dl) => {
+    const dts = Array.from(dl.querySelectorAll('dt'));
+    const dds = Array.from(dl.querySelectorAll('dd'));
+    dts.forEach((dt, i) => {
+      const label = clean(dt);
+      const value = clean(dds[i]);
+      if (label && value && label.length < 60) out.push({ label, value });
+    });
+  });
+
+  doc.querySelectorAll('table tr').forEach((tr) => {
+    const cells = Array.from(tr.querySelectorAll('th, td')).map(clean).filter(Boolean);
+    if (cells.length >= 2 && cells[0].length < 60 && cells[1].length < 120) {
+      out.push({ label: cells[0], value: cells.slice(1).join(' · ') });
+    }
+  });
+
+  doc.querySelectorAll('li, p, div, span, dt').forEach((el) => {
+    const text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (text.length > 90) return;
+
+    // Sla elementen over waar een kind ook tekst heeft: dat zijn menu's,
+    // cookiebanners en kaarten, geen productspecificaties. Alleen dan is de
+    // "label: waarde"-vorm van het element zelf betrouwbaar.
+    const kids = Array.from(el.children);
+    const childText = kids.map((k) => (k.textContent || '').replace(/\\s+/g, ' ').trim()).join(' ').trim();
+    if (kids.length > 0 && childText !== '' && childText !== text) return;
+
+    const m = text.match(/^([A-Za-z][A-Za-z ()\\-]{2,28})\\s*[:：]\\s*(\\S.{0,50})$/);
+    if (m) out.push({ label: m[1].trim(), value: m[2].trim() });
+  });
+
+  // cookie-/opslagregels en navigatie-uitspraken zijn geen productspecificatie
+  const NOISE = /type:\\s*(http-cookie|local html-opslag|geïndexeerddb|pixeltracker)|^(catalogus|blog|diy|inspiratie|bereken in|bzorgen in|waardering)$/i;
+  const seen = new Set();
+  return out.filter((s) => {
+    if (NOISE.test(s.value) || NOISE.test(s.label)) return false;
+    const k = (s.label + '|' + s.value).toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+})()`;
+
+const GROW_SCRIPT = `(() => {
+  const re = /zaai|zaaien|zaaisoort|veredelen|kiemen|opkweken|rijafstand|plantafstand|oogst|teelt|voorzaaien/i;
+  const parts = [];
+  document.querySelectorAll('p, li, dd, td, span').forEach((el) => {
+    const t = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (t && t.length < 400 && re.test(t)) parts.push(t);
+  });
+  return Array.from(new Set(parts.filter((p) => p.length > 12))).join('\\n').slice(0, 3000);
+})()`;
+
+async function extractSpecs(page: Page): Promise<{ label: string; value: string }[]> {
+  return (await page.evaluate(SPECS_SCRIPT)) as { label: string; value: string }[];
+}
+
+/** Tekstfragmenten die over zaaien/planten/veredelen gaan. */
+async function extractGrowText(page: Page): Promise<string> {
+  return (await page.evaluate(GROW_SCRIPT)) as string;
+}
+
 async function extractFromPage(page: Page, url: URL): Promise<ProductData> {
   const source = detectSource(url);
 
@@ -123,17 +202,42 @@ async function extractFromPage(page: Page, url: URL): Promise<ProductData> {
   let image: string | undefined;
   let description: string | undefined;
 
+  /**
+   * JSON-LD `image` is niet altijd een string: het kan een array zijn, of een
+   * object met `url`/`contentUrl` (veel webshops doen dat). Trek daar de eerste
+   * bruikbare URL uit, anders crasht het op `.startsWith()`.
+   */
+  const imageToUrl = (value: unknown): string | undefined => {
+    if (typeof value === "string") return value.trim() || undefined;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const found = imageToUrl(entry);
+        if (found) return found;
+      }
+      return undefined;
+    }
+    if (value && typeof value === "object") {
+      const obj = value as Record<string, unknown>;
+      for (const key of ["url", "contentUrl", "@id"]) {
+        const found = imageToUrl(obj[key]);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  };
+
   for (const data of jsonLdData) {
     if (data["@type"] === "Product" || data["@type"] === "Offer") {
-      if (!title && data.name) title = data.name;
-      if (!description && data.description) description = data.description;
-      if (!image && data.image) {
-        image = Array.isArray(data.image) ? data.image[0] : data.image;
+      if (!title && typeof data.name === "string") title = data.name;
+      if (!description && typeof data.description === "string") {
+        description = data.description;
       }
+      if (!image) image = imageToUrl(data.image);
       const offers = data.offers ? (Array.isArray(data.offers) ? data.offers : [data.offers]) : [];
       for (const offer of offers) {
-        if (offer && (offer.price || offer.lowPrice)) {
-          const p = Number(String(offer.price ?? offer.lowPrice).replace(",", "."));
+        if (offer && typeof offer === "object") {
+          const raw = offer.price ?? offer.lowPrice;
+          const p = Number(String(raw).replace(",", "."));
           if (!isNaN(p) && p > 0 && p < 100000) {
             price = p;
             currency = offer.priceCurrency ?? "EUR";
@@ -177,6 +281,9 @@ async function extractFromPage(page: Page, url: URL): Promise<ProductData> {
     }) ?? undefined;
   }
 
+  const specs = await extractSpecs(page);
+  const growText = await extractGrowText(page);
+
   if (price === undefined) {
     const bodyText = await page.evaluate(() => (globalThis as any).document.body?.innerText?.slice(0, 5000) ?? "");
     const parsed = parsePrice(bodyText);
@@ -186,12 +293,21 @@ async function extractFromPage(page: Page, url: URL): Promise<ProductData> {
     }
   }
 
-  if (image && image.startsWith("/")) {
-    image = new URL(image, url).toString();
+  // relatieve afbeeldingen afmaken; niet-URL's (data:, lege string) negeren
+  if (image) {
+    if (image.startsWith("//")) {
+      image = `${url.protocol}${image}`;
+    } else if (image.startsWith("/")) {
+      image = new URL(image, url).toString();
+    } else if (!/^https?:\/\//i.test(image)) {
+      image = undefined;
+    }
   }
 
   if (title) {
-    title = title.replace(/\s*[|\-–—]\s*(temu|aliexpress|bol\.com|amazon|coolblue|intratuin|gamma|praxis).*$/i, "").trim();
+    title = title
+      .replace(/\s*[|\-–—]\s*(temu|aliexpress|bol\.com|amazon|coolblue|intratuin|gamma|praxis).*$/i, "")
+      .trim();
     if (title.length > 150) title = title.slice(0, 150);
   }
 
@@ -205,6 +321,8 @@ async function extractFromPage(page: Page, url: URL): Promise<ProductData> {
     currency,
     image,
     description: description?.slice(0, 500),
+    specs,
+    growText,
     url: url.toString(),
     source,
     cachedAt: Date.now(),
