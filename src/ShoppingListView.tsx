@@ -4,6 +4,7 @@ import { api } from "./api";
 import { useCollapseForm } from "./useCollapseForm";
 import { lineTotal, parseQty } from "./shopping";
 import { EXPENSE_CATEGORIES, categoryByKey } from "./expenseCategories";
+import { CategoryDropdown } from "./CategoryDropdown";
 
 interface Props {
   items: ShoppingItem[];
@@ -15,7 +16,7 @@ interface Props {
 }
 
 function fmtEuro(v: number): string {
-  return `€${v.toFixed(2)}`;
+  return `€${v.toFixed(2).replace(".", ",")}`;
 }
 
 function normalizeUrl(url: string): string {
@@ -30,6 +31,7 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
   const [editingId, setEditingId] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "done">("all");
+  const [catFilter, setCatFilter] = useState("");
 
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -81,11 +83,30 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
   // meegerekend met aantal: 3 zakken van €4,50 = €13,50
   const totalOpen = items.filter((i) => !i.done).reduce((s, i) => s + lineTotal(i), 0);
 
+  const usedCats = useMemo(() => {
+    const keys = new Set(items.map((i) => (i.category ? categoryByKey(i.category).key : "")));
+    keys.delete("");
+    return EXPENSE_CATEGORIES.filter((c) => keys.has(c.key));
+  }, [items]);
+  const filterCats = useMemo(
+    () => [{ key: "", label: "Alle categorieën", icon: "fa-layer-group", tone: "grey" }, ...usedCats],
+    [usedCats]
+  );
+  const statusOptions = useMemo(
+    () => [
+      { key: "all", label: "Alles", icon: "fa-layer-group", tone: "grey" },
+      { key: "open", label: "Open", icon: "fa-circle-dot", tone: "green" },
+      { key: "done", label: "Afgevinkt", icon: "fa-check", tone: "cyan" },
+    ],
+    []
+  );
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     let list = [...items];
     if (filter === "open") list = list.filter((i) => !i.done);
     if (filter === "done") list = list.filter((i) => i.done);
+    if (catFilter) list = list.filter((i) => i.category && categoryByKey(i.category).key === catFilter);
     if (s) {
       list = list.filter(
         (i) =>
@@ -94,11 +115,8 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
           (i.url ?? "").toLowerCase().includes(s)
       );
     }
-    return list.sort((a, b) => {
-      if (a.done !== b.done) return a.done ? 1 : -1;
-      return b.createdAt - a.createdAt;
-    });
-  }, [items, q, filter]);
+    return list.sort((a, b) => b.createdAt - a.createdAt);
+  }, [items, q, filter, catFilter]);
 
   const resetForm = () => {
     setTitle("");
@@ -156,8 +174,17 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
     items.filter((i) => i.done).forEach((i) => onRemove(i.id));
   };
 
+  /** Klik op de kaart: open de productlink, of bewerken als er geen link is. */
+  const openCard = (item: ShoppingItem) => {
+    if (item.url) {
+      window.open(normalizeUrl(item.url), "_blank", "noopener,noreferrer");
+    } else {
+      startEdit(item);
+    }
+  };
+
   return (
-    <div className="shop-page">
+    <div className="shop-page bood-page">
       <div className="shop-hero">
         <div className="shop-hero-text">
           <h2>
@@ -220,7 +247,7 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
       </div>
 
       {form.mounted && (
-        <div className={`shop-form ${form.open ? "" : "shop-form-closing"}`}>
+        <div ref={form.formRef} className={`shop-form ${form.open ? "" : "shop-form-closing"}`}>
           <div className="shop-form-inner">
             <div className="shop-form-panel">
             <div className="shop-form-header">
@@ -293,31 +320,16 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
                   placeholder="Bijv. ras, maat, alternatief…"
                 />
               </div>
-              <div className="shop-form-field">
-                <label>Categorie *</label>
-                <select
+              <div className="shop-form-field shop-form-field-wide">
+                <CategoryDropdown
+                  id="shop-cat"
+                  label="Categorie"
+                  noIcons
+                  categories={EXPENSE_CATEGORIES}
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}>
-                  {EXPENSE_CATEGORIES.map((c) => (
-                    <option key={c.key} value={c.key}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setCategory}
+                />
               </div>
-            </div>
-            <div className="shop-form-cats">
-              {EXPENSE_CATEGORIES.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  className={`exp-chip exp-chip-${c.tone} ${category === c.key ? "exp-chip-active" : ""}`}
-                  onClick={() => setCategory(c.key)}
-                  aria-pressed={category === c.key}>
-                  <i className={`fa-solid ${c.icon}`} />
-                  {c.label}
-                </button>
-              ))}
             </div>
 
           <div className="shop-form-footer">
@@ -352,25 +364,27 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
             aria-label="Zoek product"
           />
         </div>
-        <div className="shop-filters" role="group" aria-label="Filter">
-          <button
-            className={`shop-filter ${filter === "all" ? "shop-filter-active" : ""}`}
-            onClick={() => setFilter("all")}
-          >
-            Alles
-          </button>
-          <button
-            className={`shop-filter ${filter === "open" ? "shop-filter-active" : ""}`}
-            onClick={() => setFilter("open")}
-          >
-            Open
-          </button>
-          <button
-            className={`shop-filter ${filter === "done" ? "shop-filter-active" : ""}`}
-            onClick={() => setFilter("done")}
-          >
-            Afgevinkt
-          </button>
+        {usedCats.length > 0 && (
+          <div className="bood-catfilter">
+            <CategoryDropdown
+              id="bood-catfilter"
+              label="Filter op categorie"
+              noIcons
+              categories={filterCats}
+              value={catFilter}
+              onChange={setCatFilter}
+            />
+          </div>
+        )}
+        <div className="bood-statusfilter">
+          <CategoryDropdown
+            id="bood-statusfilter"
+            label="Filter op status"
+            noIcons
+            categories={statusOptions}
+            value={filter}
+            onChange={(key) => setFilter(key as "all" | "open" | "done")}
+          />
         </div>
       </div>
 
@@ -384,25 +398,60 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
         </div>
       )}
 
-      <div className="shop-grid">
-        {filtered.map((item) => (
+      {/* key op de filter: bij een filterwissel her-mounten de kaarten, zodat
+          ze netjes in-faden (stagger) i.p.v. ineens te verspringen. */}
+      <div className="shop-grid" key={`${filter}-${catFilter}`}>
+        {filtered.map((item, i) => (
           <div
             key={item.id}
+            style={{ animationDelay: `${Math.min(i, 11) * 35}ms` }}
             className={`shop-card ${item.done ? "shop-card-done" : ""}`}
+            onClick={() => openCard(item)}
+            role={item.url ? "link" : "button"}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") openCard(item);
+            }}
+            aria-label={`${item.title} openen`}
           >
-            <div
-              className={`shop-card-image ${item.imageUrl ? "" : "shop-card-image-empty"}`}
-            >
-              {item.imageUrl ? (
-                <img src={item.imageUrl} alt="" loading="lazy" />
-              ) : (
-                <div className="shop-card-image-placeholder">
-                  <i className="fa-solid fa-cart-shopping" />
-                </div>
-              )}
+            {item.imageUrl && (
+            <div className="shop-card-media">
+              <img src={item.imageUrl} alt="" loading="lazy" />
               {item.source && <span className="shop-card-source">{item.source}</span>}
+              <div className="shop-card-tools" onClick={(e) => e.stopPropagation()}>
+                {item.url && (
+                  <a
+                    className="shop-card-tool"
+                    href={normalizeUrl(item.url)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open productlink"
+                  >
+                    <i className="fa-solid fa-up-right-from-square" />
+                  </a>
+                )}
+                <button className="shop-card-tool" onClick={() => startEdit(item)} title="Bewerken">
+                  <i className="fa-solid fa-pen" />
+                </button>
+                <button
+                  className="shop-card-tool shop-card-tool-danger"
+                  onClick={() => onRemove(item.id)}
+                  title="Verwijderen"
+                >
+                  <i className="fa-solid fa-trash" />
+                </button>
+              </div>
             </div>
+            )}
             <div className="shop-card-body">
+              {item.category && (
+                <span
+                  className={`shop-card-eyebrow shop-card-cat-${categoryByKey(item.category).tone}`}
+                >
+                  <i className={`fa-solid ${categoryByKey(item.category).icon}`} />
+                  {categoryByKey(item.category).label}
+                </span>
+              )}
               <div className="shop-card-title">
                 {item.url ? (
                   <a
@@ -410,80 +459,88 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
                     target="_blank"
                     rel="noopener noreferrer"
                     title={item.url}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {item.title}
-                    <i className="fa-solid fa-up-right-from-square shop-card-ext" />
                   </a>
                 ) : (
                   item.title
                 )}
               </div>
-              <div className="shop-card-meta">
-                {item.category && (
-                  <span
-                    className={`shop-card-cat shop-card-cat-${categoryByKey(item.category).tone}`}
-                    title={`Categorie: ${categoryByKey(item.category).label}`}>
-                    <i className={`fa-solid ${categoryByKey(item.category).icon}`} />
-                    {categoryByKey(item.category).label}
-                  </span>
-                )}
-                {item.quantity && (
-                  <span className="shop-card-qty" title={`Aantal: ${item.quantity}`}>
-                    <i className="fa-solid fa-layer-group" />
-                    {item.quantity}
-                  </span>
-                )}
-                {item.price !== undefined && item.price > 0 && (
-                  <span className="shop-card-price">
-                    {fmtEuro(item.price)}
-                    {parseQty(item.quantity) > 1 && (
-                      <span className="shop-card-each"> / stuk</span>
+              {item.note && <div className="shop-card-note">{item.note}</div>}
+              <div className="shop-card-foot">
+                <div className="shop-card-prices">
+                  {(() => {
+                    const qtyN = parseQty(item.quantity);
+                    const price = item.price ?? 0;
+                    const hasPrice = price > 0;
+                    if (hasPrice && qtyN > 1) {
+                      return (
+                        <>
+                          <span className="shop-card-price">{fmtEuro(lineTotal(item))}</span>
+                          <span className="shop-card-sub">
+                            {item.quantity} × {fmtEuro(price)}
+                          </span>
+                        </>
+                      );
+                    }
+                    return (
+                      <>
+                        {hasPrice && (
+                          <span className="shop-card-price">{fmtEuro(price)}</span>
+                        )}
+                        {item.quantity && (
+                          <span className="shop-card-sub">
+                            {item.quantity}
+                            {hasPrice ? "" : " nodig"}
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+                {!item.imageUrl && (
+                  <span className="shop-card-minitools" onClick={(e) => e.stopPropagation()}>
+                    {item.url && (
+                      <a
+                        className="shop-card-minitool"
+                        href={normalizeUrl(item.url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open productlink"
+                      >
+                        <i className="fa-solid fa-up-right-from-square" />
+                      </a>
                     )}
+                    <button className="shop-card-minitool" onClick={() => startEdit(item)} title="Bewerken">
+                      <i className="fa-solid fa-pen" />
+                    </button>
+                    <button
+                      className="shop-card-minitool shop-card-minitool-danger"
+                      onClick={() => onRemove(item.id)}
+                      title="Verwijderen"
+                    >
+                      <i className="fa-solid fa-trash" />
+                    </button>
                   </span>
                 )}
-                {lineTotal(item) > 0 && parseQty(item.quantity) > 1 && (
-                  <span className="shop-card-total" title="Aantal × prijs">
-                    {fmtEuro(lineTotal(item))}
-                  </span>
-                )}
-                {item.note && <span className="shop-card-note">{item.note}</span>}
-              </div>
-            </div>
-            <div className="shop-card-actions">
-              <button
-                className={`shop-card-check ${item.done ? "shop-card-check-done" : ""}`}
-                onClick={() => toggleDone(item)}
-                title={
-                  item.done
-                    ? "Terugzetten naar open — uitgave wordt verwijderd"
-                    : "Afvinken — komt op de Uitgaven-pagina"
-                }
-                aria-label={item.done ? "Terugzetten naar open" : "Afvinken"}
-                aria-pressed={item.done}
-              >
-                <i className="fa-solid fa-check" />
-              </button>
-              {item.url && (
-                <a
-                  className="shop-card-action"
-                  href={normalizeUrl(item.url)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open productlink"
+                <button
+                  className={`shop-card-check${item.done ? " shop-card-check-done" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleDone(item);
+                  }}
+                  title={
+                    item.done
+                      ? "Terugzetten naar open — uitgave wordt verwijderd"
+                      : "Afvinken — komt op de Uitgaven-pagina"
+                  }
+                  aria-pressed={item.done}
+                  aria-label={item.done ? "Terugzetten naar open" : "Afvinken"}
                 >
-                  <i className="fa-solid fa-up-right-from-square" />
-                </a>
-              )}
-              <button className="shop-card-action" onClick={() => startEdit(item)} title="Bewerken">
-                <i className="fa-solid fa-pen" />
-              </button>
-              <button
-                className="shop-card-action shop-card-action-danger"
-                onClick={() => onRemove(item.id)}
-                title="Verwijderen"
-              >
-                <i className="fa-solid fa-trash" />
-              </button>
+                  <i className="fa-solid fa-check" />
+                </button>
+              </div>
             </div>
           </div>
         ))}

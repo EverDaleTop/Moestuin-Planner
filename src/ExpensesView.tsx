@@ -8,6 +8,8 @@ import {
 	resolveIncomeCategory,
 	type ExpenseCategory,
 } from './expenseCategories'
+import { CategoryDropdown } from './CategoryDropdown'
+import { DateField } from './DateField'
 
 type Mode = 'uit' | 'in'
 
@@ -222,7 +224,7 @@ export function ExpensesView({
 			: 'Nog geen inkomsten geregistreerd. Verkoop je oogst en leg het hier vast.'
 
 	return (
-		<div className='shop-page'>
+		<div className='shop-page exp-page'>
 			<div className='shop-hero'>
 				<div className='shop-hero-text'>
 					<h2>
@@ -309,7 +311,7 @@ export function ExpensesView({
 			</div>
 
 			{form.mounted && (
-				<div className={`shop-form ${form.open ? '' : 'shop-form-closing'}`}>
+				<div ref={form.formRef} className={`shop-form ${form.open ? '' : 'shop-form-closing'}`}>
 					<div className='shop-form-inner'>
 						<div className='shop-form-panel'>
 							<div className='shop-form-header'>
@@ -348,37 +350,17 @@ export function ExpensesView({
 								</div>
 								<div className='shop-form-field'>
 									<label>Datum</label>
-									<input
-										type='date'
-										value={date}
-										onChange={(e) => setDate(e.target.value)}
+									<DateField value={date} onChange={setDate} />
+								</div>
+								<div className='shop-form-field shop-form-field-wide'>
+									<CategoryDropdown
+										id='exp-cat'
+										label='Categorie'
+										categories={cats}
+										value={category}
+										onChange={setCategory}
 									/>
 								</div>
-								<div className='shop-form-field'>
-									<label>Categorie *</label>
-									<select
-										value={category}
-										onChange={(e) => setCategory(e.target.value)}>
-										{cats.map((c) => (
-											<option key={c.key} value={c.key}>
-												{c.label}
-											</option>
-										))}
-									</select>
-								</div>
-							</div>
-							<div className='shop-form-cats'>
-								{cats.map((c) => (
-									<button
-										key={c.key}
-										type='button'
-										className={`exp-chip exp-chip-${c.tone} ${category === c.key ? 'exp-chip-active' : ''}`}
-										onClick={() => setCategory(c.key)}
-										aria-pressed={category === c.key}>
-										<i className={`fa-solid ${c.icon}`} />
-										{c.label}
-									</button>
-								))}
 							</div>
 							<div className='shop-form-footer'>
 								<button className='btn-primary' onClick={submit} disabled={!canSave}>
@@ -409,24 +391,6 @@ export function ExpensesView({
 						aria-label={isUit ? 'Zoek in uitgaven' : 'Zoek in inkomsten'}
 					/>
 				</div>
-			</div>
-
-			<div className='exp-cats' role='group' aria-label='Filter op categorie'>
-				<button
-					className={`exp-cat ${catFilter === '' ? 'exp-cat-active' : ''}`}
-					onClick={() => setCatFilter('')}>
-					Alles
-				</button>
-				{categories.map((c) => (
-					<button
-						key={c.key}
-						className={`exp-cat exp-cat-${c.tone} ${catFilter === c.key ? 'exp-cat-active' : ''}`}
-						onClick={() => setCatFilter(c.key === catFilter ? '' : c.key)}
-						aria-pressed={catFilter === c.key}>
-						<i className={`fa-solid ${c.icon}`} />
-						{c.label}
-					</button>
-				))}
 			</div>
 
 			{hasCharts && (
@@ -520,15 +484,18 @@ export function ExpensesView({
 				</div>
 			)}
 
-			{groups.length === 0 && (
+			{groups.length === 0 ? (
 				<div className='shop-empty'>
 					<i className={`fa-solid ${isUit ? 'fa-receipt' : 'fa-sack-dollar'}`} />
 					<p>{emptyText}</p>
 				</div>
-			)}
-
-			{groups.map((group) => (
-				<div key={group.key} className='exp-month'>
+			) : (
+				<div key={`${mode}-${catFilter}`}>
+			{groups.map((group, gi) => (
+				<div
+					key={group.key}
+					className='exp-month'
+					style={{ animationDelay: `${Math.min(gi, 11) * 35}ms` }}>
 					<div className='exp-month-head'>
 						<h3>{monthLabel(group.key)}</h3>
 						<span className={`exp-month-total ${isUit ? '' : 'exp-month-total-in'}`}>
@@ -576,6 +543,8 @@ export function ExpensesView({
 					</div>
 				</div>
 			))}
+			</div>
+			)}
 		</div>
 	)
 }

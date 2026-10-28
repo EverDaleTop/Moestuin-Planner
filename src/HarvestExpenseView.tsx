@@ -1,11 +1,19 @@
-import { useCallback, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Crop, HarvestEntry } from './types'
+import { NumField } from './FormFields'
+import { DateField } from './DateField'
+import { CropSuggestions } from './CropSuggestions'
+import { CropGlyph } from './CropIconPicker'
 import { useCollapseForm } from './useCollapseForm'
 import { api } from './api'
 
 interface Props {
 	catalog: Crop[]
 	harvests: HarvestEntry[]
+	/** gewassen die ergens in een bed staan; die zetten we vooraan in de suggestie */
+	plantedCropIds?: Set<string>
+	/** vanaf de zaaikalender: open het formulier met dit gewas al ingevuld */
+	prefill?: { name: string; nonce: number } | null
 	onAdd: (entry: Omit<HarvestEntry, 'id'>) => void
 	onUpdate: (id: string, patch: Partial<HarvestEntry>) => void
 	onRemove: (id: string) => void
@@ -16,7 +24,7 @@ function todayStr(): string {
 }
 
 function fmtEuro(v: number): string {
-	return `€${v.toFixed(2)}`
+	return `€${v.toFixed(2).replace('.', ',')}`
 }
 
 /** "2026-03" -> "maart 2026" */
@@ -107,14 +115,22 @@ function resolveCropName(h: HarvestEntry, byId: Map<string, Crop>): string {
 	return 'Gewas'
 }
 
-export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Props) {
+export function HarvestView({
+	catalog,
+	harvests,
+	plantedCropIds,
+	prefill,
+	onAdd,
+	onUpdate,
+	onRemove,
+}: Props) {
 	const form = useCollapseForm()
 	const [editingId, setEditingId] = useState<string | null>(null)
 	const [q, setQ] = useState('')
-	/** filter op gewas; '' = alles */
-	const [cropFilter, setCropFilter] = useState('')
 
 	const [cropName, setCropName] = useState('')
+	const [cropOpen, setCropOpen] = useState(false)
+	const cropAnchorRef = useRef<HTMLDivElement | null>(null)
 	const [qty, setQty] = useState('1')
 	const [date, setDate] = useState(todayStr())
 	const [price, setPrice] = useState('')
@@ -161,7 +177,8 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 		for (const ch of cropKey(name)) hash = (hash * 31 + ch.charCodeAt(0)) | 0
 		return FREE_COLORS[Math.abs(hash) % FREE_COLORS.length]
 	}
-	const cropIconOf = (name: string) => catalogByName.get(cropKey(name))?.icon ?? 'fa-seedling'
+	/** catalogus-icoonsleutel voor emoji-weergave (zelfde als de kalender) */
+	const cropIconOf = (name: string) => catalogByName.get(cropKey(name))?.icon ?? undefined
 
 	/** Live berekening voor de oogst die je nu invult. */
 	const draftKg = parseFloat(qty) || 0
@@ -219,7 +236,6 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 		const s = q.trim().toLowerCase()
 		const list = harvests
 			.filter((h) => !s || cropNameOf(h).toLowerCase().includes(s))
-			.filter((h) => !cropFilter || cropKey(cropNameOf(h)) === cropFilter)
 			.slice()
 			.sort((a, b) => b.date.localeCompare(a.date))
 
@@ -236,7 +252,7 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 			}
 		}
 		return out
-	}, [harvests, q, cropFilter, cropNameOf])
+	}, [harvests, q, cropNameOf])
 
 	/** Data voor de grafiek. */
 	const months = useMemo(() => monthlySeries(harvests, 12), [harvests])
@@ -331,8 +347,21 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 		form.openForm()
 	}
 
+	/** Vanaf de zaaikalender: formulier openen met het gewas al ingevuld. */
+	useEffect(() => {
+		if (!prefill) return
+		resetForm()
+		setCropName(prefill.name)
+		setEditingId(null)
+		// het gewas staat er al helemaal in: suggestielijst meteen dicht,
+		// er valt niets meer aan te klikken (opslaan koppelt op naam)
+		setCropOpen(false)
+		form.openForm()
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [prefill])
+
 	return (
-		<div className='shop-page'>
+		<div className='shop-page oogst-page'>
 			<div className='shop-hero'>
 				<div className='shop-hero-text'>
 					<h2>
@@ -407,7 +436,7 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 			</div>
 
 			{form.mounted && (
-				<div className={`shop-form ${form.open ? '' : 'shop-form-closing'}`}>
+				<div ref={form.formRef} className={`shop-form ${form.open ? '' : 'shop-form-closing'}`}>
 					<div className='shop-form-inner'>
 						<div className='shop-form-panel'>
 							<div className='shop-form-header'>
@@ -417,51 +446,48 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 							<div className='shop-form-grid shop-form-grid-3'>
 								<div className='shop-form-field shop-form-field-crop'>
 									<label htmlFor='harvest-crop'>Gewas *</label>
-									<div className='crop-input'>
-										<i className='fa-solid fa-seedling' aria-hidden='true' />
+									<div className='crop-input' ref={cropAnchorRef}>
 										<input
 											id='harvest-crop'
 											type='text'
 											value={cropName}
 											onChange={(e) => setCropName(e.target.value)}
-											placeholder='Bijv. Tomaat,Courgette…'
+											onFocus={() => setCropOpen(true)}
+											placeholder='Bijv. Tomaat, Courgette…'
 											autoComplete='off'
+											role='combobox'
+											aria-expanded={cropOpen}
+											aria-autocomplete='list'
 											autoFocus
 										/>
 									</div>
-									{catalog.length > 0 && (
-										<div className='crop-suggest'>
-											{catalog.slice(0, 8).map((c) => (
-												<button
-													key={c.id}
-													type='button'
-													className='crop-suggest-chip'
-													style={{ '--crop-color': c.color } as React.CSSProperties}
-													onClick={() => setCropName(c.name)}>
-													<i className={`fa-solid ${c.icon ?? 'fa-seedling'}`} />
-													{c.name}
-												</button>
-											))}
-										</div>
+									{catalog.length > 0 && cropOpen && cropName.trim() !== '' && (
+										<CropSuggestions
+											catalog={catalog}
+											plantedCropIds={plantedCropIds}
+											anchorRef={cropAnchorRef}
+											query={cropName}
+											onPick={(name) => {
+												setCropName(name)
+												setCropOpen(false)
+											}}
+											onClose={() => setCropOpen(false)}
+										/>
 									)}
 								</div>
 								<div className='shop-form-field'>
 									<label>Hoeveelheid (kg) *</label>
-									<input
-										type='number'
-										min='0.1'
-										step='0.1'
+									<NumField
 										value={qty}
-										onChange={(e) => setQty(e.target.value)}
+										onChange={setQty}
+										min='0.1'
+										step={0.1}
+										stepper
 									/>
 								</div>
 								<div className='shop-form-field'>
 									<label>Datum</label>
-									<input
-										type='date'
-										value={date}
-										onChange={(e) => setDate(e.target.value)}
-									/>
+									<DateField value={date} onChange={setDate} />
 								</div>
 								<div className='shop-form-field'>
 									<label htmlFor='harvest-price'>
@@ -470,17 +496,17 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 											<span className='shop-form-hint-inline'>uit de productlink</span>
 										)}
 									</label>
-									<input
+									<NumField
 										id='harvest-price'
-										type='number'
-										min='0'
-										step='0.01'
-										placeholder='0.00'
 										value={price}
-										onChange={(e) => {
-											setPrice(e.target.value)
+										onChange={(v) => {
+											setPrice(v)
 											setPriceTouched(true)
 										}}
+										min='0'
+										step={0.01}
+										placeholder='0.00'
+										stepper
 									/>
 								</div>
 							</div>
@@ -505,10 +531,8 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 									<span className='ref-compare-optional'>optioneel</span>
 								</div>
 								<p className='ref-hint'>
-									Plak het product uit de supermarkt en vul het gewicht van die verpakking.
-									Op Bereken wordt de winkelprijs opgehaald, rekenen we de prijs per kilo
-									uit en vullen we die automatisch in bij "Prijs per kg". Daarna hoort de
-									besparing bij: hoeveelheid × prijs per kilo.
+									Plak het product uit de supermarkt en vul het gewicht van de verpakking.
+									“Bereken” haalt de winkelprijs op en zet de prijs per kilo er klaar voor.
 								</p>
 								<div className='ref-row'>
 									<div className='ref-field ref-field-url'>
@@ -524,19 +548,17 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 									</div>
 									<div className='ref-field'>
 										<label htmlFor='ref-weight'>Verpakking (kg)</label>
-										<input
+										<NumField
 											id='ref-weight'
-											type='text'
-											inputMode='decimal'
 											value={refWeightKg}
-											onChange={(e) => {
-												const v = e.target.value
+											onChange={(v) => {
 												setRefWeightKg(v)
 												applyStorePrice(
 													refStorePrice,
 													parseFloat(v.replace(',', '.')) || 0,
 												)
 											}}
+											step={0.1}
 											placeholder='1'
 										/>
 									</div>
@@ -571,16 +593,15 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 											<div className='ref-product-fields'>
 												<label className='ref-mini'>
 													<span>Winkelprijs (€)</span>
-													<input
-														type='number'
-														min='0'
-														step='0.01'
-														value={refStorePrice ?? ''}
-														onChange={(e) => {
-															const v = parseFloat(e.target.value) || 0
-															setRefStorePrice(v)
-															applyStorePrice(v, draftWeight)
+													<NumField
+														value={refStorePrice !== undefined ? String(refStorePrice) : ''}
+														onChange={(v) => {
+															const n = parseFloat(v) || 0
+															setRefStorePrice(n)
+															applyStorePrice(n, draftWeight)
 														}}
+														min='0'
+														step={0.01}
 													/>
 												</label>
 												{draftPerKg !== null && (
@@ -649,26 +670,6 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 				</div>
 			)}
 
-			{perCrop.length > 0 && (
-				<div className='exp-cats' role='group' aria-label='Filter op gewas'>
-					<button
-						className={`exp-cat ${cropFilter === '' ? 'exp-cat-active' : ''}`}
-						onClick={() => setCropFilter('')}>
-						Alles
-					</button>
-					{perCrop.map((c) => (
-						<button
-							key={c.key}
-							className={`exp-cat ${cropFilter === c.key ? 'exp-cat-active' : ''}`}
-							onClick={() => setCropFilter(cropFilter === c.key ? '' : c.key)}
-							aria-pressed={cropFilter === c.key}>
-							<i className={`fa-solid ${c.icon}`} />
-							{c.name}
-						</button>
-					))}
-				</div>
-			)}
-
 			{hasCharts && (
 				<div className='exp-charts'>
 					<div className='exp-card'>
@@ -713,7 +714,7 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 								>
 									<span className='exp-crop-dot' aria-hidden='true' />
 									<span className='exp-crop-name'>
-										<i className={`fa-solid ${c.icon}`} />
+										<CropGlyph iconKey={c.icon} cropName={c.name} />
 										{c.name}
 									</span>
 									<span className='exp-crop-bar'>
@@ -731,14 +732,18 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 				<div className='shop-empty'>
 					<i className='fa-solid fa-carrot' />
 					<p>
-						{q.trim() || cropFilter
-							? 'Geen oogst gevonden met die zoekterm of gewas.'
+						{q.trim()
+							? 'Geen oogst gevonden met die zoekterm.'
 							: 'Nog geen oogst geregistreerd. Klik op "Oogst toevoegen" om te beginnen.'}
 					</p>
 				</div>
 			) : (
-				groups.map((group) => (
-					<div key={group.key} className='exp-month'>
+				<Fragment key={q}>
+				{groups.map((group, gi) => (
+					<div
+						key={group.key}
+						className='exp-month'
+						style={{ animationDelay: `${Math.min(gi, 11) * 35}ms` }}>
 						<div className='exp-month-head'>
 							<h3>{monthLabel(group.key)}</h3>
 							<span className='exp-month-sum'>
@@ -758,7 +763,7 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 											className='exp-icon exp-icon-green'
 											style={{ '--crop-color': cropColorOf(name) } as React.CSSProperties}
 										>
-											<i className={`fa-solid ${cropIconOf(name)}`} />
+											<CropGlyph iconKey={cropIconOf(name)} cropName={name} />
 										</div>
 										<div className='he-row-main'>
 											<div className='he-row-title'>
@@ -824,7 +829,8 @@ export function HarvestView({ catalog, harvests, onAdd, onUpdate, onRemove }: Pr
 							})}
 						</div>
 					</div>
-				))
+				))}
+				</Fragment>
 			)}
 		</div>
 	)

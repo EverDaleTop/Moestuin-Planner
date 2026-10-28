@@ -1,23 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import type { Crop, CropAssignment, GardenElement } from "./types";
-import { fmtM } from "./storage";
+import { fmtM, PX_PER_M } from "./storage";
 import { cropLabel, fitCropCounts, cropAreaForCounts } from "./cropIcons";
 import { CropGlyph } from "./CropIconPicker";
 import { objectDef } from "./gardenObjects";
 
 interface Props {
+  locked?: boolean;
+  overviewOpen?: boolean;
+  selectedIds?: string[];
+  onGoToCropList?: () => void;
   element: GardenElement | null;
-  /** alle elementen in de tuin, voor het overzicht in de sidebar */
+  
   elements: GardenElement[];
   catalog: Crop[];
-  /** planted crop currently selected on the canvas (only when a bed holds it) */
+  
   crop: CropAssignment | null;
-  /** catalog entry for the selected crop */
+  
   cropInfo: Crop | null;
   onUpdate: (patch: Partial<GardenElement>) => void;
   onRemove: () => void;
   onSelectElement: (id: string) => void;
-  onAddCrop: (cropId: string) => void;
+  onToggleSelectElement?: (id: string) => void;
+  onSelectCrop?: (iId: string) => void;
+  onAddCrop?: (cropId: string) => void;
   onUpdateCrop: (
     iId: string,
     patch: Partial<CropAssignment>
@@ -25,28 +32,60 @@ interface Props {
   onRemoveCrop: (iId: string) => void;
   onDuplicateCrop: (iId: string) => void;
   onDeselectCrop: () => void;
-  /** gewas dat het gewas-gereedschap gebruikt */
+  
   activeCropId: string | null;
   onSelectActiveCrop: (cropId: string) => void;
 }
 
-/** Soortnaam voor in de sidebar-lijst. */
+
+function elementBox(e: GardenElement): { x: number; y: number; w: number; h: number } {
+  if (e.object === "gaas" && e.gaas) {
+    const t = (e.widthM || 0.1) * PX_PER_M;
+    const x1 = Math.min(e.gaas.a.x, e.gaas.b.x) - t;
+    const y1 = Math.min(e.gaas.a.y, e.gaas.b.y) - t;
+    return {
+      x: x1,
+      y: y1,
+      w: Math.abs(e.gaas.b.x - e.gaas.a.x) + t * 2,
+      h: Math.abs(e.gaas.b.y - e.gaas.a.y) + t * 2,
+    };
+  }
+  return { x: e.x, y: e.y, w: e.widthM * PX_PER_M, h: e.heightM * PX_PER_M };
+}
+
+
+function elementInVeld(e: GardenElement, v: GardenElement): boolean {
+  if (e.id === v.id) return false;
+  const m = 4;
+  const a = elementBox(e);
+  const b = elementBox(v);
+  return (
+    a.x < b.x + b.w + m &&
+    a.x + a.w > b.x - m &&
+    a.y < b.y + b.h + m &&
+    a.y + a.h > b.y - m
+  );
+}
+
+
 function elementKindName(el: GardenElement): string {
   if (el.type === "bed") return "Bed";
   if (el.type === "path") return "Pad";
+  if (el.type === "veld") return "Veld";
   if (el.object === "gaas") return "Gaas";
   return objectDef(el.object)?.name ?? "Voorwerp";
 }
 
-/** FontAwesome-icoon voor in de sidebar-lijst. */
+
 function elementIconClass(el: GardenElement): string {
   if (el.type === "bed") return "fa-solid fa-table-cells-large";
   if (el.type === "path") return "fa-solid fa-road";
+  if (el.type === "veld") return "fa-solid fa-vector-square";
   if (el.object === "gaas") return "fa-solid fa-table-cells";
   return objectDef(el.object)?.icon ?? "fa-solid fa-cube";
 }
 
-/** Compacte klikbare lijst van alle elementen in de tuin. */
+
 function ElementList({
   elements,
   activeId,
@@ -120,9 +159,8 @@ function NumField({
   );
 }
 
-/** Custom dropdown om het gewas van een stuk te veranderen, met icoontje
- *  en kleur per optie (een native <select> kan geen icons tonen). */
-function CropSelect({
+
+export function CropSelect({
   value,
   catalog,
   onChange,
@@ -132,26 +170,67 @@ function CropSelect({
   onChange: (newId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [query, setQuery] = useState("");
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
   const current = catalog.find((c) => c.id === value);
+
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    window.clearTimeout(closeTimer.current ?? undefined);
+    closeTimer.current = window.setTimeout(() => {
+      setOpen(false);
+      setClosing(false);
+      closeTimer.current = null;
+      const t = triggerRef.current;
+      if (t && document.activeElement === t) t.blur();
+    }, 200);
+  };
+
+  const measure = () => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.max(r.width, 220);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    setPos({ top: r.bottom + 4, left, width });
+  };
+
+  useLayoutEffect(() => {
+    if (open) measure();
+  }, [open ]);
 
   useEffect(() => {
     if (!open) return;
     const onDocDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
+      const t = e.target as Node;
+      const pop = document.getElementById("cropselect-portal");
+      if (
+        triggerRef.current && !triggerRef.current.contains(t) &&
+        (!pop || !pop.contains(t))
+      ) {
+        requestClose();
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") requestClose();
     };
+    const onScroll = () => measure();
     document.addEventListener("pointerdown", onDocDown);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
     return () => {
       document.removeEventListener("pointerdown", onDocDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
     };
+    
   }, [open ]);
 
   const q = query.trim().toLowerCase();
@@ -159,67 +238,105 @@ function CropSelect({
     ? catalog
     : catalog.filter((c) => c.name.toLowerCase().includes(q));
 
+  const openNow = () => {
+    window.clearTimeout(closeTimer.current ?? undefined);
+    closeTimer.current = null;
+    setClosing(false);
+    setQuery("");
+    setOpen(true);
+  };
+  const closeIfOutside = (e: React.MouseEvent) => {
+    const next = e.relatedTarget as Node | null;
+    const pop = document.getElementById("cropselect-portal");
+    if (next && (triggerRef.current?.contains(next) || pop?.contains(next))) return;
+    window.clearTimeout(closeTimer.current ?? undefined);
+    closeTimer.current = window.setTimeout(() => requestClose(), 150);
+  };
+
   return (
-    <div className="crop-select" ref={rootRef}>
+    <div
+      className="catdd cal-scope-dropdown crop-select"
+      ref={rootRef}
+      onMouseEnter={openNow}
+      onMouseLeave={closeIfOutside}
+    >
       <button
         type="button"
-        className="crop-select-btn"
+        ref={triggerRef}
+        className="catdd-trigger cal-scope-trigger"
         onClick={() => {
+          if (open && !closing) {
+            requestClose();
+            return;
+          }
+          setClosing(false);
           setQuery("");
-          setOpen((o) => !o);
+          setOpen(true);
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
         title="Ander gewas kiezen"
       >
         <CropGlyph iconKey={current?.icon} cropName={current?.name} color={current?.color} />
-        <span className="crop-select-name">
+        <span className="catdd-current">
                   {current ? cropLabel(current) : value}
                 </span>
-        <i className={`fa-solid fa-chevron-down crop-select-caret${open ? " open" : ""}`} />
+        <i className={`fa-solid fa-chevron-down catdd-caret${open && !closing ? " open" : ""}`} aria-hidden="true" />
       </button>
-      {open && (
-        <div className="crop-select-pop" role="listbox" aria-label="Gewas kiezen">
-          {catalog.length > 6 && (
-            <input
-              className="crop-select-search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Zoek gewas…"
-              autoFocus
-            />
-          )}
-          <div className="crop-select-list">
+      {(open || closing) &&
+        createPortal(
+          <div
+            id="cropselect-portal"
+            className={`catdd-pop catdd-pop-portal scopedd-pop${closing ? " closing" : ""}`}
+            role="listbox"
+            aria-label="Gewas kiezen"
+            style={{ top: pos.top, left: pos.left, width: pos.width }}
+            onMouseEnter={() => {
+              window.clearTimeout(closeTimer.current ?? undefined);
+              closeTimer.current = null;
+              setClosing(false);
+              setOpen(true);
+            }}
+            onMouseLeave={closeIfOutside}
+          >
+            {catalog.length > 6 && (
+              <input
+                className="crop-select-search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Zoek gewas…"
+                aria-label="Zoek gewas"
+              />
+            )}
             {options.map((c) => (
               <button
                 key={c.id}
                 type="button"
                 role="option"
                 aria-selected={c.id === value}
-                className={c.id === value ? "crop-select-item selected" : "crop-select-item"}
+                className={c.id === value ? "catdd-item is-active" : "catdd-item"}
+                style={c.color ? ({ "--crop-color": c.color } as CSSProperties) : undefined}
                 onClick={() => {
-                  setOpen(false);
                   onChange(c.id);
+                  requestClose();
                 }}
               >
                   <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
-                <span className="crop-select-name">{cropLabel(c)}</span>
-                {c.id === value && <i className="fa-solid fa-check crop-select-check" />}
+                <span className="catdd-name">{cropLabel(c)}</span>
+                {c.id === value && <i className="fa-solid fa-check catdd-check" />}
               </button>
             ))}
             {options.length === 0 && (
               <div className="cp-empty">Geen resultaten.</div>
             )}
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
 
-/** Eén stuk gewas: overzichtelijke kaart met samenvatting, gegroepeerde
- *  instellingen en acties. Wordt zowel in de "Gewassen beheren" popup als in
- *  het enkele-gewas paneel gebruikt. */
+
 function CropRow({
   a,
   crop,
@@ -243,15 +360,15 @@ function CropRow({
   const rowSpacing = a.rowSpacing ?? crop?.rowSpacing ?? 0.3;
   const plantSpacing = a.plantSpacing ?? crop?.plantSpacing ?? 0.2;
   const padding = a.padding ?? 0.1;
-  // De tussenafstand is heilig: rijen/kolommen volgen uit maat + afstand.
-  // Groter vlak = meer rijen, nooit dichter op elkaar.
+  
+  
   const fit = fitCropCounts(areaW, areaH, rowSpacing, plantSpacing, padding);
   const dispRows = fit.rows;
   const dispCols = fit.cols;
   const total = dispRows * dispCols;
   const r2 = (v: number) => Math.round(v * 100) / 100;
 
-  /** Vlak opslaan en rijen/kolommen erbij herberekenen (vaste afstand). */
+  
   const applyArea = (
     nx: number,
     ny: number,
@@ -277,7 +394,7 @@ function CropRow({
     applyArea(nx, ny, nw, nh);
   };
 
-  /** Meer/minder rijen = het vlak hoger/lager maken met één rijafstand. */
+  
   const setRows = (req: number) => {
     const r = Math.max(1, Math.round(req));
     const need = cropAreaForCounts(r, dispCols, rowSpacing, plantSpacing, padding);
@@ -287,7 +404,7 @@ function CropRow({
     applyArea(nx, ny, areaW, nh);
   };
 
-  /** Meer/minder kolommen = het vlak breder/smaler maken met één plantafstand. */
+  
   const setCols = (req: number) => {
     const c = Math.max(1, Math.round(req));
     const need = cropAreaForCounts(dispRows, c, rowSpacing, plantSpacing, padding);
@@ -319,7 +436,7 @@ function CropRow({
     const f = fitCropCounts(areaW, areaH, nrs, nps, padding);
     onUpdateCrop(a.instanceId, {
       cropId: newId,
-      // neem de afstanden van het nieuwe gewas over, tel opnieuw bij vaste afstand
+      
       rowSpacing: nrs,
       plantSpacing: nps,
       rows: f.rows,
@@ -475,11 +592,15 @@ export function Inspector({
   }, [catalog]);
 
   if (!element) {
+    const parents = elements.filter((e) => {
+      const velden = elements.filter((v) => v.type === "veld" && v.id !== e.id);
+      return !velden.some((v) => elementInVeld(e, v));
+    });
     return (
       <aside className="insp">
-        <h4 className="insp-list-title">Elementen ({elements.length})</h4>
-        <ElementList elements={elements} activeId={null} onSelect={onSelectElement} />
-        {elements.length > 0 && (
+        <h4 className="insp-list-title">Elementen ({parents.length})</h4>
+        <ElementList elements={parents} activeId={null} onSelect={onSelectElement} />
+        {parents.length > 0 && (
           <p className="insp-hint insp-list-hint">
             Klik een element aan om het te bewerken.
           </p>
@@ -491,13 +612,15 @@ export function Inspector({
   const elementKind =
     element.type === "bed"
       ? "Bed"
-      : element.type === "object"
-        ? element.object === "gaas"
-          ? "Gaas"
-          : (objectDef(element.object)?.name ?? "Voorwerp")
-        : "Pad";
+      : element.type === "veld"
+        ? "Veld"
+        : element.type === "object"
+          ? element.object === "gaas"
+            ? "Gaas"
+            : (objectDef(element.object)?.name ?? "Voorwerp")
+          : "Pad";
 
-  // A child crop is selected: show that crop's settings instead of the bed's.
+  
   if (crop) {
     return (
       <aside className="insp">
@@ -622,7 +745,7 @@ export function Inspector({
         <section className="insp-crops">
           <h4>Gewassen</h4>
 
-          {/* Kies welk gewas je tekent; elk stuk toont daarna het icoontje. */}
+          {}
           <div className="insp-pick-crop">
             <span className="icon-picker-label">Gewas om te tekenen</span>
             <div className="crop-picker-grid">
@@ -704,8 +827,24 @@ export function Inspector({
       </button>
 
       <section className="insp-all">
-        <h4>Alle elementen ({elements.length})</h4>
-        <ElementList elements={elements} activeId={element.id} onSelect={onSelectElement} />
+        <h4>
+          {element?.type === "veld"
+            ? `Elementen in ${element.label} (${elements.filter((e) => elementInVeld(e, element)).length})`
+            : `Alle elementen (${elements.length})`}
+        </h4>
+        <ElementList
+          elements={
+            element?.type === "veld"
+              ? elements.filter((e) => elementInVeld(e, element))
+              : elements.filter((e) => {
+                  
+                  const velden = elements.filter((v) => v.type === "veld" && v.id !== e.id);
+                  return !velden.some((v) => elementInVeld(e, v));
+                })
+          }
+          activeId={element.id}
+          onSelect={onSelectElement}
+        />
       </section>
     </aside>
   );
@@ -764,7 +903,7 @@ function CropsModal({
   catalog: Crop[];
   cropById: Map<string, Crop>;
   onClose: () => void;
-  onAddCrop: (cropId: string) => void;
+  onAddCrop?: (cropId: string) => void;
   onUpdateCrop: (
     iId: string,
     patch: Partial<CropAssignment>
@@ -843,7 +982,7 @@ function CropsModal({
                   type="button"
                   key={c.id}
                   className="crops-add-item"
-                  onClick={() => onAddCrop(c.id)}
+                  onClick={() => onAddCrop?.(c.id)}
                 >
                 <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
                   <span className="crops-add-name">{cropLabel(c)}</span>

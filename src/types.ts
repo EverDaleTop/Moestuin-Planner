@@ -1,4 +1,4 @@
-export type ElementType = "bed" | "path" | "object";
+export type ElementType = "bed" | "path" | "veld" | "object";
 
 /** Keys of the special garden objects (benches, fences, …). See src/gardenObjects.ts. */
 export type GardenObjectKey =
@@ -59,6 +59,24 @@ export interface Crop {
   notes?: string;
   /** flat icon key for this crop, see src/cropIcons.ts */
   icon?: string;
+  /** laatste wijziging (ms sinds epoch): bepaalt wie wint bij gelijktijdig bewerken */
+  updatedAt?: number;
+}
+
+/** Verwijderde items per tuin, met het moment van verwijderen. Zo weet een
+ *  samenvoeging (merge) of een ontbrekend item echt verwijderd is, of dat de
+ *  andere kant het gewoon nog niet gezien had (dan mag het nooit terugkomen
+ *  als "verwijderd" en nooit zomaar herrijzen als "nieuw"). */
+export interface GardenTombstones {
+  elements: Record<string, number>;
+  /** verwijderde gewas-stukjes (instanceId) binnen bedden */
+  crops: Record<string, number>;
+  harvests: Record<string, number>;
+  sowings: Record<string, number>;
+  expenses: Record<string, number>;
+  incomes: Record<string, number>;
+  shopping: Record<string, number>;
+  todos: Record<string, number>;
 }
 
 /** A logged sowing ("gezaaid"): what was sown and when. */
@@ -71,6 +89,8 @@ export interface SowingEntry {
   /** sowing date as yyyy-mm-dd */
   date: string;
   note?: string;
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
 }
 
 /** A crop instance planted in a bed. */
@@ -92,6 +112,8 @@ export interface CropAssignment {
    * corner. When absent the planting fills the whole bed.
    */
   area?: { x: number; y: number; w: number; h: number };
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
 }
 
 export interface GardenElement {
@@ -113,6 +135,8 @@ export interface GardenElement {
   color: string;
   /** only meaningful for beds */
   crops: CropAssignment[];
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
 }
 
 export interface HarvestEntry {
@@ -131,6 +155,8 @@ export interface HarvestEntry {
   storePrice?: number;
   /** gewicht van die verpakking in kg (supermarkten verkopen per verpakking) */
   storeWeightKg?: number;
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
 }
 
 export interface Expense {
@@ -142,6 +168,8 @@ export interface Expense {
   shoppingItemId?: string;
   /** gekozen categorie, zie src/expenseCategories.ts */
   category?: string;
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
 }
 
 /** Geld dat binnenkomt, bv. verkoop van oogst of plantjes. */
@@ -152,6 +180,8 @@ export interface Income {
   date: string;
   /** gekozen categorie, zie src/expenseCategories.ts (INCOME_CATEGORIES) */
   category?: string;
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
 }
 
 export interface ShoppingItem {
@@ -172,6 +202,23 @@ export interface ShoppingItem {
   note?: string;
   done: boolean;
   createdAt: number;
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
+}
+
+/** Een tuinklusje: wat moet er gebeuren, optioneel bij welke bedden/velden. */
+export interface TodoItem {
+  id: string;
+  title: string;
+  done: boolean;
+  /** optioneel gekoppelde bedden/velden (element-ids van de tuin) */
+  elementIds?: string[];
+  priority?: "low" | "normal" | "high";
+  createdBy?: string;
+  note?: string;
+  createdAt: number;
+  /** laatste wijziging (ms sinds epoch) */
+  updatedAt?: number;
 }
 
 export interface Garden {
@@ -184,18 +231,25 @@ export interface Garden {
   expenses: Expense[];
   incomes: Income[];
   shopping: ShoppingItem[];
+  todos: TodoItem[];
   /** user id of the garden's owner; only the owner can share/delete */
   ownerId: string;
   /** user ids that may view & edit this garden */
   sharedWith: string[];
   /** secret invite token embedded in the share URL; joining requires it */
   inviteToken: string;
+  /** laatste wijziging van de tuinnaam/meta (ms sinds epoch) */
+  updatedAt?: number;
+  /** verwijderde items: zo herrijzen ze nooit meer en wist een delete nooit andermans werk */
+  deleted?: GardenTombstones;
 }
 
 export interface User {
   id: string;
   username: string;
   createdAt: number;
+  /** false bij OAuth-accounts (Google) zonder wachtwoord */
+  hasPassword?: boolean;
 }
 
 export interface AppData {

@@ -14,6 +14,7 @@ export interface DataStore {
   getUserByUsername(username: string): Promise<StoredUser | undefined>;
   getUserById(id: string): Promise<StoredUser | undefined>;
   addUser(user: StoredUser): Promise<void>;
+  updateUser(user: StoredUser): Promise<void>;
   searchUsers(query: string, limit: number): Promise<StoredUser[]>;
   getSession(token: string): Promise<Session | undefined>;
   addSession(session: Session): Promise<void>;
@@ -24,6 +25,9 @@ export interface DataStore {
   deleteGarden(id: string): Promise<void>;
   getCropCatalog(): Promise<Crop[]>;
   setCropCatalog(crops: Crop[]): Promise<void>;
+  /** tombstones van verwijderde catalogusgewassen, zodat deletes nooit herrijzen */
+  getCatalogDeleted(): Promise<Record<string, number>>;
+  setCatalogDeleted(deleted: Record<string, number>): Promise<void>;
 }
 
 function emptyDb(): Db {
@@ -31,6 +35,7 @@ function emptyDb(): Db {
     users: [],
     sessions: [],
     cropCatalog: DEFAULT_CROP_CATALOG,
+    catalogDeleted: {},
     gardens: [],
   };
 }
@@ -80,6 +85,7 @@ export class JsonStore implements DataStore {
           sharedWith: g.sharedWith ?? [],
           inviteToken: g.inviteToken ?? randomToken(),
         })),
+        catalogDeleted: parsed.catalogDeleted ?? {},
       };
     } catch {
       db = emptyDb();
@@ -116,6 +122,13 @@ export class JsonStore implements DataStore {
 
   async addUser(user: StoredUser): Promise<void> {
     this.db.users.push(user);
+    this.scheduleFlush();
+  }
+
+  async updateUser(user: StoredUser): Promise<void> {
+    const idx = this.db.users.findIndex((u) => u.id === user.id);
+    if (idx >= 0) this.db.users[idx] = user;
+    else this.db.users.push(user);
     this.scheduleFlush();
   }
 
@@ -178,6 +191,15 @@ export class JsonStore implements DataStore {
 
   async setCropCatalog(crops: Crop[]): Promise<void> {
     this.db.cropCatalog = crops;
+    this.scheduleFlush();
+  }
+
+  async getCatalogDeleted(): Promise<Record<string, number>> {
+    return this.db.catalogDeleted ?? {};
+  }
+
+  async setCatalogDeleted(deleted: Record<string, number>): Promise<void> {
+    this.db.catalogDeleted = deleted;
     this.scheduleFlush();
   }
 }

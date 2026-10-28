@@ -16,15 +16,15 @@ export function id(): string {
 }
 
 export const DEFAULT_CROP_CATALOG: Crop[] = [
-  { id: "carrot", name: "Wortel", color: "#e67e22", rowSpacing: 0.15, plantSpacing: 0.05, sowWindow: "mrt–jun", sowStart: 3, sowEnd: 6, harvestStart: 6, harvestEnd: 10, notes: "Dun uit tot 5 cm in de rij.", icon: "carrot" },
-  { id: "tomato", name: "Tomaat", color: "#e74c3c", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "feb–apr", sowStart: 2, sowEnd: 4, harvestStart: 7, harvestEnd: 10, notes: "Tuinpoten na vorst.", icon: "tomato" },
-  { id: "lettuce", name: "Sla", color: "#27ae60", rowSpacing: 0.3, plantSpacing: 0.25, sowWindow: "mrt–aug", sowStart: 3, sowEnd: 8, harvestStart: 5, harvestEnd: 10, icon: "salad" },
-  { id: "potato", name: "Aardappel", color: "#b08968", rowSpacing: 0.75, plantSpacing: 0.3, sowWindow: "apr", sowStart: 4, sowEnd: 4, harvestStart: 7, harvestEnd: 8, icon: "potato" },
-  { id: "beet", name: "Biet", color: "#8e44ad", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "apr–jul", sowStart: 4, sowEnd: 7, harvestStart: 7, harvestEnd: 10, icon: "beet" },
-  { id: "bean", name: "Boon", color: "#7dcea0", rowSpacing: 0.5, plantSpacing: 0.1, sowWindow: "mei–jun", sowStart: 5, sowEnd: 6, harvestStart: 7, harvestEnd: 9, icon: "beans" },
-  { id: "pepper", name: "Paprika", color: "#f1c40f", rowSpacing: 0.5, plantSpacing: 0.4, sowWindow: "feb–mrt", sowStart: 2, sowEnd: 3, harvestStart: 7, harvestEnd: 10, icon: "bell-pepper" },
-  { id: "onion", name: "Ui", color: "#d4a373", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "mrt", sowStart: 3, sowEnd: 3, harvestStart: 8, harvestEnd: 9, icon: "onion" },
-  { id: "spinach", name: "Spinazie", color: "#2ecc71", rowSpacing: 0.25, plantSpacing: 0.1, sowWindow: "mrt–apr", sowStart: 3, sowEnd: 4, harvestStart: 5, harvestEnd: 7, icon: "leafy" },
+  { id: "carrot", name: "Wortel", color: "#e67e22", rowSpacing: 0.15, plantSpacing: 0.05, sowWindow: "mrt–jun", sowStart: 3, sowEnd: 6, harvestStart: 6, harvestEnd: 10, notes: "Dun uit tot 5 cm in de rij.", icon: "wortel" },
+  { id: "tomato", name: "Tomaat", color: "#e74c3c", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "feb–apr", sowStart: 2, sowEnd: 4, harvestStart: 7, harvestEnd: 10, notes: "Tuinpoten na vorst.", icon: "tomaat" },
+  { id: "lettuce", name: "Sla", color: "#27ae60", rowSpacing: 0.3, plantSpacing: 0.25, sowWindow: "mrt–aug", sowStart: 3, sowEnd: 8, harvestStart: 5, harvestEnd: 10, icon: "sla" },
+  { id: "potato", name: "Aardappel", color: "#b08968", rowSpacing: 0.75, plantSpacing: 0.3, sowWindow: "apr", sowStart: 4, sowEnd: 4, harvestStart: 7, harvestEnd: 8, icon: "aardappel" },
+  { id: "beet", name: "Biet", color: "#8e44ad", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "apr–jul", sowStart: 4, sowEnd: 7, harvestStart: 7, harvestEnd: 10, icon: "biet-knol" },
+  { id: "bean", name: "Boon", color: "#7dcea0", rowSpacing: 0.5, plantSpacing: 0.1, sowWindow: "mei–jun", sowStart: 5, sowEnd: 6, harvestStart: 7, harvestEnd: 9, icon: "bonen" },
+  { id: "pepper", name: "Paprika", color: "#f1c40f", rowSpacing: 0.5, plantSpacing: 0.4, sowWindow: "feb–mrt", sowStart: 2, sowEnd: 3, harvestStart: 7, harvestEnd: 10, icon: "paprika" },
+  { id: "onion", name: "Ui", color: "#d4a373", rowSpacing: 0.3, plantSpacing: 0.1, sowWindow: "mrt", sowStart: 3, sowEnd: 3, harvestStart: 8, harvestEnd: 9, icon: "ui" },
+  { id: "spinach", name: "Spinazie", color: "#2ecc71", rowSpacing: 0.25, plantSpacing: 0.1, sowWindow: "mrt–apr", sowStart: 3, sowEnd: 4, harvestStart: 5, harvestEnd: 7, icon: "bladgroente" },
   { id: "broccoli", name: "Broccoli", color: "#1e8449", rowSpacing: 0.6, plantSpacing: 0.5, sowWindow: "apr–jun", sowStart: 4, sowEnd: 6, harvestStart: 8, harvestEnd: 11, icon: "broccoli" },
 ];
 

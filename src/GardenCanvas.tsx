@@ -1,18 +1,23 @@
 import { GpuCanvas } from "./gpu/GpuCanvas";
 import type { Crop, EditorTool, GardenElement, CropAssignment, GardenObjectKey } from "./types";
-import type { PreviewPayload } from "./realtime";
+import type { LiveCursor, PreviewPayload } from "./realtime";
 
 interface Props {
   elements: GardenElement[];
   catalog: Crop[];
   tool: EditorTool;
-  frameType: "bed" | "path";
+  frameType: "bed" | "path" | "veld";
   selectedIds: string[];
   selectedCropId: string | null;
   onSelect: (ids: string[]) => void;
+  /** Ctrl/Cmd+klik: ids aan de selectie toevoegen ("add") of togglen ("toggle") */
+  onToggleSelect: (ids: string[], mode?: "toggle" | "add") => void;
   onSelectCrop: (instanceId: string | null) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** eenmalig zodra het eerste frame echt getekend is */
+  onFirstPaint?: () => void;
   theme: "light" | "dark";
+  locked?: boolean;
   onApplyChanges: (
     updates: {
       id: string;
@@ -27,8 +32,13 @@ interface Props {
   onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: CropAssignment[] }[]) => void;
   onLivePreview?: (preview: PreviewPayload) => void;
   livePreview?: PreviewPayload | null;
+  /** eigen muis + selectie live delen */
+  onLiveCursor?: (cursor: { x: number; y: number } | null, selection: string[]) => void;
+  /** live muizen + selecties van de andere editors */
+  liveCursors?: { current: Map<string, LiveCursor> };
+  currentUserId?: string;
   onAddFrame: (
-    type: "bed" | "path",
+    type: "bed" | "path" | "veld",
     x: number,
     y: number,
     widthM: number,
@@ -61,13 +71,18 @@ export function GardenCanvas({
   selectedIds,
   selectedCropId,
   onSelect,
+  onToggleSelect,
   onSelectCrop,
   onBusyChange,
+  onFirstPaint,
   theme,
   onApplyChanges,
   onLiveMove,
   onLivePreview,
   livePreview,
+  onLiveCursor,
+  liveCursors,
+  currentUserId,
   onAddFrame,
   onAddObject,
   objectMenuOpen,
@@ -77,9 +92,11 @@ export function GardenCanvas({
   onAddCropAt,
   activeCropId,
   focusSignal,
+locked,
 }: Props) {
   return (
     <GpuCanvas
+      locked={locked}
       elements={elements}
       catalog={catalog}
       tool={tool}
@@ -88,17 +105,22 @@ export function GardenCanvas({
       selectedCropId={selectedCropId}
       theme={theme}
       onSelect={onSelect}
+      onToggleSelect={onToggleSelect}
       onSelectCrop={onSelectCrop}
       onApplyChanges={onApplyChanges}
       onLiveMove={onLiveMove}
       onLivePreview={onLivePreview}
       livePreview={livePreview}
+      onLiveCursor={onLiveCursor}
+      liveCursors={liveCursors}
+      currentUserId={currentUserId}
       onAddFrame={onAddFrame}
       onAddObject={onAddObject}
       objectMenuOpen={objectMenuOpen}
       onObjectMenuOpenChange={onObjectMenuOpenChange}
       onUpdateCrop={onUpdateCrop}
       onBusyChange={onBusyChange}
+      onFirstPaint={onFirstPaint}
       snap={snap}
       onAddCropAt={onAddCropAt}
       activeCropId={activeCropId}

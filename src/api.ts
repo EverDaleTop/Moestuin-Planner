@@ -69,10 +69,26 @@ export const api = {
     });
   },
 
-  async login(username: string, password: string): Promise<{ user: User; token: string }> {
+  async login(username: string, password: string, rememberMe = false): Promise<{ user: User; token: string }> {
     return req("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, rememberMe }),
+    });
+  },
+
+  /** Login met een Google ID-token (Google Identity Services). */
+  async loginWithGoogle(idToken: string): Promise<{ user: User; token: string }> {
+    return req("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ idToken }),
+    });
+  },
+
+  /** Wissel een Supabase access-token in voor een lokale app-sessie. */
+  async loginWithSupabase(accessToken: string): Promise<{ user: User; token: string }> {
+    return req("/auth/supabase", {
+      method: "POST",
+      body: JSON.stringify({ accessToken }),
     });
   },
 
@@ -88,10 +104,26 @@ export const api = {
     return req("/me");
   },
 
-  putCatalog(cropCatalog: Crop[]): Promise<{ cropCatalog: Crop[] }> {
+  /** Profielnaam wijzigen. */
+  updateUsername(username: string): Promise<{ user: User }> {
+    return req("/me/username", {
+      method: "PATCH",
+      body: JSON.stringify({ username }),
+    });
+  },
+
+  /** Wachtwoord wijzigen (alleen accounts met wachtwoord). */
+  updatePassword(currentPassword: string, newPassword: string): Promise<{ ok: true }> {
+    return req("/me/password", {
+      method: "PATCH",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  },
+
+  putCatalog(cropCatalog: Crop[], deletedCropIds?: Record<string, number>): Promise<{ cropCatalog: Crop[] }> {
     return req("/catalog", {
       method: "PUT",
-      body: JSON.stringify({ cropCatalog }),
+      body: JSON.stringify({ cropCatalog, deletedCropIds: deletedCropIds ?? {} }),
     });
   },
 
@@ -155,10 +187,15 @@ export const api = {
   regenerateInvite(gardenId: string): Promise<Garden> {
     return req(`/gardens/${encodeURIComponent(gardenId)}/invite`, { method: "POST" });
   },
+  /** Disable the invite link (owner only): existing links stop working. */
+  disableInvite(gardenId: string): Promise<Garden> {
+    return req(`/gardens/${encodeURIComponent(gardenId)}/invite`, { method: "DELETE" });
+  },
 };
 
-/** The copyable share URL for a garden. */
+/** The copyable share URL for a garden. Empty string when invites are disabled. */
 export function inviteUrl(garden: Garden): string {
+  if (!garden.inviteToken) return "";
   const base = `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/$/, "");
   return `${base}/invite/${encodeURIComponent(garden.id)}/${encodeURIComponent(garden.inviteToken)}`;
 }

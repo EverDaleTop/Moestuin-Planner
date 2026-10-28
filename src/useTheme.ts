@@ -5,8 +5,12 @@ export type Theme = "light" | "dark";
 const STORAGE_KEY = "mp-theme";
 
 function initialTheme(): Theme {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved === "dark" || saved === "light") return saved;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === "dark" || saved === "light") return saved;
+  } catch {
+    // ignore
+  }
   if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
     return "dark";
   }
@@ -18,7 +22,11 @@ export function useTheme(): [Theme, () => void] {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(STORAGE_KEY, theme);
+    try {
+      localStorage.setItem(STORAGE_KEY, theme);
+    } catch {
+      // ignore
+    }
   }, [theme]);
 
   const toggle = useCallback(() => {

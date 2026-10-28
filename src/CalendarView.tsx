@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Crop, HarvestEntry, SowingEntry } from "./types";
 import { cropLabel } from "./cropIcons";
 import { CropGlyph } from "./CropIconPicker";
@@ -9,44 +10,206 @@ import {
   harvestWindowOf,
   monthInWindow,
   sowableInMonth,
-  seasonLabel,
-  upcomingSowStarts,
   sameWindow,
   windowText,
   windowLine,
 } from "./sowing";
-import {
-  getNotifyPrefs,
-  saveNotifyPrefs,
-  requestNotifyPermission,
-  permissionState,
-  checkSowReminders,
-  type NotifyPrefs,
-} from "./notifications";
 import { useCollapseForm } from "./useCollapseForm";
+import { SowLogModal } from "./SowLogModal";
 
 interface Props {
-  gardenId: string;
   catalog: Crop[];
   sowings: SowingEntry[];
   harvests: HarvestEntry[];
-  /** gewas-ids die ergens in een bed geplant staan */
+  
   plantedCropIds: Set<string>;
+  
+  veldScopes?: { id: string; name: string; cropIds: string[] }[];
   onAddSowing: (entry: Omit<SowingEntry, "id">) => void;
   onUpdateSowing: (sId: string, patch: Partial<SowingEntry>) => void;
   onRemoveSowing: (sId: string) => void;
-  /** spring naar de tuin en highlight waar dit gewas staat */
+  
   onLocateCrop: (cropId: string) => void;
+  
+  unresolvedPlantings?: number;
+  
+  onLogHarvest: (cropId: string) => void;
 }
 
-type Filter = "all" | "sow" | "harvest";
+
+const VELD_PREFIX = "veld:";
+
+
+function ScopeDropdown({
+  value,
+  plantedCount,
+  catalogCount,
+  velds,
+  onChange,
+}: {
+  value: string;
+  plantedCount: number;
+  catalogCount: number;
+  velds: { id: string; name: string; cropIds: string[] }[];
+  onChange: (s: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  const options = [
+    {
+      key: "planted",
+      label: `In tuin (${plantedCount})`,
+      title: "Alleen gewassen die in de tuin staan",
+    },
+    ...velds.map((v) => ({
+      key: `${VELD_PREFIX}${v.id}`,
+      label: `${v.name} (${v.cropIds.length})`,
+      title: `Alleen gewassen in ${v.name}`,
+    })),
+    {
+      key: "catalog",
+      label: `Alle gewassen (${catalogCount})`,
+      title: "Alle aangemaakte gewassen met een zaaiperiode",
+    },
+  ];
+  const current = options.find((o) => o.key === value) ?? options[0];
+
+  const measure = () => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.max(r.width, 210);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    setPos({ top: r.bottom + 4, left, width });
+  };
+
+  useLayoutEffect(() => {
+    if (open) measure();
+  }, [open ]);
+
+  
+  
+  const openNow = () => {
+    window.clearTimeout(closeTimer.current ?? undefined);
+    closeTimer.current = null;
+    setClosing(false);
+    setOpen(true);
+  };
+  const closeIfOutside = (e: React.MouseEvent) => {
+    const next = e.relatedTarget as Node | null;
+    const pop = document.getElementById("scopedd-portal");
+    if (next && (triggerRef.current?.contains(next) || pop?.contains(next))) return;
+    window.clearTimeout(closeTimer.current ?? undefined);
+    closeTimer.current = window.setTimeout(() => requestClose(), 150);
+  };
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    window.clearTimeout(closeTimer.current ?? undefined);
+    closeTimer.current = window.setTimeout(() => {
+      setOpen(false);
+      setClosing(false);
+      closeTimer.current = null;
+      const t = triggerRef.current;
+      if (t && document.activeElement === t) t.blur();
+    }, 200);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
+        const pop = document.getElementById("scopedd-portal");
+        if (!pop || !pop.contains(e.target as Node)) requestClose();
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") requestClose();
+    };
+    const onScroll = () => requestClose();
+    window.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+    
+  }, [open ]);
+
+  return (
+    <div
+      className="catdd cal-scope-dropdown"
+      onMouseEnter={openNow}
+      onMouseLeave={closeIfOutside}
+    >
+      <button
+        type="button"
+        ref={triggerRef}
+        className="catdd-trigger cal-scope-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open || closing}
+        aria-label="Welke gewassen tonen"
+        title={current.title}
+        onClick={() => openNow()}
+      >
+        <span className="catdd-current">{current.label}</span>
+        <i className={`fa-solid fa-chevron-down catdd-caret${open && !closing ? " open" : ""}`} aria-hidden="true" />
+      </button>
+      {(open || closing) &&
+        createPortal(
+          <ul
+            id="scopedd-portal"
+            className={`catdd-pop catdd-pop-portal scopedd-pop${closing ? " closing" : ""}`}
+            role="listbox"
+            onMouseLeave={closeIfOutside}
+            onMouseEnter={() => {
+              window.clearTimeout(closeTimer.current ?? undefined);
+              closeTimer.current = null;
+              setClosing(false);
+              setOpen(true);
+            }}
+            aria-label="Welke gewassen tonen"
+            style={{ top: pos.top, left: pos.left, width: Math.max(220, pos.width) }}
+          >
+            {options.map((o) => (
+              <li key={o.key} role="option" aria-selected={o.key === value}>
+                <button
+                  type="button"
+                  className={`catdd-item${o.key === value ? " is-active" : ""}`}
+                  title={o.title}
+                  onClick={() => {
+                    onChange(o.key);
+                    requestClose();
+                  }}
+                >
+                  <span className="catdd-name">{o.label}</span>
+                  {o.key === value && (
+                    <i className="fa-solid fa-check catdd-check" aria-hidden="true" />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>,
+          document.body
+        )}
+    </div>
+  );
+}
 
 function todayLocal(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** Datum vandaag/dit jaar anders, zodat recente logs compact blijven. */
+
 function fmtDayShort(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   if (!y || !m || !d) return dateStr;
@@ -58,31 +221,23 @@ function fmtDayShort(dateStr: string): string {
   });
 }
 
-function fmtMonthDay(date: Date): string {
-  return date.toLocaleDateString("nl-NL", { day: "numeric", month: "long" });
-}
-
-function inDaysLabel(days: number): string {
-  if (days === 0) return "vandaag";
-  if (days === 1) return "morgen";
-  if (days < 14) return `over ${days} dagen`;
-  if (days < 60) return `over ${Math.round(days / 7)} weken`;
-  return `over ${Math.round(days / 30)} maanden`;
-}
-
 export function CalendarView({
-  gardenId,
   catalog,
   sowings,
   harvests,
   plantedCropIds,
+  veldScopes,
   onAddSowing,
   onUpdateSowing,
   onRemoveSowing,
   onLocateCrop,
+  unresolvedPlantings = 0,
+  onLogHarvest: _onLogHarvest,
 }: Props) {
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  const [scopeKey, setScopeKey] = useState<string>("planted");
+  
+
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [editDateId, setEditDateId] = useState<string | null>(null);
   const form = useCollapseForm();
@@ -90,38 +245,54 @@ export function CalendarView({
   const [pickDate, setPickDate] = useState(todayLocal);
   const [pickNote, setPickNote] = useState("");
 
-  const [prefs, setPrefs] = useState<NotifyPrefs>(() => getNotifyPrefs(gardenId));
-  const [perm, setPerm] = useState(() => permissionState());
-  const [permHint, setPermHint] = useState(false);
-
   const now = useMemo(() => new Date(), []);
   const month = now.getMonth() + 1;
   const year = now.getFullYear();
+  
+  const day = now.getDate();
 
-  useEffect(() => {
-    checkSowReminders(gardenId, catalog, new Date());
-    const t = window.setInterval(
-      () => checkSowReminders(gardenId, catalog, new Date()),
-      3600 * 1000
-    );
-    return () => window.clearInterval(t);
-  }, [gardenId, catalog]);
-
-  const upcoming = useMemo(
-    () => upcomingSowStarts(catalog, new Date(), prefs.daysBefore),
-    [catalog, prefs.daysBefore]
-  );
   const sowNow = useMemo(() => sowableInMonth(catalog, month), [catalog, month]);
-  // Gewassen die je nu zowel kunt zaaien als oogsten staan niet dubbel:
-  // die komen alleen in "Nu zaaien" te staan, met "zaai én oogst" erbij.
+  
+  
+  
+  
+  const sownKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sowings) {
+      if (s.cropId) set.add(s.cropId);
+      const n = s.cropName.trim().toLowerCase();
+      if (n) set.add(`naam:${n}`);
+    }
+    return set;
+  }, [sowings]);
+  
+  const plantedKeys = useMemo(() => {
+    const set = new Set<string>(plantedCropIds);
+    for (const c of catalog) {
+      if (plantedCropIds.has(c.id)) {
+        const n = c.name.trim().toLowerCase();
+        if (n) set.add(`naam:${n}`);
+      }
+    }
+    return set;
+  }, [plantedCropIds, catalog]);
+  const isPlanted = (c: Crop) =>
+    plantedKeys.has(c.id) ||
+    plantedKeys.has(`naam:${c.name.trim().toLowerCase()}`);
   const harvestOnly = useMemo(
     () =>
       catalog.filter((c) => {
         const h = harvestWindowOf(c);
         if (h === null || !monthInWindow(month, h.start, h.end)) return false;
-        return !sowWindowOf(c) || !monthInWindow(month, sowWindowOf(c)!.start, sowWindowOf(c)!.end);
+        if (sowWindowOf(c) && monthInWindow(month, sowWindowOf(c)!.start, sowWindowOf(c)!.end)) return false;
+        return (
+          isPlanted(c) ||
+          sownKeys.has(c.id) ||
+          sownKeys.has(`naam:${c.name.trim().toLowerCase()}`)
+        );
       }),
-    [catalog, month]
+    
+    [catalog, month, sownKeys, plantedKeys]
   );
 
   const withWindow = useMemo(
@@ -129,21 +300,52 @@ export function CalendarView({
     [catalog]
   );
 
+  
+  const plantedAll = useMemo(() => {
+    const withW: Crop[] = [];
+    const withoutW: Crop[] = [];
+    for (const c of catalog) {
+      if (!isPlanted(c)) continue;
+      (sowWindowOf(c) ? withW : withoutW).push(c);
+    }
+    return [...withW, ...withoutW];
+    
+  }, [catalog, plantedKeys]);
+
+  
+  const veldScope = useMemo(
+    () =>
+      scopeKey.startsWith(VELD_PREFIX)
+        ? (veldScopes.find((v) => `${VELD_PREFIX}${v.id}` === scopeKey) ?? null)
+        : null,
+    [veldScopes, scopeKey]
+  );
+  const veldKeys = useMemo(() => {
+    if (!veldScope) return null;
+    const set = new Set<string>(veldScope.cropIds);
+    for (const c of catalog) {
+      if (veldScope.cropIds.includes(c.id)) {
+        const n = c.name.trim().toLowerCase();
+        if (n) set.add(`naam:${n}`);
+      }
+    }
+    return set;
+  }, [veldScope, catalog]);
+  const scoped = useMemo(() => {
+    if (scopeKey === "catalog") return withWindow;
+    if (!veldScope || !veldKeys) return plantedAll;
+    return plantedAll.filter(
+      (c) => veldKeys.has(c.id) || veldKeys.has(`naam:${c.name.trim().toLowerCase()}`)
+    );
+  }, [plantedAll, withWindow, scopeKey, veldScope, veldKeys]);
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    let list = withWindow;
-    if (filter === "sow") list = list.filter((c) => sowWindowOf(c)!.start === month);
-    if (filter === "harvest") {
-      list = list.filter((c) => {
-        const h = harvestWindowOf(c);
-        return h !== null && monthInWindow(month, h.start, h.end);
-      });
-    }
-    if (!s) return list;
-    return list.filter((c) => c.name.toLowerCase().includes(s));
-  }, [withWindow, q, filter, month]);
+    if (!s) return scoped;
+    return scoped.filter((c) => c.name.toLowerCase().includes(s));
+  }, [scoped, q]);
 
-  /** marks per crop+month: sowings and harvests */
+  
   const marks = useMemo(() => {
     const sown = new Map<string, number>();
     const harvested = new Map<string, number>();
@@ -175,6 +377,24 @@ export function CalendarView({
     return n;
   };
 
+  
+  const toneOf = (c: Crop, m: number) => {
+    const sow = sowWindowOf(c);
+    const harv = harvestWindowOf(c);
+    const inSow = sow !== null && monthInWindow(m, sow.start, sow.end);
+    const inHarv = harv !== null && monthInWindow(m, harv.start, harv.end);
+    const both = inSow && inHarv;
+    const cls = [
+      both ? (sameWindow(sow, harv) ? "cal-cell-cycle" : "cal-cell-both") : "",
+      !both && inSow ? "cal-cell-sow" : "",
+      !both && inHarv ? "cal-cell-harv" : "",
+    ].filter(Boolean);
+    return { inSow, inHarv, both, cls };
+  };
+
+  
+  const hlCls = "";
+
   const sortedSowings = useMemo(
     () => sowings.slice().sort((a, b) => b.date.localeCompare(a.date)),
     [sowings]
@@ -200,312 +420,135 @@ export function CalendarView({
     form.closeForm();
   };
 
-  const savePrefs = (next: NotifyPrefs) => {
-    setPrefs(next);
-    saveNotifyPrefs(gardenId, next);
-  };
-
-  const enableNotifications = async () => {
-    const ok = await requestNotifyPermission();
-    setPerm(permissionState());
-    if (ok) {
-      savePrefs({ ...prefs, enabled: true });
-      setPermHint(false);
-      checkSowReminders(gardenId, catalog, new Date());
-    } else {
-      setPermHint(true);
-    }
-  };
-
-  const sendTest = () => {
-    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    try {
-      new Notification("Moestuin-meldingen aan", {
-        body: "Je krijgt nu een seintie als een zaaivenster nadert.",
-      });
-    } catch {
-      /* ignore */
-    }
-  };
-
   return (
-    <div className="shop-page cal-page">
-      {/* Hero + huidige maand */}
-      <div className="shop-hero">
-        <div className="shop-hero-text">
-          <h2>
-            <i className="fa-solid fa-calendar-days" /> Zaaikalender
-          </h2>
-          <p>
-            Wat je nu kunt zaaien, wanneer je kunt oogsten en wat je al hebt
-            gezaaid.
+    <div className="cal-page">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 className="cal-title">Zaaikalender</h1>
+          <p style={{ margin: "6px 0 0", color: "var(--ink-soft)", fontSize: 16 }}>Zaai- en oogstmomenten voor jouw tuin.</p>
+        </div>
+        <span style={{ background: "var(--surface)", borderRadius: 99, padding: "10px 18px", fontWeight: 700, fontSize: 14 }}>{day} {MONTHS_LONG[month - 1]} {year}</span>
+      </div>
+
+      <div className="cal-cards">
+        <div style={{ background: "var(--primary)", color: "var(--bg)", borderRadius: 28, padding: 28 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--harvest)" }}>Deze maand</div>
+          <div style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 800, fontSize: 64, lineHeight: 1, marginTop: 14 }}>{harvestOnly.length}</div>
+          <div style={{ fontSize: 16, marginTop: 4 }}>gewassen te oogsten</div>
+          <p style={{ fontSize: 14, margin: "16px 0 0", opacity: .85, lineHeight: 1.5 }}>
+            {sowNow.length === 0 ? "Geen actief zaaivenster. Stel zaaiperiodes in via Gewassen." : "Actief zaaivenster deze maand."}
           </p>
         </div>
-        <div className="cal-hero-actions">
-          <div className="cal-now-badge">
-            <span className="cal-now-num">{month}</span>
-            <span className="cal-now-txt">
-              <strong>{MONTHS_LONG[month - 1]}</strong>
-              <span>{year}</span>
-            </span>
+        <div style={{ background: "var(--surface)", borderRadius: 28, padding: 28 }}>
+          <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 16 }}>Te oogsten</div>
+          <div className="cal-harvest-grid">
+            {harvestOnly.map((c) => {
+              const h = harvestWindowOf(c);
+              return (
+                <div key={c.id} style={{ background: "var(--bg)", borderRadius: 18, padding: "14px 16px" }}>
+                  <b>{cropLabel(c)}</b>
+                  <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>{h ? windowText(h) : ""}</div>
+                </div>
+              );
+            })}
           </div>
-          <button
-            className={`cal-bell${prefs.enabled ? " cal-bell-on" : ""}`}
-            onClick={() => {
-              if (prefs.enabled) savePrefs({ ...prefs, enabled: false });
-              else void enableNotifications();
-            }}
-            title={prefs.enabled ? "Meldingen uitzetten" : "Meldingen aanzetten"}
-            aria-pressed={prefs.enabled}
-          >
-            <i className={`fa-solid ${prefs.enabled ? "fa-bell" : "fa-bell-slash"}`} />
-          </button>
         </div>
       </div>
-
-      {/* Deze maand: zaaien + oogsten */}
-      <div className="cal-now-grid">
-        <section className="cal-panel">
-          <h3 className="cal-h">
-            <i className="fa-solid fa-seedling" /> Nu zaaien
-            <span className="cal-n">{sowNow.length}</span>
-          </h3>
-          {sowNow.length === 0 ? (
-            <p className="insp-hint">
-              Deze maand geen actief zaaivenster. Stel zaaiperiodes in via Gewassen →
-              Bewerken.
-            </p>
-          ) : (
-            <div className="cal-chips">
-              {sowNow.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className="cal-chip"
-                  onClick={() => startAdd(c.id)}
-title={`${cropLabel(c)} als gezaaid loggen`}
-                  >
-                    <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
-                    <span className="cal-chip-txt">
-                      <span className="cal-chip-name">{cropLabel(c)}</span>
-                      <span className="cal-chip-sub">{seasonLabel(c)}</span>
-                  </span>
-                  <i className="fa-solid fa-plus cal-chip-add" />
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="cal-panel">
-          <h3 className="cal-h">
-            <i className="fa-solid fa-basket-shopping" /> Te oogsten
-            <span className="cal-n">{harvestOnly.length}</span>
-          </h3>
-          {harvestOnly.length === 0 ? (
-            <p className="insp-hint">
-              Deze maand geen verwachte oogst. Kijk in het jaaroverzicht wat wanneer
-              klaar is.
-            </p>
-          ) : (
-            <div className="cal-chips">
-              {harvestOnly.map((c) => {
-                const h = harvestWindowOf(c)!;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className="cal-chip cal-chip-harvest"
-                    onClick={() => startAdd(c.id)}
-                    title={`${cropLabel(c)} als gezaaid loggen`}
-                  >
-                    <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
-                    <span className="cal-chip-txt">
-                      <span className="cal-chip-name">{cropLabel(c)}</span>
-                      <span className="cal-chip-sub">
-                        {windowText(h)}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      </div>
-
-      {/* Jaaroverzicht */}
+      {}
       <section className="cal-panel">
-        <div className="cal-panel-head">
-          <h3 className="cal-h">
-            <i className="fa-solid fa-table-cells" /> Jaaroverzicht {year}
-          </h3>
-          <div className="cal-tools">
-            <div className="cal-seg" role="group" aria-label="Filter maand">
-              {(
-                [
-                  ["all", "Alles"],
-                  ["sow", "Zaaien"],
-                  ["harvest", "Oogsten"],
-                ] as [Filter, string][]
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  className={filter === key ? "cal-seg-btn on" : "cal-seg-btn"}
-                  onClick={() => setFilter(key)}
-                  aria-pressed={filter === key}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <input
-              className="pd-search cal-search"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Zoek gewas…"
-            />
-          </div>
-        </div>
 
-        <div className="cal-legend">
-          <span className="cal-lg">
-            <span className="cal-lg-sw cal-lg-sow" /> zaaien
-          </span>
-          <span className="cal-lg">
-            <span className="cal-lg-sw cal-lg-harv" /> oogsten
-          </span>
-          <span className="cal-lg">
-            <span className="cal-lg-sw cal-lg-both" /> zaaien én oogsten
-          </span>
-          <span className="cal-lg">
-            <span className="cal-lg-sw cal-lg-now" /> deze maand
-          </span>
-          <span className="cal-lg">🌱 gezaaid</span>
-          <span className="cal-lg">🧺 geoogst</span>
-        </div>
+        {scopeKey === "planted" && unresolvedPlantings > 0 && (
+          <p className="insp-hint">
+            Er {unresolvedPlantings === 1 ? "staat 1 stuk" : `staan ${unresolvedPlantings} stukken`} op
+            de canvas waarvan het gewas niet meer in de database staat. Plant{" "}
+            {unresolvedPlantings === 1 ? "het" : "ze"} opnieuw vanuit de gewassenlijst.
+          </p>
+        )}
 
         {filtered.length === 0 ? (
           <p className="insp-hint">
             {withWindow.length === 0
               ? "Nog geen zaaiperiodes ingesteld. Stel ze in via Gewassen → Bewerken."
-              : "Geen gewassen gevonden."}
+              : scopeKey === "planted" && scoped.length === 0
+                ? "Nog niets in de tuin geplant. Kies “Alle gewassen” om alles te zien."
+                : "Geen gewassen gevonden."}
           </p>
         ) : (
-          <div className="cal-table-wrap">
-            <table className="cal-table">
-              <thead>
-                <tr>
-                  <th className="cal-crop-col">Gewas</th>
-                  {MONTHS_SHORT.map((m, i) => (
-                    <th key={m} className={i + 1 === month ? "cal-th-now" : ""}>
-                      {m}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((c, idx) => {
-                  const sow = sowWindowOf(c)!;
-                  const harv = harvestWindowOf(c);
-                  // Zaaien en oogsten in dezelfde maanden is één doorlopend
-                  // seizoen: dan één cel en één vermelding, geen dubbele.
-                  const cycle = sameWindow(sow, harv);
-                  return (
-                    <tr
-                      key={c.id}
-                      className="cal-row"
-                      style={{ animationDelay: `${Math.min(idx, 9) * 0.03}s` }}
-                    >
-                      <td className="cal-crop-col">
-                        <div className="cal-crop-cell">
-                          <button
-                            type="button"
-                            className="cal-crop-btn"
-                            onClick={() => startAdd(c.id)}
-                            title={`${cropLabel(c)} — ${windowLine(c) ?? ""} (klik om zaaien te loggen)`}
-                          >
-                            <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} className="cal-crop-emoji" />
-                            <span className="cal-crop-name">{c.name}</span>
-                          </button>
-                          {plantedCropIds.has(c.id) && (
-                            <button
-                              type="button"
-                              className="cal-locate-btn"
-                              onClick={() => onLocateCrop(c.id)}
-                              title={`${cropLabel(c)} tonen in de tuin`}
-                              aria-label={`${cropLabel(c)} tonen in de tuin`}
-                            >
-                              <i className="fa-solid fa-crosshairs" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      {MONTHS_SHORT.map((_, i) => {
-                        const m = i + 1;
-                        const inSow = monthInWindow(m, sow.start, sow.end);
-                        const inHarv =
-                          harv !== null && monthInWindow(m, harv.start, harv.end);
-                        const isNow = m === month;
-                        const sown = countFor(c, m, marks.sown);
-                        const harvested = countFor(c, m, marks.harvested);
-                        const both = inSow && inHarv;
-                        const title = [
-                          cropLabel(c),
-                          MONTHS_LONG[m - 1],
-                          both
-                            ? "zaaien én oogsten"
-                            : inSow
-                              ? "zaaien"
-                              : inHarv
-                                ? "oogsten"
-                                : "",
-                          sown > 0 ? `${sown}× gezaaid` : "",
-                          harvested > 0 ? `${harvested}× geoogst` : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ");
-                        return (
-                          <td
-                            key={m}
-                            className={[
-                              "cal-cell",
-                              both ? (cycle ? "cal-cell-cycle" : "cal-cell-both") : "",
-                              !both && inSow ? "cal-cell-sow" : "",
-                              !both && inHarv ? "cal-cell-harv" : "",
-                              isNow ? "cal-cell-now" : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            title={title}
-                          >
-                            {sown > 0 && (
-                              <span className="cal-mark" aria-label={`${sown} keer gezaaid`}>
-                                🌱
-                              </span>
-                            )}
-                            {harvested > 0 && (
-                              <span className="cal-mark" aria-label={`${harvested} keer geoogst`}>
-                                🧺
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <>
+          <div className="cal-year-card">
+            <div className="cal-scroll-inner">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
+                <div style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 800, fontSize: 24 }}>Jaaroverzicht <span style={{ color: "var(--ink-soft)", fontWeight: 700 }}>{year}</span></div>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <ScopeDropdown
+                    value={scopeKey}
+                    plantedCount={plantedAll.length}
+                    catalogCount={withWindow.length}
+                    velds={veldScopes ?? []}
+                    onChange={setScopeKey}
+                  />
+                  <input
+                    className="cal-search"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Zoek gewas…"
+                    aria-label="Zoek gewas"
+                  />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 16, fontSize: 13, fontWeight: 700, alignItems: "center", marginBottom: 16 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 4, background: "var(--sow)" }}></span>zaaien</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 4, background: "var(--harvest)" }}></span>oogsten</span>
+              </div>
+              <div className="cal-month-head">
+                <div></div>
+                {MONTHS_SHORT.map((m, i) => (
+                  <div key={m} className="mh">
+                    <span className={i + 1 === month ? "mh-active" : undefined}>
+                      <span className="mh-full">{m.toUpperCase()}</span>
+                      <span className="mh-abbr">{m.slice(0, 2).toUpperCase()}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {filtered.map((c) => {
+                const sw = sowWindowOf(c);
+                const hw = harvestWindowOf(c);
+                return (
+                  <div key={c.id} className="row">
+                    <span className="nm">
+                      <button type="button" onClick={() => startAdd(c.id)} title={`${cropLabel(c)}`} className="nm-name">
+                        <CropGlyph iconKey={c.icon} cropName={c.name} label={c.name} />
+                        {c.name}
+                      </button>
+                      {isPlanted(c) && (
+                        <button type="button" className="nm-goto" title={`Toon ${cropLabel(c)} in tuin`} aria-label={`Toon ${cropLabel(c)} in tuin`} onClick={() => onLocateCrop(c.id)}>
+                          <i className="fa-solid fa-location-crosshairs" aria-hidden="true" />
+                        </button>
+                      )}
+                    </span>
+                    <div className="cal-bars">
+                      {sw && (
+                        <div className="z" title={`Zaaien: ${windowText(sw)}`} style={{ gridColumn: `${sw.start} / ${sw.end + 1}` }} />
+                      )}
+                      {hw && (
+                        <div className="o" title={`Oogsten: ${windowText(hw)}`} style={{ gridColumn: `${hw.start} / ${hw.end + 1}` }} />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+          </>
         )}
       </section>
 
-      {/* Gezaaid loggen */}
+      {}
       <section className="cal-panel">
         <div className="cal-panel-head">
           <h3 className="cal-h">
-            <i className="fa-solid fa-clipboard-check" /> Gezaaid
+            Gezaaid
             <span className="cal-n">{sowings.length}</span>
           </h3>
           <button className="btn-primary" onClick={form.toggleForm}>
@@ -521,58 +564,19 @@ title={`${cropLabel(c)} als gezaaid loggen`}
           </button>
         </div>
 
-        {form.mounted && (
-          <div className={`shop-form ${form.open ? "" : "shop-form-closing"}`}>
-            <div className="shop-form-inner">
-              <div className="shop-form-panel">
-                <div className="shop-form-header">
-                  <i className="fa-solid fa-seedling" />
-                  <span>Zaaien gelogd</span>
-                </div>
-                <div className="shop-form-grid">
-                  <div className="shop-form-field">
-                    <label>Gewas</label>
-                    <select
-                      value={pickCrop || catalog[0]?.id || ""}
-                      onChange={(e) => setPickCrop(e.target.value)}
-                    >
-                      {catalog.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {cropLabel(c)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="shop-form-field">
-                    <label>Datum</label>
-                    <input
-                      type="date"
-                      value={pickDate}
-                      onChange={(e) => setPickDate(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="shop-form-field">
-                  <label>Notitie (optioneel)</label>
-                  <input
-                    value={pickNote}
-                    onChange={(e) => setPickNote(e.target.value)}
-                    placeholder="bijv. binnenshuis voorzaaien"
-                  />
-                </div>
-                <div className="shop-form-footer">
-                  <button
-                    className="btn-primary"
-                    onClick={submitAdd}
-                    disabled={!pickDate || catalog.length === 0}
-                  >
-                    <i className="fa-solid fa-check" /> Opslaan
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <SowLogModal
+          mounted={form.mounted}
+          open={form.open}
+          catalog={catalog}
+          pickCrop={pickCrop}
+          pickDate={pickDate}
+          pickNote={pickNote}
+          onPickCrop={setPickCrop}
+          onPickDate={setPickDate}
+          onPickNote={setPickNote}
+          onSubmit={submitAdd}
+          onClose={form.closeForm}
+        />
 
         {sortedSowings.length === 0 ? (
           <p className="insp-hint">
@@ -664,86 +668,7 @@ title={`${cropLabel(c)} als gezaaid loggen`}
           </div>
         )}
       </section>
-
-      {/* Meldingen */}
-      <section className="cal-panel">
-        <h3 className="cal-h">
-          <i className={`fa-solid ${prefs.enabled ? "fa-bell" : "fa-bell-slash"}`} /> Meldingen
-        </h3>
-        <div className="cal-notify">
-          <label className="cal-toggle">
-            <input
-              type="checkbox"
-              checked={prefs.enabled}
-              onChange={() => {
-                if (prefs.enabled) savePrefs({ ...prefs, enabled: false });
-                else void enableNotifications();
-              }}
-            />
-            <span>Waarschuw me als een zaaivenster nadert</span>
-          </label>
-          <label className="cal-days">
-            <span>Dagen vooraf</span>
-            <input
-              type="number"
-              min={0}
-              max={60}
-              value={prefs.daysBefore}
-              onChange={(e) => {
-                const v = Math.max(
-                  0,
-                  Math.min(60, Math.round(Number(e.target.value) || 0))
-                );
-                savePrefs({ ...prefs, daysBefore: v });
-              }}
-            />
-          </label>
-          {prefs.enabled && (
-            <button className="btn-ghost" onClick={sendTest}>
-              <i className="fa-solid fa-vial" /> Testmelding
-            </button>
-          )}
-        </div>
-        {permHint && (
-          <p className="insp-hint">
-            Meldingen zijn geblokkeerd. Sta ze toe via het slotje in de adresbalk en
-            probeer opnieuw.
-          </p>
-        )}
-        {perm === "unsupported" && (
-          <p className="insp-hint">Deze browser ondersteunt geen meldingen.</p>
-        )}
-        {upcoming.length === 0 ? (
-          <p className="insp-hint">
-            Geen zaaivensters in de komende {prefs.daysBefore} dagen.
-          </p>
-        ) : (
-          <div className="pd-list">
-            {upcoming.map((u) => (
-              <div key={u.key} className="pd-card cal-log">
-                <CropGlyph
-                  iconKey={u.crop.icon}
-                  cropName={u.crop.name}
-                  label={u.crop.name}
-                  color={u.crop.color}
-                  className="crop-icon pd-icon"
-                />
-                <div className="pd-card-main">
-                  <div className="pd-card-title">{u.crop.name}</div>
-                  <div className="pd-card-meta">
-                    zaaien vanaf {fmtMonthDay(u.date)} · {inDaysLabel(u.daysUntil)}
-                  </div>
-                </div>
-                <div className="pd-card-actions">
-                  <button onClick={() => startAdd(u.crop.id)}>
-                    <i className="fa-solid fa-seedling" /> Loggen
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }
+

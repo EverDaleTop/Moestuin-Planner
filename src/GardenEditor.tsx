@@ -27,10 +27,10 @@ import { ExpensesView } from './ExpensesView'
 import { ShoppingListView } from './ShoppingListView'
 import { PlantCatalog } from './PlantDatabase'
 import { CalendarView } from './CalendarView'
+import { SidebarThemeRow } from './ThemeToggle'
 import { sowableInMonth, harvestableInMonth } from './sowing'
 import { PX_PER_M } from './storage'
 import type { Theme } from './useTheme'
-import { ThemeToggle } from './ThemeToggle'
 
 const FaIcon = ({ cls }: { cls: string }) => (
 	<i className={cls} style={{ fontSize: 16 }} aria-hidden='true' />
@@ -89,17 +89,18 @@ function NavMenu({
 	onSelect: (key: string) => void
 }) {
 	const [open, setOpen] = useState(false)
+	const [closing, setClosing] = useState(false)
 	const rootRef = useRef<HTMLDivElement | null>(null)
 
 	useEffect(() => {
 		if (!open) return
 		const onDown = (e: PointerEvent) => {
 			if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-				setOpen(false)
+				requestClose()
 			}
 		}
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') setOpen(false)
+			if (e.key === 'Escape') requestClose()
 		}
 		document.addEventListener('pointerdown', onDown)
 		document.addEventListener('keydown', onKey)
@@ -116,19 +117,46 @@ function NavMenu({
 	const totalBadges: TabBadge[] =
 		!active && total > 0 ? [{ count: total, title: `${total} open` }] : []
 	const closeTimer = useRef<number | null>(null)
+	const closeAnimTimer = useRef<number | null>(null)
+	// actieve sleutel op het moment dat het sluiten begint: tijdens de
+	// sluitanimatie blijft die staan, zodat de markering niet verspringt
+	// voordat het menu weg is.
+	const frozenKey = useRef<string | null>(null)
 
 	const cancelClose = () => {
 		if (closeTimer.current !== null) {
 			window.clearTimeout(closeTimer.current)
 			closeTimer.current = null
 		}
+		if (closeAnimTimer.current !== null) {
+			window.clearTimeout(closeAnimTimer.current)
+			closeAnimTimer.current = null
+		}
+	}
+
+	const openNow = () => {
+		cancelClose()
+		frozenKey.current = null
+		setClosing(false)
+		setOpen(true)
+	}
+
+	const requestClose = () => {
+		cancelClose()
+		frozenKey.current = activeKey
+		setClosing(true)
+		closeAnimTimer.current = window.setTimeout(() => {
+			setOpen(false)
+			setClosing(false)
+			closeAnimTimer.current = null
+		}, 180)
 	}
 
 	// Hover opent, met een kleine vertraging bij sluiten zodat je van de tab
 	// naar het menu kunt bewegen zonder dat het dichtklapt.
 	const scheduleClose = () => {
 		cancelClose()
-		closeTimer.current = window.setTimeout(() => setOpen(false), 180)
+		closeTimer.current = window.setTimeout(() => requestClose(), 140)
 	}
 
 	useEffect(() => cancelClose, [])
@@ -138,56 +166,52 @@ function NavMenu({
 			className='ge-menu'
 			ref={rootRef}
 			onMouseEnter={() => {
-				cancelClose()
-				setOpen(true)
+				if (window.matchMedia('(hover: hover)').matches) openNow()
 			}}
-			onMouseLeave={scheduleClose}>
+			onMouseLeave={() => {
+				if (window.matchMedia('(hover: hover)').matches) scheduleClose()
+			}}>
 			<button
 				className={`nav-tab${active ? ' nav-active' : ''}`}
-				onClick={() => setOpen((o) => !o)}
+				onClick={() => (open && !closing ? requestClose() : openNow())}
 				aria-haspopup='menu'
-				aria-expanded={open}
-				title={label}>
-				<i className={`fa-solid ${icon}`} />
-				{current?.label ?? label}
-				{(tabBadges ?? totalBadges)
-					.filter((b) => b.count > 0)
-					.map((b) => (
-						<span key={b.title} className='ge-tab-badge' title={b.title}>
-							{b.icon && <i className={`fa-solid ${b.icon}`} />}
-							{b.count}
-						</span>
-					))}
-				<i className={`fa-solid fa-chevron-down ge-menu-caret${open ? ' open' : ''}`} />
+				aria-expanded={open && !closing}
+				title={current?.label ?? label}>
+				{label}
+				<i className={`fa-solid fa-chevron-down ge-menu-caret${open && !closing ? ' open' : ''}`} />
 			</button>
-			{open && (
-				<div className='ge-menu-pop' role='menu'>
-					{items.map((i) => (
-						<button
-							key={i.key}
-							type='button'
-							role='menuitem'
-							className={
-								i.key === activeKey ? 'ge-menu-item is-active' : 'ge-menu-item'
-							}
-							onClick={() => {
-								onSelect(i.key)
-								setOpen(false)
-							}}>
-							<i className={`fa-solid ${i.icon}`} />
-							<span className='ge-menu-name'>{i.label}</span>
-							{i.hint && <span className='ge-menu-hint'>{i.hint}</span>}
-							{i.key === activeKey && (
-								<i className='fa-solid fa-check ge-menu-check' />
-							)}
-							{i.key !== activeKey && !!i.count && (
-								<span className='ge-menu-count'>
-									{i.countIcon && <i className={`fa-solid ${i.countIcon}`} />}
-									{i.count}
-								</span>
-							)}
-						</button>
-					))}
+			{(open || closing) && (
+				<div className={`ge-menu-pop${closing ? ' closing' : ''}`} role='menu'>
+					{items.map((i) => {
+						const shownActive =
+							closing && frozenKey.current !== null
+								? i.key === frozenKey.current
+								: i.key === activeKey
+						return (
+							<button
+								key={i.key}
+								type='button'
+								role='menuitem'
+								className={
+									shownActive ? 'ge-menu-item is-active' : 'ge-menu-item'
+								}
+								onClick={() => {
+									onSelect(i.key)
+									requestClose()
+								}}>
+								<span className='ge-menu-name'>{i.label}</span>
+								{i.hint && <span className='ge-menu-hint'>{i.hint}</span>}
+								{shownActive && (
+									<i className='fa-solid fa-check ge-menu-check' />
+								)}
+								{!shownActive && !!i.count && (
+									<span className='ge-menu-count'>
+										{i.count}
+									</span>
+								)}
+							</button>
+						)
+					})}
 				</div>
 			)}
 		</div>
@@ -198,12 +222,12 @@ interface Props {
 	garden: Garden
 	catalog: Crop[]
 	theme: Theme
+	onToggleTheme: () => void
 	presence?: number
 	presenceMembers?: PresenceMember[]
 	currentUserId: string
 	userNames: Record<string, string>
 	onUnshareMember: (userId: string) => Promise<void>
-	onToggleTheme: () => void
 	onNameChange: (name: string) => void
 	onBack: () => void
 	onAddFrame: (
@@ -278,12 +302,12 @@ export function GardenEditor(props: Props) {
 		garden,
 		catalog,
 		theme,
+		onToggleTheme,
 		presence,
 		presenceMembers = [],
 		currentUserId,
 		userNames,
 		onUnshareMember,
-		onToggleTheme,
 		onNameChange,
 		onBack,
 		onAddFrame,
@@ -369,6 +393,7 @@ export function GardenEditor(props: Props) {
 		return 'canvas'
 	})
 
+	const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 	const [selectedIds, setSelectedIds] = useState<string[]>([])
 	const [selectedCropId, setSelectedCropId] = useState<string | null>(null)
 	const [focusSignal, setFocusSignal] = useState<{ x: number; y: number; n: number } | null>(null)
@@ -418,6 +443,15 @@ export function GardenEditor(props: Props) {
 			localStorage.setItem('mp_editor_tab', editorTab)
 		} catch { /* ignore */ }
 	}, [editorTab])
+
+	useEffect(() => {
+		if (!mobileMenuOpen) return
+		const prev = document.body.style.overflow
+		document.body.style.overflow = 'hidden'
+		return () => {
+			document.body.style.overflow = prev
+		}
+	}, [mobileMenuOpen])
 
 	// Delete / Backspace removes the selected elements, or the selected child.
 	useEffect(() => {
@@ -680,6 +714,7 @@ export function GardenEditor(props: Props) {
 		<div className='ge-wrap'>
 			<header className='ge-header'>
 				<div className='ge-brand'>
+					<svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true" style={{ flex: "none" }}><rect width="32" height="32" rx="10" fill="#1F4D3A"></rect><path d="M9 23c0-8 5-13 14-14 0 9-5 14-14 14z" fill="#5FA55A"></path></svg>
 					<button
 						className='btn-ghost ge-back'
 						onClick={onBack}
@@ -700,11 +735,10 @@ export function GardenEditor(props: Props) {
 					/>
 				</div>
 				<div className='ge-tabs-slot'>
-					<div className='ge-editor-tabs'>
+					<div className={`ge-editor-tabs${mobileMenuOpen ? ' is-open' : ''}`}>
 					<button
 						className={`nav-tab ${editorTab === 'canvas' ? 'nav-active' : ''}`}
-						onClick={() => setEditorTab('canvas')}>
-						<i className='fa-solid fa-seedling' />
+						onClick={() => { setEditorTab('canvas'); setMobileMenuOpen(false) }}>
 						Tuin
 					</button>
 					<NavMenu
@@ -741,12 +775,11 @@ export function GardenEditor(props: Props) {
 										: 'nu te zaaien',
 							},
 						]}
-						onSelect={(key) => setEditorTab(key as typeof editorTab)}
+						onSelect={(key) => { setEditorTab(key as typeof editorTab); setMobileMenuOpen(false) }}
 					/>
 					<button
 						className={`nav-tab ${editorTab === 'oogst' ? 'nav-active' : ''}`}
-						onClick={() => setEditorTab('oogst')}>
-						<i className='fa-solid fa-basket-shopping' />
+						onClick={() => { setEditorTab('oogst'); setMobileMenuOpen(false) }}>
 						Oogst
 					</button>
 					<NavMenu
@@ -766,7 +799,7 @@ export function GardenEditor(props: Props) {
 								count: openShopping,
 							},
 						]}
-						onSelect={(key) => setEditorTab(key as typeof editorTab)}
+						onSelect={(key) => { setEditorTab(key as typeof editorTab); setMobileMenuOpen(false) }}
 					/>
 				</div>
 				</div>
@@ -781,9 +814,63 @@ export function GardenEditor(props: Props) {
 							<i className='fa-solid fa-chevron-down ge-presence-caret' />
 						</button>
 					)}
-					<ThemeToggle theme={theme} onToggle={onToggleTheme} />
+					<button
+						className='ge-nav-toggle'
+						onClick={() => setMobileMenuOpen((o) => !o)}
+						aria-label='Menu openen'
+						aria-expanded={mobileMenuOpen}>
+						<i className='fa-solid fa-bars ge-nav-icon ge-nav-icon-bars' />
+						<i className='fa-solid fa-xmark ge-nav-icon ge-nav-icon-close' />
+					</button>
 				</div>
 			</header>
+			<div className={`ge-side-backdrop${mobileMenuOpen ? ' open' : ''}`} onClick={() => setMobileMenuOpen(false)} />
+			<aside className={`ge-sidebar${mobileMenuOpen ? ' open' : ''}`}>
+				<div className='ge-side-head'>
+					<span className='ge-side-title'>
+						<i className='fa-solid fa-seedling' /> Menu
+					</span>
+				</div>
+				<nav className='ge-side-nav'>
+					<button
+						className={`ge-side-item${editorTab === 'canvas' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('canvas'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-map' />
+						<span className='ge-side-label'>Tuin</span>
+					</button>
+					<button
+						className={`ge-side-item${editorTab === 'gewassen' || editorTab === 'kalender' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('gewassen'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-seedling' />
+						<span className='ge-side-label'>Gewassenlijst</span>
+					</button>
+					<button
+						className={`ge-side-item${editorTab === 'kalender' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('kalender'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-calendar-days' />
+						<span className='ge-side-label'>Zaaikalender</span>
+					</button>
+					<button
+						className={`ge-side-item${editorTab === 'oogst' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('oogst'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-basket-shopping' />
+						<span className='ge-side-label'>Oogst</span>
+					</button>
+					<button
+						className={`ge-side-item${editorTab === 'uitgaven' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('uitgaven'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-receipt' />
+						<span className='ge-side-label'>Uitgaven</span>
+					</button>
+					<button
+						className={`ge-side-item${editorTab === 'boodschappen' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('boodschappen'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-cart-shopping' />
+						<span className='ge-side-label'>Boodschappen</span>
+					</button>
+					<SidebarThemeRow theme={theme} onToggle={onToggleTheme} />
+				</nav>
+			</aside>
 			{presenceOpen && (
 				<PresenceModal
 					gardenName={garden.name}
@@ -1058,7 +1145,7 @@ export function GardenEditor(props: Props) {
 				</div>
 			) : editorTab === 'gewassen' ? (
 				<div className='shop-scroll'>
-					<div className='shop-page'>
+					<div className='shop-page cal-page'>
 						<PlantCatalog
 							catalog={catalog}
 							onAdd={onAddCropToCatalog}

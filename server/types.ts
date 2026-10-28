@@ -1,7 +1,14 @@
 import type { Crop, Garden, User } from "../src/types.ts";
 
 export interface StoredUser extends User {
-  passwordHash: string;
+  /** null voor OAuth-accounts (Google / Supabase) zonder wachtwoord */
+  passwordHash: string | null;
+  email?: string | null;
+  avatarUrl?: string | null;
+  /** waarmee is dit account aangemaakt: local | google | supabase */
+  provider?: "local" | "google" | "supabase";
+  /** externe id bij de provider (Google sub / Supabase user id) */
+  providerId?: string | null;
 }
 
 export interface Session {
@@ -14,6 +21,8 @@ export interface Db {
   users: StoredUser[];
   sessions: Session[];
   cropCatalog: Crop[];
+  /** tombstones van verwijderde catalogusgewassen, zodat deletes nooit herrijzen */
+  catalogDeleted: Record<string, number>;
   gardens: Garden[];
 }
 
@@ -62,6 +71,7 @@ export type WsMessage =
   | { type: "garden"; garden: Garden }
   | { type: "move"; gardenId: string; updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: { instanceId: string; cropId: string; rows: number; rowSpacing?: number; plantSpacing?: number; cols?: number; padding?: number; area?: { x: number; y: number; w: number; h: number } }[] }[] }
   | { type: "preview"; gardenId: string; preview: PreviewPayload }
+  | { type: "cursor"; gardenId: string; userId: string; username: string; cursor: { x: number; y: number } | null; selection: string[] }
   | { type: "presence"; gardenId: string; count: number; members: PresenceMember[] }
   | { type: "kicked"; gardenId: string }
   | { type: "error"; message: string };

@@ -1,0 +1,41 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+await page.goto("http://localhost:5173/", { waitUntil: "networkidle" });
+const seedFn = async () => {
+  const username = "mob" + Date.now();
+  const reg = await fetch("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password: "test1234" }) });
+  const body = await reg.json();
+  const token = body.token;
+  const h = { "Content-Type": "application/json", Authorization: "Bearer " + token };
+  const g = await fetch("/api/gardens", { method: "POST", headers: h, body: JSON.stringify({ name: "Testtuin" }) }).then((r) => r.json());
+  localStorage.setItem("mp_token", token);
+  localStorage.setItem("mp_last_garden", g.id);
+  localStorage.setItem("mp_gardens_cache_v1", JSON.stringify({ user: body.user, userNames: {}, gardens: [g], cropCatalog: [] }));
+};
+await page.evaluate(seedFn);
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForTimeout(1200);
+await page.locator(".ge-nav-toggle").first().tap();
+await page.waitForTimeout(400);
+await page.locator(".ge-side-item", { hasText: "Gewassenlijst" }).first().tap();
+await page.waitForTimeout(800);
+await page.locator("button", { hasText: "Nieuw gewas" }).first().tap();
+await page.waitForTimeout(1400);
+const res = await page.evaluate(() => {
+  const modal = document.querySelector(".pd-modal");
+  const grab = document.querySelector(".pd-modal-grabzone");
+  const gb = grab.getBoundingClientRect();
+  const target = document.elementFromPoint(gb.left + 40, gb.top + 2);
+  const fire = (type, cy) => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "touch", clientX: gb.left + 40, clientY: cy }));
+  fire("pointerdown", gb.top + 2);
+  fire("pointermove", gb.top + 2 + 120);
+  return new Promise((res) => setTimeout(() => {
+    const mr = modal.getBoundingClientRect();
+    const br = document.querySelector(".main-scrollbar").getBoundingClientRect();
+    res({ settledOffset: Math.round(br.top - mr.top), insideRight: Math.round(mr.right - br.right), modalTop: Math.round(mr.top) });
+  }, 400));
+});
+console.log("HELD DRAG:", JSON.stringify(res));
+await page.screenshot({ path: "C:\\Users\\Robbin\\AppData\\Local\\Temp\\opencode\\mob-drag.png" });
+await browser.close();

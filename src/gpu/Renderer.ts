@@ -68,9 +68,13 @@ export class GpuRenderer {
   private buffer: WebGLBuffer;
   private canvas: HTMLCanvasElement;
   private view = { width: 0, height: 0 };
+  /** effen achtergrondkleur van het canvas (thema) */
+  private bgBase: [number, number, number, number] = [1, 1, 1, 1];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
+    // alpha uit: het canvas is volledig dekkend en tekent zelf zijn
+    // achtergrondkleur, dus nergens compositing of CSS in de weg.
     const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
     if (!gl) throw new Error("WebGL2 is not available");
     this.gl = gl;
@@ -120,18 +124,15 @@ export class GpuRenderer {
   }
 
   /**
-   * Fit the drawing buffer to the CSS size of the canvas.
-   *
-   * The buffer is kept 1:1 with CSS pixels (NOT multiplied by devicePixelRatio)
-   * so that the WebGL output and the CSS-pixel overlay/hit-testing share exact
-   * coordinates. Multiplying by dpr would let the browser resample the buffer
-   * to the CSS box at a fractional scale under page zoom, which introduces a
-   * cumulative sub-pixel offset. The trade-off is slightly softer edges on
-   * HiDPI screens, in exchange for pixel-perfect alignment at any zoom.
+   * Fit the drawing buffer to the CSS size of the canvas, vermenigvuldigd
+   * met de devicePixelRatio (max 3x). De CSS-box blijft even groot, dus er
+   * wordt niets hersampled: alle coördinaten (NDC, overlay, hit-testing)
+   * blijven in CSS-pixels en de rasterisatie gebeurt scherp op elk scherm.
    */
   resize(cssWidth: number, cssHeight: number) {
-    const w = Math.max(1, Math.round(cssWidth));
-    const h = Math.max(1, Math.round(cssHeight));
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const w = Math.max(1, Math.round(cssWidth * dpr));
+    const h = Math.max(1, Math.round(cssHeight * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
@@ -139,18 +140,24 @@ export class GpuRenderer {
     this.view = { width: cssWidth, height: cssHeight };
   }
 
+  /** Effen achtergrondkleur van het canvas (thema). Geen gradient: het canvas
+ *  wist hiermee en tekent de elementen erbovenop, precies als eerst. */
+  setBackground(base: string) {
+    this.bgBase = hexToRgba(base, 1);
+  }
+
   /** Render rectangles using an orthographic (px) camera, single batched draw. */
-  render(items: DrawItem[], camera: GpuTransform, background = "#ffffff") {
+  render(items: DrawItem[], camera: GpuTransform) {
     const gl = this.gl;
     const { width, height } = this.view;
     if (width <= 0 || height <= 0) return;
 
-    const bg = hexToRgba(background, 1);
-
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-    gl.clearColor(bg[0], bg[1], bg[2], bg[3]);
+
+    // 1. achtergrond: effen thema-kleur (zoals eerst, zonder gradient)
+    gl.clearColor(this.bgBase[0], this.bgBase[1], this.bgBase[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     if (items.length === 0) return;

@@ -10,8 +10,47 @@ import type {
   GardenObjectKey,
 } from "../types";
 import { PX_PER_M, fmtM } from "../storage";
-import type { PreviewPayload } from "../realtime";
+import { userColor, type LiveCursor, type PreviewPayload } from "../realtime";
 import { plantPositions, cropEmoji, fitCropCounts } from "../cropIcons";
+import { cropIconImage } from "../cropIconImages";
+
+/**
+ * Geladen icoon-afbeeldingen voor het canvas. Een <img> is niet meteen klaar
+ * om tekenen, dus we laden ze op van tevoren en tekenen pas als ze er zijn;
+ * tot dan valt het frame terug op de emoji (die is direct beschikbaar).
+ */
+const iconImageCache = new Map<string, HTMLImageElement>();
+
+function loadIconImage(src: string): HTMLImageElement | null {
+  const hit = iconImageCache.get(src);
+  if (hit) return hit.complete && hit.naturalWidth > 0 ? hit : null;
+  const img = new Image();
+  img.decoding = "async";
+  img.onload = () => {
+    /* klaar: de volgende frame tekent de afbeelding */
+  };
+  img.src = src;
+  iconImageCache.set(src, img);
+  return null;
+}
+
+/** Tekent het icoon van een gewas: afbeelding als die geladen is, anders emoji. */
+function drawCropIcon(
+  ctx: CanvasRenderingContext2D,
+  iconKey: string | undefined,
+  cropName: string | undefined,
+  cx: number,
+  cy: number,
+  size: number
+): void {
+  const src = cropIconImage(iconKey);
+  const img = src ? loadIconImage(src) : null;
+  if (img) {
+    ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+    return;
+  }
+  ctx.fillText(cropEmoji(iconKey, cropName), cx, cy + 1);
+}
 import {
   GARDEN_OBJECTS,
   objectChar,
@@ -34,11 +73,14 @@ interface Props {
   elements: GardenElement[];
   catalog: Crop[];
   tool: EditorTool;
-  frameType: "bed" | "path";
+  frameType: "bed" | "path" | "veld";
   selectedIds: string[];
   selectedCropId: string | null;
   theme: "light" | "dark";
+  locked?: boolean;
   onSelect: (ids: string[]) => void;
+  /** Ctrl/Cmd+klik: ids aan de selectie toevoegen ("add") of togglen ("toggle") */
+  onToggleSelect: (ids: string[], mode?: "toggle" | "add") => void;
   onSelectCrop: (instanceId: string | null) => void;
   onApplyChanges: (updates: ElementUpdate[]) => void;
   /** transient drag positions, relayed to other editors (live collaboration) */
@@ -47,7 +89,12 @@ interface Props {
   onLivePreview?: (preview: PreviewPayload) => void;
   /** ghost received from another editor, drawn as an overlay */
   livePreview?: PreviewPayload | null;
-  onAddFrame: (type: "bed" | "path", x: number, y: number, wM: number, hM: number) => string;
+  /** eigen muis + selectie live delen */
+  onLiveCursor?: (cursor: { x: number; y: number } | null, selection: string[]) => void;
+  /** live muizen + selecties van de andere editors */
+  liveCursors?: { current: Map<string, LiveCursor> };
+  currentUserId?: string;
+  onAddFrame: (type: "bed" | "path" | "veld", x: number, y: number, wM: number, hM: number) => string;
   /** adds a garden object as a sibling element, returns its id; "gaas" carries its pin anchors */
   onAddObject: (key: GardenObjectKey, x: number, y: number, gaas?: GaasData) => string;
   /** draws a new planting piece inside a bed; area is in world px, bed-relative */
@@ -64,6 +111,8 @@ interface Props {
     patch: Partial<CropAssignment>
   ) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** eenmalig zodra het eerste frame echt getekend is (maat > 0) */
+  onFirstPaint?: () => void;
   /** centreer de camera op een wereldpunt (bv. na "toon in tuin" vanuit de kalender) */
   focusSignal?: { x: number; y: number; n: number } | null;
 }
@@ -107,7 +156,7 @@ const EDGE_HIT = 12;
 type Dir = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 type Gesture =
   | { k: "none" }
-  | { k: "pan"; sx: number; sy: number; ox: number; oy: number }
+  | { k: "pan"; sx: number; sy: number; lx: number; ly: number }
   | { k: "marquee"; start: Pt; end: Pt }
   | { k: "drag"; id: string; sp: Pt; origin: R }
   | { k: "groupDrag"; ids: string[]; sp: Pt; origins: Map<string, R>; leadId: string }
@@ -116,13 +165,15 @@ type Gesture =
   | { k: "cropFrame"; start: Pt; end: Pt }
   | { k: "ga"; start: Pt; end: Pt }
   | { k: "gaasEnd"; id: string; end: "a" | "b"; origin: GaasData }
-  | { k: "cropDrag"; eId: string; instanceId: string; sp: Pt; origin: R; bed: R }
+  | { k: "cropDrag"; eId: string; instanceId: string; sp: Pt; origin: R; bed: R; wasSelected: boolean }
   | { k: "cropResize"; eId: string; instanceId: string; dir: Dir; origin: R; bed: R }
   | { k: "pinch"; ids: [number, number]; mid: Pt; startDist: number; cam: Cam };
 
 function rectOf(el: GardenElement): R {
   return { x: el.x, y: el.y, w: el.widthM * PX_PER_M, h: el.heightM * PX_PER_M };
 }
+
+
 
 /** Shortest distance from a point to a line segment (world units). */
 function distToSeg(x1: number, y1: number, x2: number, y2: number, px: number, py: number): number {
@@ -318,10 +369,9 @@ interface Travelling {
 /** The anchors that travel when one side of a rect is dragged: the dragged edge
  *  itself and the centre. `moving` is the dragged edge, `fixed` the opposite one,
  *  `growing` says whether the drag is on the high side. */
-function resizeTravellers(moving: number, fixed: number, growing: boolean): Travelling[] {
+function resizeTravellers(moving: number, _fixed: number, growing: boolean): Travelling[] {
   return [
     { at: moving, kind: growing ? 1 : 0, scale: 1 },
-    { at: (moving + fixed) / 2, kind: 2, scale: 0.5 },
   ];
 }
 
@@ -559,12 +609,17 @@ export function GpuCanvas({
   selectedIds,
   selectedCropId,
   theme,
+  locked,
   onSelect,
+  onToggleSelect,
   onSelectCrop,
   onApplyChanges,
   onLiveMove,
   onLivePreview,
   livePreview,
+  onLiveCursor,
+  liveCursors,
+  currentUserId,
   onAddFrame,
   onAddObject,
   onAddCropAt,
@@ -572,6 +627,7 @@ export function GpuCanvas({
   onObjectMenuOpenChange,
   onUpdateCrop,
   onBusyChange,
+  onFirstPaint,
   snap,
   activeCropId,
   focusSignal,
@@ -580,8 +636,8 @@ export function GpuCanvas({
   const gpuRef = useRef<HTMLCanvasElement | null>(null);
   const ovRef = useRef<HTMLCanvasElement | null>(null);
 
-  const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap, activeCropId });
-  propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap, activeCropId };
+  const propsRef = useRef({ elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap, activeCropId, locked, liveCursors, currentUserId });
+  propsRef.current = { elements, tool, frameType, selectedIds, selectedCropId, theme, catalog, livePreview, snap, activeCropId, locked, liveCursors, currentUserId };
   /** focus-signaal dat nog toegepast moet worden zodra de canvas een maat heeft */
   const pendingFocusRef = useRef<{ x: number; y: number; n: number } | null>(null);
 
@@ -604,8 +660,21 @@ export function GpuCanvas({
       pendingFocusRef.current = null;
     }
   }, [focusSignal]);
-  const handlersRef = useRef({ onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onAddCropAt, onObjectMenuOpenChange, onUpdateCrop, onBusyChange });
-  handlersRef.current = { onSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onAddFrame, onAddObject, onAddCropAt, onObjectMenuOpenChange, onUpdateCrop, onBusyChange };
+  const handlersRef = useRef({ onSelect, onToggleSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onLiveCursor, onAddFrame, onAddObject, onAddCropAt, onObjectMenuOpenChange, onUpdateCrop, onBusyChange, onFirstPaint });
+  handlersRef.current = { onSelect, onToggleSelect, onSelectCrop, onApplyChanges, onLiveMove, onLivePreview, onLiveCursor, onAddFrame, onAddObject, onAddCropAt, onObjectMenuOpenChange, onUpdateCrop, onBusyChange, onFirstPaint };
+
+  // Selectiewijziging meteen live delen, ook zonder muisbeweging
+  // (bv. via de sidebar, het toetsenbord of de lasso).
+  useEffect(() => {
+    const fn = handlersRef.current.onLiveCursor;
+    const last = lastWorldRef.current;
+    if (!fn || !last) return;
+    fn(last, propsRef.current.selectedIds);
+  }, [selectedIds]);
+  // Diagnose in de browserconsole: __mpCam()
+  useEffect(() => {
+    (window as unknown as { __mpCam?: () => unknown }).__mpCam = () => ({ ...camRef.current });
+  }, []);
 
   const [objSearch, setObjSearch] = useState("");
 
@@ -617,13 +686,47 @@ export function GpuCanvas({
   const cropDraftRef = useRef<Map<string, R>>(new Map());
   const guidesRef = useRef<SnapGuides>({ v: [], h: [] });
   const cropGuidesRef = useRef<SnapGuides>({ v: [], h: [] });
+  /** eerste echte paint al gehad (reset bij mount) */
+  const paintedRef = useRef(false);
   /** last pointer position (screen-local) for hover highlighting. */
   const mouseRef = useRef<Pt>({ x: 0, y: 0 });
+  /** laatste muispositie in wereld-px, voor live cursor + selectie-updates */
+  const lastWorldRef = useRef<{ x: number; y: number } | null>(null);
+
+  /** Eigen muispositie (+ huidige selectie) aanbieden aan de live-koppeling. */
+  const emitCursor = (e: React.PointerEvent) => {
+    const fn = handlersRef.current.onLiveCursor;
+    if (!fn) return;
+    const wp = screenToWorld(screenToLocal(e), camRef.current);
+    const rounded = { x: Math.round(wp.x), y: Math.round(wp.y) };
+    lastWorldRef.current = rounded;
+    fn(rounded, propsRef.current.selectedIds);
+  };
   const spaceRef = useRef(false);
   const gRef = useRef<Gesture>({ k: "none" });
   const ptrsRef = useRef<Map<number, Pt>>(new Map());
   const hostSize = useRef({ w: 0, h: 0 });
+  /** devicePixelRatio waarmee de buffers geschaald zijn (check per frame) */
+  const dprRef = useRef(1);
+  /** true zodra de laatste pointer geen muis was: grotere hit-targets voor vingers */
+  const coarseRef = useRef(false);
+  /** neerzetpositie per pointer: tik (geen sleep) vs drag onderscheiden */
+  const downPosRef = useRef(new Map<number, Pt>());
+  /** selectie-actie die pas bij tik-up loopt (touch): slepen opent nooit de inspector */
+  const pendingSelectRef = useRef<null | (() => void)>(null);
+  /** tik op een planting (bed al geselecteerd): bij loslaten zonder te slepen
+   *  wordt dit gewas alsnog geselecteerd; bij slepen versleept het bed. */
+  const tapCropRef = useRef<{ eId: string; instanceId: string } | null>(null);
+  /** laatste tik-selectie: een snelle tweede tik (dubbelklik) op hetzelfde
+   *  gewas houdt het geselecteerd i.p.v. meteen weer te deselecteren. */
+  const lastTapSelectRef = useRef<{ instanceId: string; t: number } | null>(null);
+  /** true zolang er een live preview naar andere editors is gestuurd die nog
+   *  opgeruimd moet worden (anders blijft er een ghost staan) */
+  const previewSentRef = useRef(false);
   const wasEmptyClickRef = useRef(false);
+  /** veld-naamkaartjes van het laatste frame (scherm-px): een klik erop
+   *  selecteert het hele veld, net als een klik op het kader zelf. */
+  const veldChipsRef = useRef<{ id: string; x: number; y: number; w: number; h: number }[]>([]);
 
   const screenToLocal = (e: { clientX: number; clientY: number }): Pt => {
     const el = gpuRef.current ?? hostRef.current;
@@ -779,38 +882,61 @@ export function GpuCanvas({
     }
     const union = unionOfSelected();
     if (!union) return null;
+    // Vingers zijn dikker dan een cursor: ruimere targets op touch.
+    const HH = coarseRef.current ? 30 : HANDLE_HIT;
+    const EH = coarseRef.current ? 18 : EDGE_HIT;
     const p0 = worldToScreen({ x: union.x, y: union.y }, c);
     const p1 = worldToScreen({ x: union.x + union.w, y: union.y + union.h }, c);
     const corners: [Dir, number, number][] = [
       ["nw", p0.x, p0.y], ["ne", p1.x, p0.y], ["sw", p0.x, p1.y], ["se", p1.x, p1.y],
     ];
     for (const [dir, hx, hy] of corners) {
-      if (Math.abs(sp.x - hx) <= HANDLE_HIT && Math.abs(sp.y - hy) <= HANDLE_HIT) return dir;
+      if (Math.abs(sp.x - hx) <= HH && Math.abs(sp.y - hy) <= HH) return dir;
     }
     // whole edge is a resize target (band a few px thick along each side)
-    const inX = sp.x >= p0.x - EDGE_HIT && sp.x <= p1.x + EDGE_HIT;
-    const inY = sp.y >= p0.y - EDGE_HIT && sp.y <= p1.y + EDGE_HIT;
-    if (inX && sp.y >= p0.y - EDGE_HIT && sp.y <= p0.y + EDGE_HIT) return "n";
-    if (inX && sp.y >= p1.y - EDGE_HIT && sp.y <= p1.y + EDGE_HIT) return "s";
-    if (inY && sp.x >= p0.x - EDGE_HIT && sp.x <= p0.x + EDGE_HIT) return "w";
-    if (inY && sp.x >= p1.x - EDGE_HIT && sp.x <= p1.x + EDGE_HIT) return "e";
+    const inX = sp.x >= p0.x - EH && sp.x <= p1.x + EH;
+    const inY = sp.y >= p0.y - EH && sp.y <= p1.y + EH;
+    if (inX && sp.y >= p0.y - EH && sp.y <= p0.y + EH) return "n";
+    if (inX && sp.y >= p1.y - EH && sp.y <= p1.y + EH) return "s";
+    if (inY && sp.x >= p0.x - EH && sp.x <= p0.x + EH) return "w";
+    if (inY && sp.x >= p1.x - EH && sp.x <= p1.x + EH) return "e";
     return null;
   };
 
   const hitItem = (wp: Pt): GardenElement | null => {
     const els = propsRef.current.elements;
+    // Velden liggen vaak onder bedden en paden: die winnen eerst, zodat je
+    // altijd iets ín een veld kunt aanklikken. Pas als er niets anders raakt,
+    // pakt het veld zelf de klik (om te verplaatsen of resizen).
+    let veld: GardenElement | null = null;
     for (let i = els.length - 1; i >= 0; i--) {
       const el = els[i];
       const r = rOf(el);
-      if (wp.x >= r.x && wp.x <= r.x + r.w && wp.y >= r.y && wp.y <= r.y + r.h) return el;
+      if (wp.x >= r.x && wp.x <= r.x + r.w && wp.y >= r.y && wp.y <= r.y + r.h) {
+        if (el.type === "veld") veld ??= el;
+        else return el;
+      }
+    }
+    return veld;
+  };
+
+  /** Veld-naamkaartje onder de pointer (scherm-px), zodat een klik op de naam
+   *  hetzelfde doet als een klik op het kader: het hele veld selecteren. */
+  const hitVeldChip = (sp: Pt): GardenElement | null => {
+    const chips = veldChipsRef.current;
+    for (let i = chips.length - 1; i >= 0; i--) {
+      const ch = chips[i];
+      if (sp.x >= ch.x && sp.x <= ch.x + ch.w && sp.y >= ch.y && sp.y <= ch.y + ch.h) {
+        const el = propsRef.current.elements.find((e) => e.id === ch.id);
+        if (el) return el;
+      }
     }
     return null;
   };
 
   // Objects are drawn on top of beds/paths, so they win the hit-test first.
   // Round objects (poles) are hit-tested against their circle, not the square.
-  const hitObjectElement = (wp: Pt): GardenElement | null => {
-    const els = propsRef.current.elements;
+  const hitObjectElement = (wp: Pt): GardenElement | null => {    const els = propsRef.current.elements;
     for (let i = els.length - 1; i >= 0; i--) {
       const el = els[i];
       if (el.type !== "object") continue;
@@ -858,7 +984,7 @@ export function GpuCanvas({
     const { a, b } = gaasEndsOf(el);
     const sA = worldToScreen(a, c);
     const sB = worldToScreen(b, c);
-    const T = 14;
+    const T = coarseRef.current ? 22 : 14;
     if (Math.hypot(sp.x - sA.x, sp.y - sA.y) <= T) return { id: el.id, end: "a" };
     if (Math.hypot(sp.x - sB.x, sp.y - sB.y) <= T) return { id: el.id, end: "b" };
     return null;
@@ -904,34 +1030,45 @@ export function GpuCanvas({
       const r = cropRectOf(bed, a);
       const p0 = worldToScreen({ x: r.x, y: r.y }, c);
       const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+      const HH = coarseRef.current ? 30 : HANDLE_HIT;
+      const EH = coarseRef.current ? 18 : EDGE_HIT;
       // corner handles work on any plant
       const corners: [Dir, number, number][] = [
         ["nw", p0.x, p0.y], ["ne", p1.x, p0.y], ["sw", p0.x, p1.y], ["se", p1.x, p1.y],
       ];
       for (const [dir, hx, hy] of corners) {
-        if (Math.abs(sp.x - hx) <= HANDLE_HIT && Math.abs(sp.y - hy) <= HANDLE_HIT)
+        if (Math.abs(sp.x - hx) <= HH && Math.abs(sp.y - hy) <= HH)
           return { a, dir };
       }
       // edge resize: only on the selected plant (or a lone plant) so grabbing a
       // border resizes it instead of dragging a neighbouring plant.
       const isSel = p.selectedCropId === a.instanceId;
       if (isSel || bed.crops.length === 1) {
-        const inX = sp.x >= p0.x - EDGE_HIT && sp.x <= p1.x + EDGE_HIT;
-        const inY = sp.y >= p0.y - EDGE_HIT && sp.y <= p1.y + EDGE_HIT;
-        if (inX && sp.y >= p0.y - EDGE_HIT && sp.y <= p0.y + EDGE_HIT) return { a, dir: "n" };
-        if (inX && sp.y >= p1.y - EDGE_HIT && sp.y <= p1.y + EDGE_HIT) return { a, dir: "s" };
-        if (inY && sp.x >= p0.x - EDGE_HIT && sp.x <= p0.x + EDGE_HIT) return { a, dir: "w" };
-        if (inY && sp.x >= p1.x - EDGE_HIT && sp.x <= p1.x + EDGE_HIT) return { a, dir: "e" };
+        const inX = sp.x >= p0.x - EH && sp.x <= p1.x + EH;
+        const inY = sp.y >= p0.y - EH && sp.y <= p1.y + EH;
+        if (inX && sp.y >= p0.y - EH && sp.y <= p0.y + EH) return { a, dir: "n" };
+        if (inX && sp.y >= p1.y - EH && sp.y <= p1.y + EH) return { a, dir: "s" };
+        if (inY && sp.x >= p0.x - EH && sp.x <= p0.x + EH) return { a, dir: "w" };
+        if (inY && sp.x >= p1.x - EH && sp.x <= p1.x + EH) return { a, dir: "e" };
       }
     }
     return null;
   };
 
   const hitCrop = (wp: Pt, bed: GardenElement): CropAssignment | null => {
+    // Kleine tolerantie (4px) zodat een klik net naast de rand van een
+    // gewas het gewas zelf pakt in plaats van het bed eronder.
+    const pad = 4;
     for (let i = bed.crops.length - 1; i >= 0; i--) {
       const a = bed.crops[i];
       const r = cropRectOf(bed, a);
-      if (wp.x >= r.x && wp.x <= r.x + r.w && wp.y >= r.y && wp.y <= r.y + r.h) return a;
+      if (
+        wp.x >= r.x - pad &&
+        wp.x <= r.x + r.w + pad &&
+        wp.y >= r.y - pad &&
+        wp.y <= r.y + r.h + pad
+      )
+        return a;
     }
     return null;
   };
@@ -942,44 +1079,185 @@ export function GpuCanvas({
   };
 
   // ---- gestures ----
-  // Pressing an object in the picker menu imports it (as a sibling element) and
-  // immediately starts dragging it: a plain click drops it where it appears.
-const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const c = camRef.current;
-    const sp = screenToLocal(e);
-    const wp = screenToWorld(sp, c);
-
+  /**
+   * Een veld is een kader: wie het veld versleept, sleept alles wat erin ligt
+   * mee. Geeft het veld zelf plus de bedden/paden/vorwerpen ín het kader.
+   */
+  const veldMembers = (veld: GardenElement): string[] => {
+    if (veld.type !== "veld") return [veld.id];
+    const m = 2;
+    const vx = veld.x;
+    const vy = veld.y;
+    const vw = veld.widthM * PX_PER_M;
+    const vh = veld.heightM * PX_PER_M;
+    const inside = propsRef.current.elements.filter((o) => {
+      if (o.id === veld.id) return false;
+      const r = rOf(o);
+      return (
+        r.x >= vx - m && r.y >= vy - m && r.x + r.w <= vx + vw + m && r.y + r.h <= vy + vh + m
+      );
+    });
+    return [veld.id, ...inside.map((o) => o.id)];
+  };
+  // Pressing an object in the picker menu imports it (as a sibling element).
+  // Muis: meteen slepen vanaf de pointer (klassiek drag & drop).
+  // Touch/pen: pas slepen na >10px beweging (anders is scrollen in het menu
+  // onmogelijk); een tik plaatst het voorwerp in het midden van de viewport.
+  const spawnAt = (def: GardenObjectDef, wx: number, wy: number) => {
     const pw = def.widthM * PX_PER_M;
     const ph = def.heightM * PX_PER_M;
     const origin: R = {
-      x: Math.round(wp.x - pw / 2),
-      y: Math.round(wp.y - ph / 2),
+      x: Math.round(wx - pw / 2),
+      y: Math.round(wy - ph / 2),
       w: pw,
       h: ph,
     };
     const newId = handlersRef.current.onAddObject(def.key, origin.x, origin.y);
-    if (!newId) return;
+    if (!newId) return null;
     handlersRef.current.onSelect([newId]);
     handlersRef.current.onSelectCrop(null);
-    gRef.current = { k: "drag", id: newId, sp: { x: sp.x, y: sp.y }, origin };
-    hostRef.current?.setPointerCapture(e.pointerId);
+    return { newId, origin };
+  };
+
+  const startDragGesture = (id: string, origin: R, sp: Pt, pointerId: number) => {
+    if (propsRef.current.locked) return;
+gRef.current = { k: "drag", id, sp: { x: sp.x, y: sp.y }, origin };
+    hostRef.current?.setPointerCapture(pointerId);
     doBusy(true);
     handlersRef.current.onObjectMenuOpenChange(false);
   };
 
-  const onPointerDown = (e: React.PointerEvent) => {
+const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
+    e.stopPropagation();
+    if (e.pointerType !== "mouse") {
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const pid = e.pointerId;
+      let moved = false;
+      const cleanup = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pid || moved) return;
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) <= 10) return;
+        moved = true;
+        cleanup();
+        const c = camRef.current;
+        const sp = screenToLocal(ev);
+        const wp = screenToWorld(sp, c);
+        const s = spawnAt(def, wp.x, wp.y);
+        if (!s) return;
+        startDragGesture(s.newId, s.origin, sp, ev.pointerId);
+      };
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pid) return;
+        cleanup();
+        if (moved) return;
+        // tik: in het midden van de viewport plaatsen
+        const c = camRef.current;
+        const { w, h } = hostSize.current;
+        const cx = w > 0 ? (w / 2 - c.x) / c.zoom : 0;
+        const cy = h > 0 ? (h / 2 - c.y) / c.zoom : 0;
+        if (spawnAt(def, cx, cy)) {
+          handlersRef.current.onObjectMenuOpenChange(false);
+        }
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+      return;
+    }
+    e.preventDefault();
+    const c = camRef.current;
     const sp = screenToLocal(e);
+    const wp = screenToWorld(sp, c);
+    const s = spawnAt(def, wp.x, wp.y);
+    if (!s) return;
+    startDragGesture(s.newId, s.origin, sp, e.pointerId);
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    coarseRef.current = e.pointerType !== "mouse";
+    const sp = screenToLocal(e);
+    downPosRef.current.set(e.pointerId, sp);
+    pendingSelectRef.current = null;
     const c = camRef.current;
     const p = propsRef.current;
     // clicking the canvas closes the object picker menu
     handlersRef.current.onObjectMenuOpenChange(false);
 
+    // Eerste klik op een niet-geselecteerd element selecteert altijd eerst,
+    // vóór alle handle- en drag-logica. Resize-handles van de huidige selectie
+    // kunnen een klik op een ander element anders afvangen (zeker als een bed
+    // bijna het hele veld vult). Slepen/handles kan bij een tweede druk.
+    // (NB: geen arm() hier gebruiken — die is verderop gedeclareerd.)
+    if (p.tool === "select" && (e.button === 0 || e.pointerType !== "mouse")) {
+      const isTouch = e.pointerType !== "mouse";
+      const wpt = screenToWorld(sp, c);
+      const selectNow = (fn: () => void): boolean => {
+        if (isTouch) {
+          pendingSelectRef.current = fn;
+          return true;
+        }
+        fn();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        doBusy(false);
+        return true;
+      };
+      const pickOther = (): boolean => {
+        // Druk op de huidige selectie (resize-handle, geselecteerd element of
+        // geselecteerd voorwerp) is nooit "iets anders": dan volgt slepen of
+        // resizen in de normale flow hieronder. Zonder dit pikt zo'n druk het
+        // bed erachter — verplaatsen/resizen van een voorwerp lukt dan nooit.
+        if (hitHandle(sp, c)) return false;
+        const obj = hitObjectElement(wpt);
+        if (obj) {
+          if (p.selectedIds.includes(obj.id)) return false;
+          // Ctrl/Cmd+klik: toevoegen aan de selectie i.p.v. vervangen.
+          const add = e.ctrlKey || e.metaKey;
+          return selectNow(() => {
+            if (add) handlersRef.current.onToggleSelect([obj.id], "add");
+            else {
+              handlersRef.current.onSelect([obj.id]);
+              handlersRef.current.onSelectCrop(null);
+            }
+          });
+        }
+        const hit = hitItem(wpt);
+        if (hit && p.selectedIds.includes(hit.id)) return false;
+        const els = p.elements;
+        for (let i = els.length - 1; i >= 0; i--) {
+          const el = els[i];
+          if (el.type === "veld" || p.selectedIds.includes(el.id)) continue;
+          const r = rOf(el);
+          if (wpt.x >= r.x && wpt.x <= r.x + r.w && wpt.y >= r.y && wpt.y <= r.y + r.h) {
+            // Eerste klik pakt altijd het element (bed) zelf, ook op een
+            // planting: pas de tweede klik (bed al geselecteerd) pakt het
+            // gewas. Zo blijft het bed altijd bereikbaar.
+            const members = veldMembers(el);
+            const addEl = e.ctrlKey || e.metaKey;
+            return selectNow(() => {
+              if (addEl) handlersRef.current.onToggleSelect(members, "add");
+              else {
+                handlersRef.current.onSelect(members);
+                handlersRef.current.onSelectCrop(null);
+              }
+            });
+          }
+        }
+        return false;
+      };
+      if (pickOther()) return;
+    }
+
     // multi-touch bookkeeping: record this pointer; a second finger becomes a
     // pinch (zoom + pan), overriding whatever single-finger gesture is active.
     ptrsRef.current.set(e.pointerId, sp);
     if (ptrsRef.current.size === 2) {
+      // pinch is geen tik: uitgestelde selectie vervalt
+      pendingSelectRef.current = null;
       const ids = [...ptrsRef.current.keys()] as [number, number];
       const p1 = ptrsRef.current.get(ids[0])!;
       const p2 = ptrsRef.current.get(ids[1])!;
@@ -1006,7 +1284,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     // middle mouse always pans
     if (e.button === 1) {
       wasEmptyClickRef.current = false;
-      gRef.current = { k: "pan", sx: sp.x, sy: sp.y, ox: c.x, oy: c.y };
+      gRef.current = { k: "pan", sx: sp.x, sy: sp.y, lx: sp.x, ly: sp.y };
       e.currentTarget.setPointerCapture(e.pointerId);
       doBusy(true);
       return;
@@ -1016,12 +1294,13 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     if (p.tool === "move" || spaceRef.current) {
       // move tool = pan the camera only; it never moves objects
       wasEmptyClickRef.current = false;
-      gRef.current = { k: "pan", sx: sp.x, sy: sp.y, ox: c.x, oy: c.y };
+      gRef.current = { k: "pan", sx: sp.x, sy: sp.y, lx: sp.x, ly: sp.y };
       e.currentTarget.setPointerCapture(e.pointerId);
       doBusy(true);
       return;
     }
     if (p.tool === "frame") {
+      if (propsRef.current.locked) return;
       const start = screenToWorld(sp, c);
       gRef.current = { k: "frame", start, end: start };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1029,6 +1308,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       return;
     }
     if (p.tool === "crop") {
+      if (propsRef.current.locked) return;
       // Een stuk gewas zetten: sleep een rechthoek (mag vanuit/in een bed
       // starten; bij loslaten wordt het bed onder start óf eind gebruikt).
       const start = screenToWorld(sp, c);
@@ -1043,6 +1323,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       return;
     }
     if (p.tool === "gaas") {
+      if (propsRef.current.locked) return;
       const start = screenToWorld(sp, c);
       gRef.current = { k: "ga", start, end: start };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1059,12 +1340,28 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     // the bed's bbox handles. The plant handles are therefore tested first and
     // suppress the bed handles, otherwise a planting could only ever be resized
     // by dragging the bed around it.
+    //
+    // Touch: eerst selecteren, dan pas slepen. Sleep je meteen op een NIET-
+    // geselecteerd element, dan wordt het alleen geselecteerd en niet verplaatst
+    // (voorkomt ook dat de inspector opent tijdens het slepen). Op muis
+    // verandert er niets. Geeft true als het gebaar nu mag starten.
+    const arm = (selectFn: () => void, alreadySelected: boolean) => {
+      if (!coarseRef.current) {
+        selectFn();
+        return true;
+      }
+      if (alreadySelected) return true;
+      pendingSelectRef.current = selectFn;
+      return false;
+    };
     const bedSel = selectedBedEl();
     const bedPlantable = bedSel !== null && bedSel.crops.length > 0;
     const cropHandleHit = bedPlantable ? hitCropHandle(sp, c, bedSel!) : null;
+    const dirH = hitHandle(sp, c);
     if (p.tool === "select") {
-      if (cropHandleHit) {
+      if (cropHandleHit && !dirH) {
         handlersRef.current.onSelectCrop(cropHandleHit.a.instanceId);
+        if (propsRef.current.locked) return;
         gRef.current = {
           k: "cropResize",
           eId: bedSel!.id,
@@ -1077,13 +1374,13 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         doBusy(true);
         return;
       }
-      const dirH = hitHandle(sp, c);
       if (dirH && p.selectedIds.length > 0) {
         const origins = new Map<string, R>();
         for (const id of p.selectedIds) {
           const el = p.elements.find((e) => e.id === id)!;
           origins.set(id, rOf(el));
         }
+        if (propsRef.current.locked) return;
         gRef.current = {
           k: "groupResize",
           ids: p.selectedIds,
@@ -1100,8 +1397,15 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const endHit = hitGaasEndpoint(sp, c);
       if (endHit) {
         const gel = p.elements.find((e) => e.id === endHit.id)!;
-        handlersRef.current.onSelect([endHit.id]);
-        handlersRef.current.onSelectCrop(null);
+        if (
+          !arm(() => {
+            handlersRef.current.onSelect([endHit.id]);
+            handlersRef.current.onSelectCrop(null);
+          }, p.selectedIds.includes(endHit.id))
+        ) {
+          return;
+        }
+        if (propsRef.current.locked) return;
         gRef.current = { k: "gaasEnd", id: endHit.id, end: endHit.end, origin: gel.gaas! };
         e.currentTarget.setPointerCapture(e.pointerId);
         doBusy(true);
@@ -1110,14 +1414,27 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const objHit = hitObjectElement(screenToWorld(sp, c));
       if (objHit) {
         if (p.selectedIds.includes(objHit.id)) {
+          if (propsRef.current.locked) return;
           const origins = new Map<string, R>();
           origins.set(objHit.id, rOf(objHit));
           gRef.current = { k: "groupDrag", ids: [objHit.id], sp, origins, leadId: objHit.id };
         } else {
-          handlersRef.current.onSelect([objHit.id]);
-          handlersRef.current.onSelectCrop(null);
+          // Ctrl/Cmd+klik: toevoegen aan de selectie (en meteen slepen).
+          const addObj = e.ctrlKey || e.metaKey;
+          if (
+            !arm(() => {
+              if (addObj) handlersRef.current.onToggleSelect([objHit.id], "add");
+              else {
+                handlersRef.current.onSelect([objHit.id]);
+                handlersRef.current.onSelectCrop(null);
+              }
+            }, false)
+          ) {
+            return;
+          }
           const origin = rOf(objHit);
-          gRef.current = { k: "drag", id: objHit.id, sp, origin };
+          if (propsRef.current.locked) return;
+gRef.current = { k: "drag", id: objHit.id, sp, origin };
         }
         e.currentTarget.setPointerCapture(e.pointerId);
         doBusy(true);
@@ -1128,15 +1445,44 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     if (bedPlantable) {
       const cHit = hitCrop(screenToWorld(sp, c), bedSel!);
       if (cHit) {
-        handlersRef.current.onSelectCrop(cHit.instanceId);
-        gRef.current = {
-          k: "cropDrag",
-          eId: bedSel!.id,
-          instanceId: cHit.instanceId,
-          sp,
-          origin: cropRectOf(bedSel!, cHit),
-          bed: bedRefOf(bedSel!),
-        };
+        // Al geselecteerd gewas: drukken start een gewas-drag, een tik zonder
+        // te slepen deselecteert pas bij pointer-up. Nog-niet-geselecteerd
+        // gewas: drukken start een BED-drag (het element blijft leidend) en
+        // pas een tik zonder te slepen kiest het gewas bij pointer-up. Zo kun
+        // je een bed altijd verslepen, ook als je op een planting drukt.
+        // (Touch selecteert via de uitgestelde tik, zoals eerst.)
+        const sameCrop = p.selectedCropId === cHit.instanceId;
+        if (e.pointerType !== "mouse") {
+          if (
+            !arm(
+              () => handlersRef.current.onSelectCrop(sameCrop ? null : cHit.instanceId),
+              false
+            )
+          ) {
+            return;
+          }
+          if (propsRef.current.locked) return;
+          return;
+        }
+        if (propsRef.current.locked) return;
+        if (sameCrop) {
+          // Al geselecteerd: vasthouden en een gewas-drag starten. Deselecteren
+          // gebeurt pas bij tik-up (met dubbelklik-tolerantie), zodat dubbel-
+          // klikken het gewas gewoon geselecteerd houdt.
+          gRef.current = {
+            k: "cropDrag",
+            eId: bedSel!.id,
+            instanceId: cHit.instanceId,
+            sp,
+            origin: cropRectOf(bedSel!, cHit),
+            bed: bedRefOf(bedSel!),
+            wasSelected: true,
+          };
+        } else {
+          handlersRef.current.onSelect([bedSel!.id]);
+          handlersRef.current.onSelectCrop(cHit.instanceId);
+          gRef.current = { k: "drag", id: bedSel!.id, sp, origin: bedRefOf(bedSel!) };
+        }
         e.currentTarget.setPointerCapture(e.pointerId);
         doBusy(true);
         return;
@@ -1144,18 +1490,85 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       // clicked on bed area but outside any plant -> drop plant selection
       handlersRef.current.onSelectCrop(null);
     }
-    const hit = hitItem(screenToWorld(sp, c));
+    // Een klik op een veld-naamkaartje selecteert het hele veld, net als een
+    // klik op het kader zelf (het kaartje ligt erbuiten en raakt anders niets).
+    const hit = hitVeldChip(sp) ?? hitItem(screenToWorld(sp, c));
     if (hit) {
-      if (p.selectedIds.includes(hit.id)) {
-        const origins = new Map<string, R>();
-        for (const id of p.selectedIds) {
-          const el = p.elements.find((e) => e.id === id)!;
-          origins.set(id, rOf(el));
+      // Gewas direct selecteren: ook als het bed (of veld) al geselecteerd is,
+      // pakt een klik op een planting het gewas zelf in één keer. Drukken op
+      // een al geselecteerd gewas start een drag; tikken deselecteert bij up.
+      if (hit.type === "bed" && hit.crops.length > 0) {
+        const cHit = hitCrop(screenToWorld(sp, c), hit);
+        if (cHit) {
+          const sameCrop = p.selectedCropId === cHit.instanceId;
+          // Ctrl/Cmd+klik: bed aan de selectie toevoegen i.p.v. vervangen.
+          const addBed = e.ctrlKey || e.metaKey;
+          if (
+            !arm(() => {
+              if (addBed) handlersRef.current.onToggleSelect([hit.id], "add");
+              else handlersRef.current.onSelect([hit.id]);
+              handlersRef.current.onSelectCrop(sameCrop ? null : cHit.instanceId);
+            }, false)
+          ) {
+            return;
+          }
+          if (propsRef.current.locked) return;
+          gRef.current = {
+            k: "cropDrag",
+            eId: hit.id,
+            instanceId: cHit.instanceId,
+            sp,
+            origin: cropRectOf(hit, cHit),
+            bed: bedRefOf(hit),
+            wasSelected: sameCrop,
+          };
+          e.currentTarget.setPointerCapture(e.pointerId);
+          doBusy(true);
+          return;
         }
-        gRef.current = { k: "groupDrag", ids: p.selectedIds, sp, origins, leadId: hit.id };
+      }
+      const members = veldMembers(hit);
+      const isMulti = members.length > 1;
+      // Een bed dat alleen via een geselecteerd veld in de selectie zit
+      // (niet zelfstandig) telt als niet-geselecteerd: klikken moet dan dat
+      // ene bed pakken in plaats van niets te doen.
+      const inSelectedVeld = p.selectedIds.some((id) => {
+        const el = p.elements.find((e) => e.id === id);
+        return !!el && el.type === "veld" && el.id !== hit.id && veldMembers(el).includes(hit.id);
+      });
+      const hitSelected = p.selectedIds.includes(hit.id) && !inSelectedVeld;
+      if (!hitSelected) {
+        // Eerste klik selecteert altijd (nooit direct slepen): zo kan een klik
+        // op een element ín een geselecteerd veld nooit verloren gaan aan een
+        // drag-gebaar. Slepen kan bij een tweede druk op de selectie.
+        // Ctrl/Cmd+klik voegt toe aan de selectie i.p.v. te vervangen.
+        const addMembers = e.ctrlKey || e.metaKey;
+        if (
+          !arm(() => {
+            if (addMembers) handlersRef.current.onToggleSelect(members, "add");
+            else {
+              handlersRef.current.onSelect(members);
+              handlersRef.current.onSelectCrop(null);
+            }
+          }, false)
+        ) {
+          return;
+        }
+        e.currentTarget.setPointerCapture(e.pointerId);
+        doBusy(false);
+        return;
+      }
+      if (propsRef.current.locked) return;
+      if (p.selectedIds.length > 1 || isMulti) {
+        // al geselecteerd veld (met inhoud) of multi-selectie: alles meenemen
+        const ids = p.selectedIds.length > 1 ? p.selectedIds : members;
+        const origins = new Map<string, R>();
+        for (const id of ids) {
+          const el = p.elements.find((e) => e.id === id);
+          if (el) origins.set(id, rOf(el));
+        }
+        gRef.current = { k: "groupDrag", ids, sp, origins, leadId: hit.id };
       } else {
-        handlersRef.current.onSelect([hit.id]);
-        handlersRef.current.onSelectCrop(null);
         const origin = rOf(hit);
         gRef.current = { k: "drag", id: hit.id, sp, origin };
       }
@@ -1167,7 +1580,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     // on mouse it stays a selection box (marquee). A plain click deselects.
     if (e.pointerType === "touch") {
       wasEmptyClickRef.current = true;
-      gRef.current = { k: "pan", sx: sp.x, sy: sp.y, ox: c.x, oy: c.y };
+      gRef.current = { k: "pan", sx: sp.x, sy: sp.y, lx: sp.x, ly: sp.y };
     } else {
       gRef.current = { k: "marquee", start: sp, end: sp };
     }
@@ -1176,9 +1589,12 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    coarseRef.current = e.pointerType !== "mouse";
     if (ptrsRef.current.has(e.pointerId)) {
       ptrsRef.current.set(e.pointerId, screenToLocal(e));
     }
+    // Eigen muis live delen (de App throttlet het versturen).
+    emitCursor(e);
     const g = gRef.current;
     if (g.k === "pinch") {
       const spL = screenToLocal(e);
@@ -1188,7 +1604,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       if (p1 && p2) {
         const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
         const dist = Math.max(1, Math.hypot(p2.x - p1.x, p2.y - p1.y));
-        const zoom = Math.max(0.1, Math.min(3, g.cam.zoom * (dist / g.startDist)));
+        const zoom = Math.max(0.1, Math.min(6, g.cam.zoom * (dist / g.startDist)));
         const wp = screenToWorld(g.mid, g.cam);
         camRef.current = { zoom, x: mid.x - wp.x * zoom, y: mid.y - wp.y * zoom };
       }
@@ -1203,7 +1619,9 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       if (p.tool === "move" || spaceRef.current) {
         cur = spaceRef.current ? "grabbing" : "grab";
       } else if (p.tool === "select") {
-        if (hitGaasEndpoint(sp, c)) {
+        if (p.locked) {
+          cur = "default";
+        } else if (hitGaasEndpoint(sp, c)) {
           cur = "move";
         } else if (hitObjectElement(screenToWorld(sp, c))) {
           cur = "move";
@@ -1217,7 +1635,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           if (cur === "default") {
             const dir = hitHandle(sp, c);
             if (dir) cur = dirCursor(dir);
-            else if (hitItem(screenToWorld(sp, c))) cur = "move";
+            else if (hitVeldChip(sp) ?? hitItem(screenToWorld(sp, c))) cur = "pointer";
           }
         }
       } else if (p.tool === "frame" || p.tool === "gaas" || p.tool === "crop") {
@@ -1229,7 +1647,11 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     const sp = screenToLocal(e);
     const c = camRef.current;
     if (g.k === "pan") {
-      camRef.current = { ...c, x: g.ox + (sp.x - g.sx), y: g.oy + (sp.y - g.sy) };
+      const dx = sp.x - g.lx;
+      const dy = sp.y - g.ly;
+      g.lx = sp.x;
+      g.ly = sp.y;
+      camRef.current = { x: c.x + dx, y: c.y + dy, zoom: c.zoom };
       if (wasEmptyClickRef.current && (Math.abs(sp.x - g.sx) > 4 || Math.abs(sp.y - g.sy) > 4)) {
         wasEmptyClickRef.current = false;
       }
@@ -1278,6 +1700,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         w: Math.round(Math.abs(b.x - g.start.x)),
         h: Math.round(Math.abs(b.y - g.start.y)),
       };
+      previewSentRef.current = true;
       handlersRef.current.onLivePreview?.({ kind: "frame", rect });
       return;
     }
@@ -1285,6 +1708,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       gRef.current = { ...g, end: screenToWorld(sp, c) };
       const a = g.start;
       const b = gRef.current.end;
+      previewSentRef.current = true;
       handlersRef.current.onLivePreview?.({ kind: "gaas", a: { x: Math.round(a.x), y: Math.round(a.y) }, b: { x: Math.round(b.x), y: Math.round(b.y) } });
       return;
     }
@@ -1300,7 +1724,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       if (el && el.object === "gaas") {
         // free point follows the pointer; near a pole centre it snaps on
         let pin: GaasPin = { x: Math.round(wp.x), y: Math.round(wp.y) };
-        let best = 14;
+        let best = coarseRef.current ? 22 : 14;
         let pole: GardenElement | null = null;
         for (const o of propsRef.current.elements) {
           if (o.type !== "object" || o.object !== "pole") continue;
@@ -1471,15 +1895,26 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     }
   };
 
-  const onPointerUp = (id: number) => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    const id = e.pointerId;
     ptrsRef.current.delete(id);
+    // Tik (geen sleep) op touch: de uitgestelde selectie alsnog uitvoeren.
+    // Na slepen wordt pending genegeerd: de inspector opent alleen bij echt tikken.
+    const down = downPosRef.current.get(id);
+    downPosRef.current.delete(id);
+    const pending = pendingSelectRef.current;
+    pendingSelectRef.current = null;
+    if (down && pending) {
+      const up = screenToLocal(e);
+      if (Math.hypot(up.x - down.x, up.y - down.y) <= 10) pending();
+    }
     const g = gRef.current;
     if (g.k === "pinch") {
       // one finger still down -> keep panning with it; none -> end
+      tapCropRef.current = null;
       if (ptrsRef.current.size === 1) {
         const [, pos] = [...ptrsRef.current.entries()][0];
-        const c = camRef.current;
-        gRef.current = { k: "pan", sx: pos.x, sy: pos.y, ox: c.x, oy: c.y };
+        gRef.current = { k: "pan", sx: pos.x, sy: pos.y, lx: pos.x, ly: pos.y };
         wasEmptyClickRef.current = false;
       } else {
         gRef.current = { k: "none" };
@@ -1489,6 +1924,23 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     }
     doBusy(false);
     if (g.k === "drag") {
+      // Tik (geen sleep) op een planting terwijl het bed al geselecteerd was:
+      // kies dan alsnog het gewas; bij echt slepen versleepte het bed.
+      const tap = tapCropRef.current;
+      tapCropRef.current = null;
+      if (tap && tap.eId === g.id && down) {
+        const up = screenToLocal(e);
+        if (Math.hypot(up.x - down.x, up.y - down.y) <= 10) {
+          handlersRef.current.onSelectCrop(tap.instanceId);
+          lastTapSelectRef.current = { instanceId: tap.instanceId, t: Date.now() };
+          draftRef.current.delete(g.id);
+          gaasDraftRef.current.delete(g.id);
+          guidesRef.current = { v: [], h: [] };
+          gRef.current = { k: "none" };
+          if (hostRef.current) hostRef.current.style.cursor = "default";
+          return;
+        }
+      }
       const el = propsRef.current.elements.find((e) => e.id === g.id);
       const gd = gaasDraftRef.current.get(g.id);
       if (el && gd && el.object === "gaas") {
@@ -1563,6 +2015,9 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const y = Math.min(a.y, b.y);
       const w = Math.abs(b.x - a.x);
       const h = Math.abs(b.y - a.y);
+      // Ctrl/Cmd ingedrukt bij loslaten: gevonden elementen toevoegen aan de
+      // selectie i.p.v. vervangen; een tik zonder sleep wist dan niets.
+      const add = e.ctrlKey || e.metaKey;
       if (w > 2 && h > 2) {
         const found = p.elements
           .filter((el) => {
@@ -1576,8 +2031,12 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
             return r.x + r.w >= x && r.x <= x + w && r.y + r.h >= y && r.y <= y + h;
           })
           .map((el) => el.id);
-        handlersRef.current.onSelect(found);
-      } else {
+        if (add) {
+          if (found.length > 0) handlersRef.current.onToggleSelect(found, "add");
+        } else {
+          handlersRef.current.onSelect(found);
+        }
+      } else if (!add) {
         handlersRef.current.onSelect([]);
         handlersRef.current.onSelectCrop(null);
       }
@@ -1588,6 +2047,27 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       }
       wasEmptyClickRef.current = false;
     } else if (g.k === "cropDrag" || g.k === "cropResize") {
+      // Tik (geen sleep) op een al geselecteerd gewas: deselecteren i.p.v.
+      // een no-op commit — behalve bij een snelle tweede tik (dubbelklik):
+      // die houdt het gewas juist geselecteerd.
+      if (g.k === "cropDrag" && g.wasSelected) {
+        const up = screenToLocal(e);
+        if (down && Math.hypot(up.x - down.x, up.y - down.y) <= 10) {
+          const m = lastTapSelectRef.current;
+          if (m && m.instanceId === g.instanceId && Date.now() - m.t < 450) {
+            lastTapSelectRef.current = null;
+            handlersRef.current.onSelectCrop(g.instanceId);
+          } else {
+            handlersRef.current.onSelectCrop(null);
+          }
+          cropDraftRef.current.delete(g.instanceId);
+          cropGuidesRef.current = { v: [], h: [] };
+          guidesRef.current = { v: [], h: [] };
+          gRef.current = { k: "none" };
+          if (hostRef.current) hostRef.current.style.cursor = "default";
+          return;
+        }
+      }
       const r = cropDraftRef.current.get(g.instanceId);
       const bed = propsRef.current.elements.find((e) => e.id === g.eId);
       if (r && bed) {
@@ -1682,9 +2162,19 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
         }
       }
     }
-    if (gRef.current.k === "frame" || gRef.current.k === "ga") {
+    // Altijd opruimen, ongeacht welk gebaar: een live preview die blijft
+    // staan is precies die zwevende kopie (bed/gaas/gewas) die je zag.
+    if (previewSentRef.current) {
+      previewSentRef.current = false;
       handlersRef.current.onLivePreview?.({ kind: "clear" });
     }
+    // En nooit een draft achterlaten: die zou bij de volgende keer dat je
+    // iets anders sleept als spook meegetekend worden.
+    draftRef.current.clear();
+    gaasDraftRef.current.clear();
+    cropDraftRef.current.clear();
+    guidesRef.current = { v: [], h: [] };
+    cropGuidesRef.current = { v: [], h: [] };
     gRef.current = { k: "none" };
     if (hostRef.current) hostRef.current.style.cursor = "default";
   };
@@ -1701,16 +2191,25 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     let raf = 0;
     let fitted = false;
 
-    const bg = (th: "light" | "dark") => (th === "dark" ? "#13161b" : "#eef1f5");
     const accent = (th: "light" | "dark") => (th === "dark" ? "#6fd6a4" : "#1f7a4c");
+
+    // Buffers op devicePixelRatio-grootte (max 3x); tekenen gebeurt in
+    // CSS-pixels via setTransform, dus alle bestaande tekencode blijft gelijk.
+    const applySize = () => {
+      const { w, h } = hostSize.current;
+      if (w === 0 || h === 0) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      dprRef.current = dpr;
+      ov.width = Math.max(1, Math.round(w * dpr));
+      ov.height = Math.max(1, Math.round(h * dpr));
+      renderer.resize(w, h);
+    };
 
     const ro = new ResizeObserver((entries) => {
       const r = entries[0]?.contentRect;
       if (!r) return;
       hostSize.current = { w: r.width, h: r.height };
-      ov.width = Math.max(1, Math.round(r.width));
-      ov.height = Math.max(1, Math.round(r.height));
-      renderer.resize(r.width, r.height);
+      applySize();
       if (!fitted) {
         fitted = true;
         fitView();
@@ -1721,7 +2220,13 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       }
     });
     ro.observe(host_);
-    renderer.resize(gpu.clientWidth, gpu.clientHeight);
+    // Eerste maat direct van de host (niet van het canvas: diens CSS-maat is
+    // 100%, en de buffer-maat hebben we hier juist zelf in de hand).
+    {
+      const r0 = host_.getBoundingClientRect();
+      hostSize.current = { w: r0.width, h: r0.height };
+      applySize();
+    }
 
     const draw = () => {
       const p = propsRef.current;
@@ -1729,16 +2234,57 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const { w, h } = hostSize.current;
       if (w === 0 || h === 0) return;
 
+      // eerste frame met echte maat: de host mag nu zichtbaar infaden
+      // (daarvoor was hij transparant, zodat er nooit een leeg canvas popt)
+      if (!paintedRef.current) {
+        paintedRef.current = true;
+        handlersRef.current.onFirstPaint?.();
+      }
+
       const items: DrawItem[] = [];
       for (const el of p.elements) {
         if (el.type === "object") continue; // objects are drawn in their own pass
+        if (el.type === "veld") continue; // velden zijn alleen een omlijning (overlay hieronder)
         const r = rOf(el);
         items.push({ rect: r, color: el.color, selected: false });
       }
-      renderer.render(items, c, bg(p.theme));
+      renderer.setBackground(p.theme === "dark" ? "#13161b" : "#eef1f5");
+      renderer.render(items, c);
 
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      // DPR kan lopend veranderen (zoom, ander scherm): buffers bijwerken.
+      // Tekenen in CSS-pixels; de transform schaalt naar device-pixels.
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      if (dpr !== dprRef.current) applySize();
+      ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0);
+      // Overlay elke frame wissen! Zonder dit blijft elke tekening staan en
+      // krijg je sporen/kopieën van gaas, voorwerpen en gewassen tijdens het
+      // slepen. De achtergrond zelf tekent WebGL (setBackground): die canvas
+      // ligt onder dit overlay, dus hier wissen haalt de bedden niet weg.
       ctx.clearRect(0, 0, w, h);
+
+      // Veld-omlijningen: lichte vulling + stippellijn in de eigen kleur, zodat
+      // ze als kader herkenbaar zijn zonder bedden en paden te verbergen.
+      // rOf volgt de sleep-positie, dus dit beweegt live mee tijdens het slepen.
+      for (const el of p.elements) {
+        if (el.type !== "veld") continue;
+        const r = rOf(el);
+        const p0 = worldToScreen({ x: r.x, y: r.y }, c);
+        const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+        const bw = p1.x - p0.x;
+        const bh = p1.y - p0.y;
+        if (bw < 2 || bh < 2) continue;
+        const isSel = p.selectedIds.includes(el.id);
+        ctx.save();
+        ctx.globalAlpha = 0.10;
+        ctx.fillStyle = el.color;
+        ctx.fillRect(p0.x, p0.y, bw, bh);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = el.color;
+        ctx.lineWidth = isSel ? 2.5 : 1.5;
+        ctx.setLineDash([8, 5]);
+        ctx.strokeRect(p0.x, p0.y, bw, bh);
+        ctx.restore();
+      }
 
       // plant rectangles drawn inside each bed (colour-coded per catalog crop)
       const dark = p.theme === "dark";
@@ -1787,7 +2333,6 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           // slepen bij ziet komen; bij loslaten wordt de telling opgeslagen.
           const rowSpacingM = a.rowSpacing ?? crop?.rowSpacing ?? 0.3;
           const plantSpacingM = a.plantSpacing ?? crop?.plantSpacing ?? 0.2;
-          const icon = cropEmoji(crop?.icon, crop?.name);
           const gest = gRef.current;
           const liveResize =
             gest.k === "cropResize" && gest.instanceId === a.instanceId;
@@ -1806,9 +2351,10 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
             ctx.font = `${size * c.zoom}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
+            const iconSize = size * c.zoom;
             for (const s of spots) {
               const sp = worldToScreen({ x: s.x, y: s.y }, c);
-              ctx.fillText(icon, sp.x, sp.y + 1);
+              drawCropIcon(ctx, crop?.icon, crop?.name, sp.x, sp.y, iconSize);
             }
             ctx.globalAlpha = 1;
             ctx.textAlign = "left";
@@ -1979,6 +2525,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       }
 
       // labels
+      veldChipsRef.current = [];
       for (const el of p.elements) {
         // Gaas krijgt zijn kaartje niet op de bbox-hoek (daar verdwijnt hij
         // onder de lijn), maar zwevend naast het midden van de lijn — altijd
@@ -2017,6 +2564,49 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           ctx.fillText(sizeTxtG, xG + 9, yG + 5 + fsG + (smallFsG - 8) / 2 + 1);
           continue;
         }
+        // Veld: naam + maten staan BUITEN het kader (bovenaan), zodat de
+        // binnenkant vrij blijft voor bedden en paden.
+        if (el.type === "veld") {
+          const r = rOf(el);
+          const p0 = worldToScreen({ x: r.x, y: r.y }, c);
+          const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+          const bw = p1.x - p0.x;
+          if (bw < 46) continue;
+          const fsV = Math.max(9, Math.min(13, 12 * c.zoom));
+          const sizeTxtV = `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
+          ctx.textBaseline = "top";
+          ctx.font = `600 ${fsV}px Inter, system-ui, sans-serif`;
+          const nameWV = ctx.measureText(el.label || "Veld").width;
+          const smallFsV = Math.max(8, Math.min(10, 9 * c.zoom));
+          ctx.font = `600 ${smallFsV}px Inter, system-ui, sans-serif`;
+          const sizeWV = ctx.measureText(sizeTxtV).width;
+          const chipWV = Math.max(nameWV, sizeWV) + 9 * 2;
+          const chipHV = fsV + smallFsV + 5 * 2 + 1;
+          // boven de rand; past het daar niet, dan eronder; anders binnenin
+          let yV = p0.y - chipHV - 6;
+          if (yV < 2) yV = p1.y + 6;
+          if (yV + chipHV > h - 2) yV = p0.y + 4;
+          const xV = Math.max(2, Math.min(w - chipWV - 2, p0.x));
+          ctx.fillStyle = chipBg;
+          // onthouden voor de klik: een tik op dit kaartje selecteert het hele veld
+          veldChipsRef.current.push({ id: el.id, x: xV, y: yV, w: Math.min(chipWV, w - xV - 2), h: chipHV });
+          ctx.strokeStyle = chipBorder;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(xV, yV, Math.min(chipWV, w - xV - 2), chipHV, 7);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = chipName;
+          ctx.font = `600 ${fsV}px Inter, system-ui, sans-serif`;
+          ctx.fillText(el.label || "Veld", xV + 9, yV + 5 + (fsV - 10) / 2);
+          ctx.fillStyle = chipMeta;
+          ctx.font = `600 ${smallFsV}px Inter, system-ui, sans-serif`;
+          ctx.fillText(sizeTxtV, xV + 9, yV + 5 + fsV + (smallFsV - 8) / 2 + 1);
+          continue;
+        }
+        // Paden tonen geen naam en geen maten op het canvas: alleen tijdens
+        // het resizen verschijnt de maat (zie het selectie-label hieronder).
+        if (el.type === "path") continue;
         const r = rOf(el);
         const p0 = worldToScreen({ x: r.x, y: r.y }, c);
         const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
@@ -2096,7 +2686,14 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
           ctx.textBaseline = "top";
         } else {
           const r = unionOfSelected();
-          if (r) {
+          // Paden tonen hun maat alleen tijdens het resizen; een los
+          // geselecteerd pad blijft verder helemaal label-vrij.
+          const selEls = p.selectedIds
+            .map((id) => p.elements.find((e) => e.id === id))
+            .filter((e): e is GardenElement => !!e);
+          const onlyPaths = selEls.length > 0 && selEls.every((e) => e.type === "path");
+          const resizing = gRef.current.k === "groupResize";
+          if (r && (!onlyPaths || resizing)) {
             const p0 = worldToScreen({ x: r.x, y: r.y }, c);
             const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
             const txt = `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
@@ -2114,6 +2711,86 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
             ctx.fillStyle = "rgba(255,255,255,0.95)";
             ctx.textBaseline = "middle";
             ctx.fillText(txt, x + 8, y + th / 2 + 1);
+          }
+        }
+      }
+
+      // Live aanwezigheid: muis + selectie van de andere editors. Selecties
+      // krijgen een gekleurde omlijning met naam, de muis een pijltje met naam.
+      // Stilgevallen cursors (> 4 s niets gehoord) tekenen we niet meer.
+      {
+        const nowMs = Date.now();
+        const remotes = p.liveCursors?.current;
+        if (remotes) {
+          for (const [uid, lc] of remotes) {
+            if (!lc || uid === p.currentUserId) continue;
+            if (nowMs - lc.at > 4000) continue;
+            const col = userColor(uid);
+            const sel = lc.selection ?? [];
+            sel.forEach((id, si) => {
+              const el = p.elements.find((e) => e.id === id);
+              if (!el) return;
+              const rr = rOf(el);
+              const q0 = worldToScreen({ x: rr.x, y: rr.y }, c);
+              const q1 = worldToScreen({ x: rr.x + rr.w, y: rr.y + rr.h }, c);
+              ctx.save();
+              ctx.strokeStyle = col;
+              ctx.lineWidth = 2;
+              ctx.setLineDash([6, 4]);
+              ctx.strokeRect(q0.x, q0.y, q1.x - q0.x, q1.y - q0.y);
+              ctx.restore();
+              // naamkaartje bij het eerste geselecteerde element
+              if (si === 0) {
+                const fsN = Math.max(10, Math.min(12, 11 * c.zoom));
+                ctx.font = `600 ${fsN}px Inter, system-ui, sans-serif`;
+                ctx.textBaseline = "top";
+                const nw = ctx.measureText(lc.username).width + 16;
+                const nh = fsN + 7;
+                const nx = Math.max(2, Math.min(w - nw - 2, q0.x));
+                const ny = Math.max(2, q0.y - nh - 4);
+                ctx.fillStyle = col;
+                ctx.beginPath();
+                ctx.roundRect(nx, ny, nw, nh, 4);
+                ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.95)";
+                ctx.textBaseline = "middle";
+                ctx.fillText(lc.username, nx + 8, ny + nh / 2 + 1);
+                ctx.textBaseline = "top";
+              }
+            });
+            if (lc.cursor) {
+              const s = worldToScreen(lc.cursor, c);
+              const sc = Math.max(0.8, Math.min(1.4, c.zoom));
+              ctx.save();
+              ctx.translate(s.x, s.y);
+              ctx.scale(sc, sc);
+              ctx.fillStyle = col;
+              ctx.strokeStyle = "rgba(255,255,255,0.9)";
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.moveTo(0, 0);
+              ctx.lineTo(0, 15);
+              ctx.lineTo(4.2, 11.2);
+              ctx.lineTo(6.6, 16.4);
+              ctx.lineTo(9, 15.2);
+              ctx.lineTo(6.6, 10.2);
+              ctx.lineTo(11, 10.2);
+              ctx.closePath();
+              ctx.fill();
+              ctx.stroke();
+              ctx.restore();
+              const fsC = 11;
+              ctx.font = `600 ${fsC}px Inter, system-ui, sans-serif`;
+              ctx.textBaseline = "top";
+              const cw = ctx.measureText(lc.username).width + 14;
+              const chh = fsC + 7;
+              ctx.fillStyle = col;
+              ctx.beginPath();
+              ctx.roundRect(s.x + 12, s.y + 14, cw, chh, 4);
+              ctx.fill();
+              ctx.fillStyle = "rgba(255,255,255,0.95)";
+              ctx.fillText(lc.username, s.x + 12 + 7, s.y + 14 + 4);
+            }
           }
         }
       }
@@ -2232,10 +2909,13 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
               ctx.font = `${size * c.zoom}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
               ctx.textAlign = "center";
               ctx.textBaseline = "middle";
-              ctx.fillText(
-                cropEmoji(crop?.icon, crop?.name),
+              drawCropIcon(
+                ctx,
+                crop?.icon,
+                crop?.name,
                 s0.x + pw / 2,
-                s0.y + ph / 2 + 1
+                s0.y + ph / 2,
+                size * c.zoom
               );
               ctx.textAlign = "left";
               ctx.textBaseline = "top";
@@ -2478,7 +3158,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       const c = camRef.current;
       const wp = screenToWorld(sp, c);
       const factor = Math.exp(-e.deltaY * 0.0012);
-      const zoom = Math.max(0.1, Math.min(3, c.zoom * factor));
+      const zoom = Math.max(0.1, Math.min(6, c.zoom * factor));
       camRef.current = { zoom, x: sp.x - wp.x * zoom, y: sp.y - wp.y * zoom };
     };
     host_.addEventListener("wheel", wheelNative, { passive: false });
@@ -2521,13 +3201,26 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
       className="gpu-host"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={(e) => onPointerUp(e.pointerId)}
-      onPointerCancel={(e) => onPointerUp(e.pointerId)}
-      onPointerLeave={() => { if (hostRef.current) hostRef.current.style.cursor = "default"; }}
+      onPointerUp={(e) => onPointerUp(e)}
+      onPointerCancel={(e) => {
+        // afgebroken gesture: nooit selecteren
+        downPosRef.current.delete(e.pointerId);
+        pendingSelectRef.current = null;
+        tapCropRef.current = null;
+        onPointerUp(e);
+      }}
+      onPointerLeave={() => {
+        if (hostRef.current) hostRef.current.style.cursor = "default";
+        // Muis weg van het canvas: cursor meteen verbergen bij de anderen.
+        handlersRef.current.onLiveCursor?.(null, propsRef.current.selectedIds);
+      }}
       style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", touchAction: "none" }}
     >
-      <canvas ref={gpuRef} style={{ position: "absolute", inset: 0 }} />
-      <canvas ref={ovRef} style={{ position: "absolute", inset: 0 }} />
+      {/* width/height 100% is verplicht: een canvas is een replaced element en
+          neemt anders zijn intrinsieke maat (= het width-attribuut = CSS-maat x
+          dpr). Dan zou het canvas op een telefoon dpr keer te groot zijn. */}
+      <canvas ref={gpuRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
+      <canvas ref={ovRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
       {objectMenuOpen && (
         <ObjectMenu
           search={objSearch}

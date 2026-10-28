@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -15,7 +16,12 @@ const PORT = Number(process.env.PORT ?? 3001);
 const DATA_FILE = process.env.DATA_FILE ?? path.join(currentDir, "..", "data", "db.json");
 
 async function main(): Promise<void> {
-  const store = await JsonStore.open(DATA_FILE);
+  // Data-opslag: Supabase als SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY gezet zijn,
+  // anders de lokale JSON-file (data/db.json).
+  const { SupabaseStore } = await import("./supabaseStore.ts");
+  const supabaseStore = SupabaseStore.fromEnv();
+  const store = supabaseStore ?? (await JsonStore.open(DATA_FILE));
+  console.log(supabaseStore ? "Data: Supabase" : `Data: ${DATA_FILE}`);
   const auth = new AuthService(store);
 
   const app = express();
@@ -29,22 +35,37 @@ async function main(): Promise<void> {
   // In production the built frontend lives in dist/ next to the server.
   const distDir = path.join(currentDir, "..", "dist");
   const indexHtml = path.join(distDir, "index.html");
-  app.use(express.static(distDir));
+  // Gehashte assets (app-*.js/css) mogen lang gecachet worden; index.html
+  // nooit, zodat een nieuwe build altijd wordt opgepikt na herladen.
+  app.use(
+    "/assets",
+    express.static(path.join(distDir, "assets"), {
+      maxAge: "1y",
+      immutable: true,
+    })
+  );
+  app.use(express.static(distDir, { index: false }));
   // SPA fallback (Express 5: use a middleware instead of a "*" route)
   app.use((req, res, next) => {
     if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/ws")) {
       return next();
     }
-    res.sendFile(indexHtml, (err) => err && next());
+    res.sendFile(
+      indexHtml,
+      { headers: { "Cache-Control": "no-store" } },
+      (err) => err && next()
+    );
   });
 
   server.listen(PORT, () => {
-    console.log(`Moestuin Planner server draait op http://localhost:${PORT}`);
-    console.log(`Data: ${DATA_FILE}`);
+    console.log(`Pluktuintje server draait op http://localhost:${PORT}`);
   });
 
   const shutdown = () => {
-    void store.flush().finally(() => process.exit(0));
+    // SupabaseStore heeft geen flush; JsonStore wel.
+    const maybeFlush = (store as { flush?: () => Promise<void> }).flush;
+    if (maybeFlush) void maybeFlush.call(store).finally(() => process.exit(0));
+    else process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

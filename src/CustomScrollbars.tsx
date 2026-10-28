@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * Custom scrollbar: verbergt de native scrollbars en tekent zelf een thumb
@@ -42,13 +43,17 @@ interface Bar {
   right: number;
   thumbHeight: number;
   thumbTop: number;
+  inner: boolean;
+  innerTop: number;
 }
 
 /** Alle elementen met een verticale scroll-container (ongeacht overflow). */
-function collectCandidates(): HTMLElement[] {
+function collectCandidates(pageMode: boolean): HTMLElement[] {
   const out: HTMLElement[] = [];
-  for (const el of document.querySelectorAll<HTMLElement>("body, body *")) {
+  const selector = pageMode ? "body, body *" : ".sow-modal, .sow-modal *";
+  for (const el of document.querySelectorAll<HTMLElement>(selector)) {
     if (!el.isConnected) continue;
+    if (pageMode && (el === document.body || el === document.documentElement)) continue;
     const s = getComputedStyle(el);
     if (s.display === "none" || s.visibility === "hidden") continue;
     if (!/(auto|scroll|overlay)/.test(s.overflowY)) continue;
@@ -60,8 +65,13 @@ function collectCandidates(): HTMLElement[] {
 }
 
 export function CustomScrollbars() {
+  const [pageMode, setPageMode] = useState(
+    () =>
+      !(window.matchMedia?.("(pointer: coarse), (max-width: 900px)").matches ?? false)
+  );
   const [bars, setBars] = useState<Bar[]>([]);
   const candidates = useRef<HTMLElement[]>([]);
+  const lastKey = useRef("");
   /** id -> element, voor het slepen van de thumb */
   const byId = useRef(new Map<number, HTMLElement>());
   const drag = useRef<{ el: HTMLElement; startY: number; startTop: number } | null>(null);
@@ -79,58 +89,100 @@ export function CustomScrollbars() {
       if (maxScroll <= 1) continue;
       const id = idOf(el);
       map.set(id, el);
+      const inner = !!el.closest(".sow-modal");
+      const shell = inner ? (el.closest(".sow-modal") as HTMLElement) : null;
+      const trackH = inner ? r.height - 24 : r.height;
       const thumbHeight = Math.max(
         MIN_THUMB,
-        Math.min(r.height, (r.height * el.clientHeight) / el.scrollHeight),
+        Math.min(trackH, (trackH * el.clientHeight) / el.scrollHeight),
       );
       next.push({
         id,
         top: r.top,
-        height: r.height,
-        right: Math.max(0, window.innerWidth - r.right),
+        height: trackH,
+        right: Math.max(0, window.innerWidth - r.right) + 4,
         thumbHeight,
-        thumbTop: (el.scrollTop / maxScroll) * (r.height - thumbHeight),
+        thumbTop: (el.scrollTop / maxScroll) * (trackH - thumbHeight),
+        inner,
+        innerTop: shell ? r.top - shell.getBoundingClientRect().top + 12 : 0,
       });
     }
     byId.current = map;
+    const key = next
+      .map(
+        (b) =>
+          `${b.id}:${Math.round(b.top)}:${Math.round(b.height)}:${Math.round(b.innerTop)}:${Math.round(b.thumbHeight)}:${Math.round(b.thumbTop)}`,
+      )
+      .join("|");
+    if (key === lastKey.current) return;
+    lastKey.current = key;
     setBars(next);
   }, []);
 
-  /** Duur: heropen de kandidatenlijst (mount, DOM-wijziging, resize). */
-  const rescan = useCallback(() => {
-    candidates.current = collectCandidates();
-    update();
+  const rafPending = useRef(false);
+  const scheduleUpdate = useCallback(() => {
+    if (rafPending.current) return;
+    rafPending.current = true;
+    requestAnimationFrame(() => {
+      rafPending.current = false;
+      update();
+    });
   }, [update]);
 
+  /** Duur: heropen de kandidatenlijst (mount, DOM-wijziging, resize). */
+  const rescan = useCallback(() => {
+    candidates.current = collectCandidates(pageMode);
+    update();
+  }, [pageMode, update]);
+
+  const rescanPending = useRef(false);
+  const scheduleRescan = useCallback(() => {
+    if (rescanPending.current) return;
+    rescanPending.current = true;
+    requestAnimationFrame(() => {
+      rescanPending.current = false;
+      rescan();
+    });
+  }, [rescan]);
+
   useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse), (max-width: 900px)");
+    const sync = () => setPageMode(!mq.matches);
+    sync();
+    mq.addEventListener?.("change", sync);
+    return () => mq.removeEventListener?.("change", sync);
+  }, []);
+
+  useEffect(() => {
+    lastKey.current = "";
     rescan();
 
     // scroll-events bubbelen niet, maar een capture-listener op window vangt ze wel.
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", rescan);
+    window.addEventListener("scroll", scheduleUpdate, true);
+    window.addEventListener("resize", scheduleRescan);
 
     // een container die net gaat overlopen (openklappend formulier, geladen
     // afbeelding, enz.) geeft geen resize-event: deze vangen het wel.
-    const onMotionEnd = () => update();
+    const onMotionEnd = () => scheduleUpdate();
     document.addEventListener("transitionend", onMotionEnd, true);
     document.addEventListener("animationend", onMotionEnd, true);
 
-    const beat = window.setInterval(update, TICK_MS);
+    const beat = window.setInterval(pageMode ? update : scheduleUpdate, TICK_MS);
 
-    const mo = new MutationObserver(rescan);
+    const mo = new MutationObserver(scheduleRescan);
     // Alleen childList: attributes zou mijn eigen inline styles terugvoeden
     // en zo een oneindige meet-lus veroorzaken.
     mo.observe(document.body, { childList: true, subtree: true });
 
     return () => {
-      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("scroll", scheduleUpdate, true);
       window.removeEventListener("resize", rescan);
       document.removeEventListener("transitionend", onMotionEnd, true);
       document.removeEventListener("animationend", onMotionEnd, true);
       window.clearInterval(beat);
       mo.disconnect();
     };
-  }, [rescan, update]);
+  }, [pageMode, rescan, scheduleRescan, scheduleUpdate, update]);
 
   const onMove = useCallback((e: PointerEvent) => {
     const d = drag.current;
@@ -165,30 +217,44 @@ export function CustomScrollbars() {
     };
   }, [onMove, onUp]);
 
+  if (!bars.length) return null;
+
   return (
     <>
-      {bars.map((bar) => (
-        <div
-          key={bar.id}
-          id={`mainScrollbar-${bar.id}`}
-          className="main-scrollbar"
-          style={{ top: bar.top, height: bar.height, right: bar.right }}
-          aria-hidden="true"
-        >
+      {bars.map((bar) => {
+        const node = (
           <div
-            id={`mainScrollbarThumb-${bar.id}`}
-            className="main-scrollbar-thumb"
-            style={{ height: bar.thumbHeight, transform: `translateY(${bar.thumbTop}px)` }}
-            onPointerDown={(e) => {
-              const el = byId.current.get(bar.id);
-              if (!el) return;
-              e.preventDefault();
-              drag.current = { el, startY: e.clientY, startTop: el.scrollTop };
-              document.body.style.userSelect = "none";
-            }}
-          />
-        </div>
-      ))}
+            key={bar.id}
+            id={`mainScrollbar-${bar.id}`}
+            className={bar.inner ? "main-scrollbar inner" : "main-scrollbar"}
+            style={
+              bar.inner
+                ? { top: bar.innerTop, height: bar.height, right: 4 }
+                : { top: bar.top, height: bar.height, right: bar.right }
+            }
+            aria-hidden="true"
+          >
+            <div
+              id={`mainScrollbarThumb-${bar.id}`}
+              className="main-scrollbar-thumb"
+              style={{ height: bar.thumbHeight, transform: `translateY(${bar.thumbTop}px)` }}
+              onPointerDown={(e) => {
+                const el = byId.current.get(bar.id);
+                if (!el) return;
+                e.preventDefault();
+                drag.current = { el, startY: e.clientY, startTop: el.scrollTop };
+                document.body.style.userSelect = "none";
+              }}
+            />
+          </div>
+        );
+        if (bar.inner) {
+          const el = byId.current.get(bar.id);
+          if (!el) return null;
+          return createPortal(node, el);
+        }
+        return node;
+      })}
     </>
   );
 }

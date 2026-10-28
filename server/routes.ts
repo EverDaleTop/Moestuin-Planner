@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Garden } from "../src/types.ts";
 import { id } from "../src/storage.ts";
+import { mergeCatalog, mergeGarden, normalizeCrop, normalizeGarden } from "../src/sync.ts";
 import type { DataStore } from "./db.ts";
 import type { AuthService } from "./auth.ts";
 import { publicUser, randomToken } from "./auth.ts";
@@ -58,21 +59,179 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
     res.json({ ok: true });
   });
 
+  /**
+   * Login met Google (Google Identity Services ID-token).
+   * Body: { idToken: string }
+   * Verifieert het token bij Google en maakt/zoekt daarna een lokale user.
+   */
+  router.post("/api/auth/google", async (req, res) => {
+    try {
+      const idToken = String(req.body?.idToken ?? "").trim();
+      if (!idToken) {
+        res.status(400).json({ error: "Geen Google-token meegegeven." });
+        return;
+      }
+      // Token verifiëren bij Google.
+      const verifyRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
+      );
+      if (!verifyRes.ok) {
+        res.status(401).json({ error: "Google-token ongeldig. Probeer opnieuw." });
+        return;
+      }
+      const info = (await verifyRes.json()) as {
+        email?: string;
+        email_verified?: string;
+        name?: string;
+        picture?: string;
+        sub?: string;
+        aud?: string;
+      };
+      const expectedAud = process.env.GOOGLE_CLIENT_ID;
+      if (expectedAud && info.aud !== expectedAud) {
+        res.status(401).json({ error: "Google-token is voor een andere app." });
+        return;
+      }
+      if (!info.email) {
+        res.status(401).json({ error: "Geen e-mailadres van Google ontvangen." });
+        return;
+      }
+      if (info.email_verified === "false") {
+        res.status(401).json({ error: "Verifieer eerst je Google e-mailadres." });
+        return;
+      }
+      const { user, session } = await auth.loginWithOAuth({
+        email: info.email,
+        name: info.name,
+        avatarUrl: info.picture ?? null,
+        providerId: info.sub ?? null,
+        provider: "google",
+      });
+      res.json({ user: publicUser(user), token: session.token });
+    } catch (err: any) {
+      res.status(401).json({ error: err?.message ?? "Inloggen met Google mislukt." });
+    }
+  });
+
+  /**
+   * Login via Supabase Auth (Google OAuth of magic link via Supabase).
+   * Body: { accessToken: string }
+   * Verifieert het Supabase JWT bij het Supabase-project (als geconfigureerd),
+   * met een gedecodeerde fallback voor lokale ontwikkeling.
+   */
+  router.post("/api/auth/supabase", async (req, res) => {
+    try {
+      const accessToken = String(req.body?.accessToken ?? "").trim();
+      if (!accessToken) {
+        res.status(400).json({ error: "Geen Supabase-token meegegeven." });
+        return;
+      }
+      let email: string | undefined;
+      let name: string | undefined;
+      let avatar: string | null = null;
+      let providerId: string | null = null;
+
+      const url = process.env.SUPABASE_URL;
+      // Nieuwe dashboard-naam (SUPABASE_PUBLISHABLE_KEY) én legacy-naam allebei ok.
+      // Placeholder-waardes (VUL_HIER…) tellen niet als geconfigureerd.
+      const anonRaw =
+        process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY;
+      const anon = anonRaw && !anonRaw.includes("VUL_HIER") ? anonRaw : undefined;
+      if (url && anon) {
+        const userRes = await fetch(`${url.replace(/\/$/, "")}/auth/v1/user`, {
+          headers: { apikey: anon, Authorization: `Bearer ${accessToken}` },
+        });
+        if (!userRes.ok) {
+          res.status(401).json({ error: "Supabase-sessie ongeldig. Log opnieuw in." });
+          return;
+        }
+        const su = (await userRes.json()) as {
+          id?: string;
+          email?: string;
+          user_metadata?: { name?: string; full_name?: string; avatar_url?: string; picture?: string };
+        };
+        email = su.email;
+        name = su.user_metadata?.full_name ?? su.user_metadata?.name;
+        avatar = su.user_metadata?.avatar_url ?? su.user_metadata?.picture ?? null;
+        providerId = su.id ?? null;
+      } else {
+        // Dev-fallback: decodeer de JWT-payload zonder handtekening-check.
+        // Nooit gebruiken in productie zonder SUPABASE_URL te zetten!
+        const parts = accessToken.split(".");
+        if (parts.length < 2) throw new Error("Ongeldig token.");
+        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8")) as {
+          email?: string;
+          user_metadata?: { name?: string; full_name?: string; avatar_url?: string };
+          sub?: string;
+        };
+        email = payload.email;
+        name = payload.user_metadata?.full_name ?? payload.user_metadata?.name;
+        providerId = payload.sub ?? null;
+      }
+
+      if (!email) {
+        res.status(401).json({ error: "Geen e-mailadres in Supabase-sessie gevonden." });
+        return;
+      }
+      const { user, session } = await auth.loginWithOAuth({
+        email,
+        name,
+        avatarUrl: avatar,
+        providerId,
+        provider: "supabase",
+      });
+      res.json({ user: publicUser(user), token: session.token });
+    } catch (err: any) {
+      res.status(401).json({ error: err?.message ?? "Inloggen via Supabase mislukt." });
+    }
+  });
+
   // ---------- account / catalog ----------
   router.get("/api/me", auth.requireAuth, async (req, res) => {
     const me = reqUser(req);
     const gardens = await store.listGardensForUser(me.id);
     const catalog = await store.getCropCatalog();
-    const userNames: Record<string, string> = {};
+    const ids = new Set<string>([me.id]);
     for (const g of gardens) {
-      userNames[g.ownerId] = userNames[g.ownerId] ?? (await store.getUserById(g.ownerId))?.username ?? "?";
-      for (const uid of g.sharedWith) {
-        userNames[uid] = userNames[uid] ?? (await store.getUserById(uid))?.username ?? "?";
-      }
+      ids.add(g.ownerId);
+      for (const uid of g.sharedWith) ids.add(uid);
     }
-    userNames[me.id] = userNames[me.id] ?? me.username;
+    const found = await Promise.all(
+      [...ids].map(async (id) => [id, await store.getUserById(id)] as const)
+    );
+    const userNames: Record<string, string> = {};
+    for (const [id, u] of found) userNames[id] = u?.username ?? "?";
+    userNames[me.id] = me.username;
     const payload: MeResponse = { user: publicUser(me), gardens, cropCatalog: catalog, userNames };
     res.json(payload);
+  });
+
+  router.patch("/api/me/username", auth.requireAuth, async (req, res) => {
+    try {
+      const { username } = req.body ?? {};
+      if (typeof username !== "string") {
+        res.status(400).json({ error: "Gebruikersnaam is verplicht." });
+        return;
+      }
+      const updated = await auth.changeUsername(reqUser(req).id, username);
+      res.json({ user: publicUser(updated) });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message ?? "Naam wijzigen mislukt." });
+    }
+  });
+
+  router.patch("/api/me/password", auth.requireAuth, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body ?? {};
+      if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+        res.status(400).json({ error: "Huidig en nieuw wachtwoord zijn verplicht." });
+        return;
+      }
+      await auth.changePassword(reqUser(req).id, currentPassword, newPassword);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message ?? "Wachtwoord wijzigen mislukt." });
+    }
   });
 
   router.put("/api/catalog", auth.requireAuth, async (req, res) => {
@@ -85,8 +244,23 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       res.status(400).json({ error: "cropCatalog mag niet leeg zijn." });
       return;
     }
-    await store.setCropCatalog(catalog);
-    res.json({ cropCatalog: catalog });
+    // Samenvoegen i.p.v. vervangen: met twee bewerkers tegelijk wint per gewas
+    // de nieuwste bewerking en herrijzen verwijderde gewassen nooit.
+    const incomingDeleted: Record<string, number> =
+      req.body?.deletedCropIds && typeof req.body.deletedCropIds === "object"
+        ? req.body.deletedCropIds
+        : {};
+    const stored = await store.getCropCatalog();
+    const storedDeleted = await store.getCatalogDeleted();
+    const { list, tomb } = mergeCatalog(
+      stored.map(normalizeCrop),
+      catalog.map(normalizeCrop),
+      storedDeleted,
+      incomingDeleted
+    );
+    await store.setCropCatalog(list);
+    await store.setCatalogDeleted(tomb);
+    res.json({ cropCatalog: list });
   });
 
   router.get("/api/users", auth.requireAuth, async (req, res) => {
@@ -118,6 +292,7 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       expenses: [],
       incomes: [],
       shopping: [],
+      todos: [],
       ownerId: me.id,
       sharedWith: [],
       inviteToken: randomToken(),
@@ -148,8 +323,11 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       res.status(400).json({ error: "Ongeldige tuin-data." });
       return;
     }
+    // Samenvoegen i.p.v. blind vervangen: bewerkingen van twee schermen aan
+    // verschillende onderdelen overleven elkaar (per item wint nieuwer).
+    const merged = mergeGarden(normalizeGarden(existing), normalizeGarden(incoming), "b");
     const safe: Garden = {
-      ...incoming,
+      ...merged,
       ownerId: existing.ownerId,
       sharedWith: existing.sharedWith,
       createdAt: existing.createdAt,
@@ -176,7 +354,7 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
   router.get("/api/gardens/:gardenId/invite", async (req, res) => {
     const garden = await store.getGarden(String(req.params.gardenId));
     const token = String(req.query.token ?? "");
-    if (!garden || garden.inviteToken !== token) {
+    if (!garden || !token || !garden.inviteToken || garden.inviteToken !== token) {
       res.status(404).json({ error: "Uitnodiging niet gevonden of ongeldig." });
       return;
     }
@@ -195,7 +373,7 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
     const me = reqUser(req);
     const garden = await store.getGarden(String(req.params.gardenId));
     const token = String(req.body?.token ?? "");
-    if (!garden || garden.inviteToken !== token) {
+    if (!garden || !token || !garden.inviteToken || garden.inviteToken !== token) {
       res.status(404).json({ error: "Uitnodiging niet gevonden of ongeldig." });
       return;
     }
@@ -209,6 +387,20 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
     res.json(garden);
   });
 
+  // Disable the invite link (owner only): existing links stop working.
+  // POST /invite creates a fresh link again afterwards.
+  router.delete("/api/gardens/:gardenId/invite", auth.requireAuth, async (req, res) => {
+    const me = reqUser(req);
+    const garden = await store.getGarden(String(req.params.gardenId));
+    if (!garden || garden.ownerId !== me.id) {
+      res.status(404).json({ error: "Tuin niet gevonden of geen toegang." });
+      return;
+    }
+    garden.inviteToken = "";
+    await store.putGarden(garden);
+    ws.broadcastGarden(garden);
+    res.json(garden);
+  });
   // Regenerate the invite link (owner only), so a leaked link can be invalidated.
   router.post("/api/gardens/:gardenId/invite", auth.requireAuth, async (req, res) => {
     const me = reqUser(req);

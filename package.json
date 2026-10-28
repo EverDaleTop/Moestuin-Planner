@@ -1,5 +1,5 @@
 {
-  "name": "moestuin-planner",
+  "name": "pluktuintje",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,6 +7,8 @@
     "dev": "concurrently -k -n server,client -c green,cyan \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
+    "dev:client-lan": "vite --host",
+    "dev:lan": "node scripts/lan-url.mjs && concurrently -k -n server,client -c green,cyan \"npm:dev:server\" \"npm:dev:client-lan\"",
     "build": "tsc -b && vite build",
     "build:server": "node scripts/build-server.mjs",
     "start": "node --import tsx server/index.ts",
@@ -15,7 +17,9 @@
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
+    "@supabase/supabase-js": "^2.47.0",
     "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.7",
     "express": "^5.2.1",
     "playwright": "^1.63.0",
     "react": "^19.2.8",
