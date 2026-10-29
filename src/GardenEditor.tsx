@@ -19,7 +19,7 @@ import type {
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
 import type { PreviewPayload } from './realtime'
-import { Inspector } from './Inspector'
+import { Inspector, inspectorElementInVeld } from './Inspector'
 import type { PresenceMember } from './realtime'
 import { PresenceModal } from './PresenceModal'
 import { HarvestView } from './HarvestExpenseView'
@@ -711,6 +711,15 @@ export function GardenEditor(props: Props) {
 		[garden.elements, catalog],
 	)
 
+	const elBox = (e: any) => {
+		if (e.object === 'gaas' && e.gaas) {
+			const t = (e.widthM || 0.1) * 100
+			const x1 = Math.min(e.gaas.a.x, e.gaas.b.x) - t
+			const y1 = Math.min(e.gaas.a.y, e.gaas.b.y) - t
+			return { x: x1, y: y1, w: Math.abs(e.gaas.b.x - e.gaas.a.x) + t * 2, h: Math.abs(e.gaas.b.y - e.gaas.a.y) + t * 2 }
+		}
+		return { x: e.x, y: e.y, w: e.widthM * 100, h: e.heightM * 100 }
+	}
 	return (
 		<div className='ge-wrap'>
 			<header className='ge-header'>
@@ -1129,21 +1138,30 @@ export function GardenEditor(props: Props) {
 							setSelectedIds([id])
 							if (!el || el.type !== 'bed') setSelectedCropId(null)
 						}}
+						onSelectCrop={setSelectedCropId}
 						onBack={() => {
 							if (!selected) return
-							if (selected.type === 'bed') {
-								const veld = garden.elements.find((e) => e.type === 'veld')
+							if (selected.type !== 'veld') {
+								const veld = garden.elements.find(
+									(e) => e.type === 'veld' && e.id !== selected.id && inspectorElementInVeld(selected, e),
+								)
 								if (veld) {
 									setSelectedIds([veld.id])
+									setSelectedCropId(null)
+									return
+								}
+							} else {
+								const parent = garden.elements.find(
+									(e) => e.type === 'veld' && e.id !== selected.id && inspectorElementInVeld(selected, e),
+								)
+								if (parent) {
+									setSelectedIds([parent.id])
 									setSelectedCropId(null)
 									return
 								}
 							}
 							setSelectedIds([])
 							setSelectedCropId(null)
-						}}
-						onAddCrop={(cropId) => {
-							if (selected) onAddCrop(selected.id, cropId)
 						}}
 						onUpdateCrop={(iId, patch) =>
 							selected && onUpdateCrop(selected.id, iId, patch)

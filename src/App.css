@@ -1579,7 +1579,8 @@ select:focus {
   font-family: var(--font-display);
   font-size: 18px;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--primary);
 }
 /* zacht binnenkomen bij wisselen van lijst / element / gewas */
@@ -1678,10 +1679,14 @@ select:focus {
   margin-bottom: 12px;
 }
 
-.crop-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+.insp .icon-picker-grid {
+  grid-template-columns: repeat(auto-fill, 48px);
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.insp .icon-opt:active:not(:disabled) {
+  transform: none;
 }
 
 /* Stuk gewas bijplaatsen naast verwijderen */
@@ -2189,8 +2194,8 @@ select:focus {
 
 .icon-picker-label {
   display: block;
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--muted);
   margin-bottom: 6px;
 }
@@ -2203,36 +2208,48 @@ select:focus {
 
 .icon-opt {
   border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 10px;
+  background: var(--bg);
+  border-radius: 16px;
   padding: 0;
   aspect-ratio: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
 }
 
 .icon-opt .crop-icon {
-  font-size: 22px;
-  width: auto;
-  height: auto;
+  width: 30px;
+  height: 30px;
+  font-size: 26px;
+  flex: none;
 }
 
-.icon-opt:hover {
-  border-color: var(--accent);
-  transform: scale(1.08);
+.crop-picker-grid .crop-icon img,
+.icon-picker-grid .crop-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
-.icon-opt:active {
-  transform: scale(0.94);
+.icon-opt:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--ink) 24%, var(--line));
+  background: var(--bg);
+  transform: none;
 }
 
-.icon-opt-active {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-  background: var(--surface-2);
+.icon-opt:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.icon-opt-active,
+.icon-opt-active:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--sow-tint);
+  box-shadow: 0 0 0 3px var(--sow-tint);
+  transform: none;
 }
 
 /* --------- Plant database icon swatch ---------- */
@@ -2262,11 +2279,11 @@ select:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 10px;
 }
 
 .crop-chip-icon {
@@ -2279,24 +2296,38 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   width: 100%;
-  font-weight: 500;
-  font-size: 13px;
-  padding: 9px 12px;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.crops-open:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--surface);
 }
 
 .crops-open-count {
-  background: var(--accent);
-  color: var(--on-accent, #fff);
+  background: var(--primary);
+  color: var(--on-primary);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   border-radius: 999px;
   min-width: 20px;
   height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 6px;
+  padding: 0 7px;
+  font-variant-numeric: tabular-nums;
 }
 
 .crops-overlay {
@@ -2313,7 +2344,7 @@ select:focus {
 .crops-modal {
   width: 100%;
   max-width: 560px;
-  max-height: min(720px, 88vh);
+  max-height: min(600px, 82vh);
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -5204,7 +5235,7 @@ html {
     right: 0;
     bottom: 0;
     width: auto;
-    max-height: 88dvh;
+    max-height: 70dvh;
     z-index: 20;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -5218,11 +5249,15 @@ html {
   }
   .insp-grip {
     display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 5;
     justify-content: center;
     align-items: center;
-    height: 26px;
-    padding: 0 0 8px;
-    margin: 8px 0 0;
+    height: 34px;
+    padding: 8px 0;
+    margin: 0 -20px;
+    background: var(--surface);
     touch-action: none;
     cursor: grab;
     flex: none;
@@ -5238,7 +5273,7 @@ html {
     cursor: grabbing;
   }
   .insp.sheet-shut {
-    transform: translateY(calc(100% - 42px));
+    transform: translateY(calc(100% - 34px));
   }
 
   .insp-empty {
@@ -7592,7 +7627,7 @@ textarea:not(.pd-bare textarea):not(.pd-bare):not(.inp-num textarea):not(.pd-ran
   scrollbar-width: none;
 }
 .main-scrollbar.inner {
-  position: absolute;
+  position: fixed;
   width: 6px;
 }
 .main-scrollbar.inner .main-scrollbar-thumb {
@@ -8366,7 +8401,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   gap: 12px;
   grid-column: 1 / -1;
 }
-.crop-modal .step-, .insp .step-wrap {
+.crop-modal .step-wrap, .insp .step-wrap {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -8374,18 +8409,18 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   border: 1px solid var(--line);
   border-radius: 14px;
   min-height: 48px;
-  padding: 4px;
+  padding: 0 4px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.crop-modal .step-, .insp .step-wrap:hover {
+.crop-modal .step-wrap:hover, .insp .step-wrap:hover {
   border-color: color-mix(in srgb, var(--ink) 24%, var(--line));
 }
-.crop-modal .step-, .insp .step-wrap:focus-within {
+.crop-modal .step-wrap:focus-within, .insp .step-wrap:focus-within {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--sow-tint);
   outline: none;
 }
-.crop-modal .step-, .insp .step-input {
+.crop-modal .step-input, .insp .step-input {
   flex: 1;
   min-width: 0;
   border: 0;
@@ -8399,30 +8434,31 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   padding: 0;
   min-height: 40px;
 }
-.crop-modal .step-, .insp .step-input:focus,
-.crop-modal .step-, .insp .step-input:focus-visible {
+.crop-modal .step-input:focus, .insp .step-input:focus,
+.crop-modal .step-input:focus-visible, .insp .step-input:focus-visible {
   outline: none;
   border: 0;
   box-shadow: none;
 }
-.crop-modal .step-, .insp .step-input::-webkit-outer-spin-button,
-.crop-modal .step-, .insp .step-input::-webkit-inner-spin-button {
+.crop-modal .step-input::-webkit-outer-spin-button, .insp .step-input::-webkit-outer-spin-button,
+.crop-modal .step-input::-webkit-inner-spin-button, .insp .step-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-.crop-modal .step-, .insp .step-input[type="number"] {
+.crop-modal .step-input[type="number"], .insp .step-input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
-.crop-modal .step-, .insp .step-suffix {
+.crop-modal .step-suffix, .insp .step-suffix {
   color: var(--ink-soft);
   font-size: 13px;
   flex: none;
 }
-.crop-modal .step-, .insp .step-btn {
+.crop-modal .step-btn, .insp .step-btn {
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 0;
   border-radius: 10px;
   background: transparent;
@@ -8434,20 +8470,20 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   justify-content: center;
   transition: color 0.15s ease, background-color 0.15s ease;
 }
-.crop-modal .step-, .insp .step-btn:hover:not(:disabled) {
+.crop-modal .step-btn:hover:not(:disabled), .insp .step-btn:hover:not(:disabled) {
   color: var(--primary);
   background: transparent;
 }
-.crop-modal .step-, .insp .step-btn:active:not(:disabled) {
+.crop-modal .step-btn:active:not(:disabled), .insp .step-btn:active:not(:disabled) {
   transform: none;
 }
 @media (max-width: 700px) {
-  .crop-modal .step-, .insp .step-btn {
+  .crop-modal .step-btn, .insp .step-btn {
     width: 36px;
     height: 36px;
   }
-  .crop-modal .color-, .insp .color-dot,
-  .crop-modal .color-, .insp .color-custom {
+  .crop-modal .color-dot, .insp .color-dot,
+  .crop-modal .color-custom, .insp .color-custom {
     max-width: 32px;
   }
 }
@@ -8487,7 +8523,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
     padding: 12px 20px calc(16px + env(safe-area-inset-bottom));
   }
 }
-.crop-modal .color-, .insp .color-row {
+.crop-modal .color-row, .insp .color-row {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -8546,7 +8582,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   color: var(--ink-soft);
   flex: none;
 }
-.crop-modal .color-, .insp .color-dot {
+.crop-modal .color-dot, .insp .color-dot {
   flex: 1 1 0;
   min-width: 0;
   max-width: 36px;
@@ -8557,19 +8593,20 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   cursor: pointer;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  will-change: transform, box-shadow;
 }
-.crop-modal .color-, .insp .color-dot:hover:not(:disabled) {
+.crop-modal .color-dot:hover:not(:disabled), .insp .color-dot:hover:not(:disabled) {
   border-color: transparent;
   transform: scale(1.08);
 }
-.crop-modal .color-, .insp .color-dot:active:not(:disabled) {
+.crop-modal .color-dot:active:not(:disabled), .insp .color-dot:active:not(:disabled) {
   transform: none;
 }
-.crop-modal .color-, .insp .color-dot.is-active {
+.crop-modal .color-dot.is-active, .insp .color-dot.is-active {
   border-color: var(--primary);
   box-shadow: none;
 }
-.crop-modal .color-, .insp .color-custom {
+.crop-modal .color-custom, .insp .color-custom {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
@@ -8587,7 +8624,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
-.crop-modal .color-, .insp .color-custom input[type="color"] {
+.crop-modal .color-custom, .insp .color-custom input[type="color"] {
   position: absolute;
   inset: 0;
   width: 100%;

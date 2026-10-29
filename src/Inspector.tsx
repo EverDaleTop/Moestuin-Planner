@@ -22,9 +22,9 @@ interface Props {
   onUpdate: (patch: Partial<GardenElement>) => void;
   onRemove: () => void;
   onSelectElement: (id: string) => void;
+  onSelectCrop: (instanceId: string) => void;
   onBack?: () => void;
   onToggleSelectElement?: (id: string) => void;
-  onSelectCrop?: (iId: string) => void;
   onAddCrop?: (cropId: string) => void;
   onUpdateCrop: (
     iId: string,
@@ -37,7 +37,6 @@ interface Props {
   activeCropId: string | null;
   onSelectActiveCrop: (cropId: string) => void;
 }
-
 
 function elementBox(e: GardenElement): { x: number; y: number; w: number; h: number } {
   if (e.object === "gaas" && e.gaas) {
@@ -54,7 +53,6 @@ function elementBox(e: GardenElement): { x: number; y: number; w: number; h: num
   return { x: e.x, y: e.y, w: e.widthM * PX_PER_M, h: e.heightM * PX_PER_M };
 }
 
-
 function elementInVeld(e: GardenElement, v: GardenElement): boolean {
   if (e.id === v.id) return false;
   const m = 4;
@@ -68,6 +66,9 @@ function elementInVeld(e: GardenElement, v: GardenElement): boolean {
   );
 }
 
+export function inspectorElementInVeld(e: GardenElement, v: GardenElement): boolean {
+  return elementInVeld(e, v)
+}
 
 function elementKindName(el: GardenElement): string {
   if (el.type === "bed") return "Bed";
@@ -77,7 +78,6 @@ function elementKindName(el: GardenElement): string {
   return objectDef(el.object)?.name ?? "Voorwerp";
 }
 
-
 function elementIconClass(el: GardenElement): string {
   if (el.type === "bed") return "fa-solid fa-table-cells-large";
   if (el.type === "path") return "fa-solid fa-road";
@@ -85,7 +85,6 @@ function elementIconClass(el: GardenElement): string {
   if (el.object === "gaas") return "fa-solid fa-table-cells";
   return objectDef(el.object)?.icon ?? "fa-solid fa-cube";
 }
-
 
 function ElementList({
   elements,
@@ -231,7 +230,6 @@ function ColorField({
     </div>
   );
 }
-
 
 export function CropSelect({
   value,
@@ -408,7 +406,6 @@ export function CropSelect({
     </div>
   );
 }
-
 
 function CropRow({
   a,
@@ -648,16 +645,14 @@ export function Inspector({
   onUpdate,
   onRemove,
   onSelectElement,
+  onSelectCrop,
   onBack,
-  onAddCrop,
   onUpdateCrop,
   onRemoveCrop,
   onDuplicateCrop,
   onDeselectCrop,
   activeCropId,
-  onSelectActiveCrop,
 }: Props) {
-  const [cropsOpen, setCropsOpen] = useState(false);
   const [sheetShut, setSheetShut] = useState(false);
   const dragStartY = useRef(0);
   const dragOffsetRef = useRef(0);
@@ -696,12 +691,19 @@ export function Inspector({
     if (!sheetShut && off > 90) {
       setSheetShut(true);
       setDragOffset(0);
-    } else if (sheetShut && off < -60) {
+      return;
+    }
+    if (sheetShut && off < -60) {
       setSheetShut(false);
       setDragOffset(0);
-    } else {
-      setDragOffset(0);
+      return;
     }
+    if (sheetShut && Math.abs(off) < 10) {
+      setSheetShut(false);
+      setDragOffset(0);
+      return;
+    }
+    setDragOffset(0);
   };
   const sheetStyle =
     dragging || dragOffset !== 0
@@ -920,78 +922,33 @@ export function Inspector({
 
       {element.type === "bed" && (
         <section className="insp-crops">
-          <h4>Gewassen</h4>
-
-          {}
-          <div className="insp-pick-crop">
-            <span className="icon-picker-label">Gewas om te tekenen</span>
-            <div className="crop-picker-grid">
-              {catalog.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  title={c.name}
-                  aria-label={c.name}
-                  aria-pressed={c.id === activeCropId}
-                  className={
-                    c.id === activeCropId ? "icon-opt icon-opt-active" : "icon-opt"
-                  }
-                  onClick={() => onSelectActiveCrop(c.id)}
-                >
-                  <CropGlyph iconKey={c.icon} cropName={c.name} label={c.name} color={c.color} />
-                </button>
-              ))}
-            </div>
-          </div>
-          {catalog.length === 0 && (
-            <p className="insp-hint">Voeg eerst een gewas toe aan je database.</p>
-          )}
-
+          <span className="icon-picker-label">Gewassen</span>
           {element.crops.length === 0 ? (
-            <p className="insp-hint">
-              Nog geen gewassen. Kies hierboven een gewas en sleep in het bed om
-              een stuk te tekenen.
-            </p>
+            <p className="insp-hint">Nog geen gewassen in dit bed.</p>
           ) : (
-            <div className="crop-chips">
+            <div className="icon-picker-grid insp-crop-grid">
               {element.crops.map((c) => {
                 const crop = cropById.get(c.cropId);
                 return (
-                  <span key={c.instanceId} className="crop-chip">
+                  <button
+                    key={c.instanceId}
+                    type="button"
+                    title={crop ? cropLabel(crop) : "Gewas"}
+                    aria-label={crop ? cropLabel(crop) : "Gewas"}
+                    className="icon-opt"
+                    onClick={() => onSelectCrop(c.instanceId)}
+                  >
                     <CropGlyph
                       iconKey={crop?.icon}
                       cropName={crop?.name}
-                      className="crop-chip-icon"
                       color={crop?.color}
                     />
-                  </span>
+                  </button>
                 );
               })}
             </div>
           )}
-
-          <button
-            type="button"
-            className="crops-open"
-            onClick={() => setCropsOpen(true)}
-          >
-            <span><i className="fa-solid fa-seedling" /> Gewassen beheren</span>
-            <span className="crops-open-count">{element.crops.length}</span>
-          </button>
         </section>
-      )}
-
-      {cropsOpen && (
-        <CropsModal
-          bed={element}
-          catalog={catalog}
-          cropById={cropById}
-          onClose={() => setCropsOpen(false)}
-          onAddCrop={onAddCrop}
-          onUpdateCrop={onUpdateCrop}
-          onRemoveCrop={onRemoveCrop}
-          onDuplicateCrop={onDuplicateCrop}
-        />
       )}
 
       <section className="insp-all">
@@ -1058,118 +1015,3 @@ function Nudge({
   );
 }
 
-function CropsModal({
-  bed,
-  catalog,
-  cropById,
-  onClose,
-  onAddCrop,
-  onUpdateCrop,
-  onRemoveCrop,
-  onDuplicateCrop,
-}: {
-  bed: GardenElement;
-  catalog: Crop[];
-  cropById: Map<string, Crop>;
-  onClose: () => void;
-  onAddCrop?: (cropId: string) => void;
-  onUpdateCrop: (
-    iId: string,
-    patch: Partial<CropAssignment>
-  ) => void;
-  onRemoveCrop: (iId: string) => void;
-  onDuplicateCrop: (iId: string) => void;
-}) {
-  const [addQ, setAddQ] = useState("");
-  const query = addQ.trim().toLowerCase();
-  const counts = new Map<string, number>();
-  for (const a of bed.crops) counts.set(a.cropId, (counts.get(a.cropId) ?? 0) + 1);
-  const added =
-    query.length === 0
-      ? catalog
-      : catalog.filter((c) => c.name.toLowerCase().includes(query));
-
-  return (
-    <div
-      className="crops-overlay"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="crops-modal" onClick={(e) => e.stopPropagation()}>
-        <header className="crops-modal-head">
-          <div>
-            <h3>Gewassen</h3>
-            <p className="crops-modal-sub">
-              {bed.label} · {bed.crops.length}{" "}
-              {bed.crops.length === 1 ? "gewas" : "gewassen"}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="crops-close"
-            onClick={onClose}
-            aria-label="Sluiten"
-          >
-            <i className="fa-solid fa-xmark" />
-          </button>
-        </header>
-
-        <div className="crops-active">
-          {bed.crops.length === 0 && (
-            <p className="insp-hint">
-              Nog geen gewassen. Voeg hieronder een toe.
-            </p>
-          )}
-          {bed.crops.map((a) => (
-            <CropRow
-              key={a.instanceId}
-              a={a}
-              crop={cropById.get(a.cropId)}
-              bed={bed}
-              catalog={catalog}
-              onUpdateCrop={onUpdateCrop}
-              onRemoveCrop={onRemoveCrop}
-              onDuplicateCrop={onDuplicateCrop}
-            />
-          ))}
-        </div>
-
-        <div className="crops-add">
-          <h4>Gewas toevoegen</h4>
-          <input
-            className="cp-search"
-            value={addQ}
-            onChange={(e) => setAddQ(e.target.value)}
-            placeholder="Zoek gewas…"
-          />
-          <div className="crops-add-list">
-            {added.map((c) => {
-              const n = counts.get(c.id) ?? 0;
-              return (
-                <button
-                  type="button"
-                  key={c.id}
-                  className="crops-add-item"
-                  onClick={() => onAddCrop?.(c.id)}
-                >
-                <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
-                  <span className="crops-add-name">{cropLabel(c)}</span>
-                  {n > 0 && (
-                    <span className="crops-add-count" title={`Al ${n}× in dit bed`}>
-                      {n}×
-                    </span>
-                  )}
-                  <span className="crops-add-plus"><i className="fa-solid fa-plus" /></span>
-                </button>
-              );
-            })}
-            {added.length === 0 && (
-              <div className="cp-empty">Geen resultaten.</div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
