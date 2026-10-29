@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Crop, CropAssignment, GardenElement } from "./types";
 import { fmtM, PX_PER_M } from "./storage";
@@ -244,6 +244,7 @@ export function CropSelect({
   const [closing, setClosing] = useState(false);
   const [query, setQuery] = useState("");
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const [above, setAbove] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -265,10 +266,14 @@ export function CropSelect({
   const measure = () => {
     const el = triggerRef.current;
     if (!el) return;
+    const GAP = 6;
     const r = el.getBoundingClientRect();
     const width = Math.max(r.width, 220);
     const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-    setPos({ top: r.bottom + 4, left, width });
+    const estH = Math.min(76 + catalog.length * 41, 360, window.innerHeight * 0.6);
+    const flip = r.bottom + GAP + estH > window.innerHeight && r.top - GAP - estH >= 0;
+    setAbove(flip);
+    setPos({ top: flip ? Math.max(8, r.top - GAP - estH) : r.bottom + GAP, left, width });
   };
 
   useLayoutEffect(() => {
@@ -319,7 +324,7 @@ export function CropSelect({
   const closeIfOutside = (e: React.MouseEvent) => {
     const next = e.relatedTarget as Node | null;
     const pop = document.getElementById("cropselect-portal");
-    if (next && (triggerRef.current?.contains(next) || pop?.contains(next))) return;
+    if (next instanceof Node && (triggerRef.current?.contains(next) || pop?.contains(next))) return;
     window.clearTimeout(closeTimer.current ?? undefined);
     closeTimer.current = window.setTimeout(() => requestClose(), 150);
   };
@@ -348,7 +353,7 @@ export function CropSelect({
         aria-expanded={open}
         title="Ander gewas kiezen"
       >
-        <CropGlyph iconKey={current?.icon} cropName={current?.name} color={current?.color} />
+        <CropGlyph iconKey={current?.icon} cropName={current?.name} />
         <span className="catdd-current">
                   {current ? cropLabel(current) : value}
                 </span>
@@ -358,7 +363,7 @@ export function CropSelect({
         createPortal(
           <div
             id="cropselect-portal"
-            className={`catdd-pop catdd-pop-portal scopedd-pop${closing ? " closing" : ""}`}
+            className={`catdd-pop catdd-pop-portal scopedd-pop${closing ? " closing" : ""}${above ? " catdd-pop-above" : ""}`}
             role="listbox"
             aria-label="Gewas kiezen"
             style={{ top: pos.top, left: pos.left, width: pos.width }}
@@ -379,6 +384,7 @@ export function CropSelect({
                 aria-label="Zoek gewas"
               />
             )}
+            <div className="scopedd-list">
             {options.map((c) => (
               <button
                 key={c.id}
@@ -386,13 +392,12 @@ export function CropSelect({
                 role="option"
                 aria-selected={c.id === value}
                 className={c.id === value ? "catdd-item is-active" : "catdd-item"}
-                style={c.color ? ({ "--crop-color": c.color } as CSSProperties) : undefined}
                 onClick={() => {
                   onChange(c.id);
                   requestClose();
                 }}
               >
-                  <CropGlyph iconKey={c.icon} cropName={c.name} color={c.color} />
+                  <CropGlyph iconKey={c.icon} cropName={c.name} />
                 <span className="catdd-name">{cropLabel(c)}</span>
                 {c.id === value && <i className="fa-solid fa-check catdd-check" />}
               </button>
@@ -400,6 +405,7 @@ export function CropSelect({
             {options.length === 0 && (
               <div className="cp-empty">Geen resultaten.</div>
             )}
+            </div>
           </div>,
           document.body
         )}
@@ -413,7 +419,6 @@ function CropRow({
   bed,
   catalog,
   onUpdateCrop,
-  onRemoveCrop,
   onDuplicateCrop,
 }: {
   a: CropAssignment;
@@ -421,7 +426,6 @@ function CropRow({
   bed: GardenElement;
   catalog: Crop[];
   onUpdateCrop: (iId: string, patch: Partial<CropAssignment>) => void;
-  onRemoveCrop: (iId: string) => void;
   onDuplicateCrop?: (iId: string) => void;
 }) {
   const area = a.area ?? { x: 0, y: 0, w: bed.widthM, h: bed.heightM };
@@ -515,17 +519,9 @@ function CropRow({
   };
 
   return (
-    <div className="crop-card">
+    <div className="crop-card-view">
       <div className="crop-card-head">
         <CropSelect value={a.cropId} catalog={catalog} onChange={switchCrop} />
-        <button
-          type="button"
-          className="crop-row-remove"
-          title="Gewas uit dit bed verwijderen"
-          onClick={() => onRemoveCrop(a.instanceId)}
-        >
-          <i className="fa-solid fa-trash" />
-        </button>
       </div>
 
       <dl className="crop-stats">
@@ -779,7 +775,7 @@ export function Inspector({
           onPointerCancel={endGripDrag}
         />
         <div className="insp-view" key={crop.instanceId}>
-        <div className="insp-crop-head">
+        <header className="insp-head">
           <button
             type="button"
             className="btn-ghost insp-back"
@@ -789,8 +785,32 @@ export function Inspector({
           >
             <i className="fa-solid fa-arrow-left" />
           </button>
-          <div className="insp-size">Gewas in {element.label}</div>
-        </div>
+          <span
+            className="insp-dot insp-dot-crop"
+            title={cropInfo ? cropLabel(cropInfo) : undefined}
+          >
+            <CropGlyph
+              iconKey={cropInfo?.icon}
+              cropName={cropInfo ? cropLabel(cropInfo) : undefined}
+            />
+          </span>
+          <div className="insp-title">
+            <span className="insp-kind">{cropInfo ? cropLabel(cropInfo) : "Gewas"}</span>
+            <span className="insp-size">in {element.label}</span>
+          </div>
+          <button
+            type="button"
+            className="btn-ghost insp-back insp-remove"
+            onClick={() => {
+              onRemoveCrop(crop.instanceId);
+              onDeselectCrop();
+            }}
+            aria-label="Gewas verwijderen"
+            title="Verwijderen"
+          >
+            <i className="fa-solid fa-trash" />
+          </button>
+        </header>
 
         <div className="insp-crop-body">
           <CropRow
@@ -799,10 +819,6 @@ export function Inspector({
             bed={element}
             catalog={catalog}
             onUpdateCrop={onUpdateCrop}
-            onRemoveCrop={(iId) => {
-              onRemoveCrop(iId);
-              onDeselectCrop();
-            }}
             onDuplicateCrop={onDuplicateCrop}
           />
         </div>

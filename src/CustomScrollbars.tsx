@@ -24,13 +24,14 @@ interface Bar {
   thumbHeight: number;
   thumbTop: number;
   inner: boolean;
+  popup: boolean;
 }
 
 function collectCandidates(pageMode: boolean): HTMLElement[] {
   const out: HTMLElement[] = [];
   const selector = pageMode
     ? "body, body *"
-    : ".sow-modal, .sow-modal *, .insp, .insp *";
+    : ".sow-modal, .sow-modal *, .insp, .insp *, .catdd-pop, .catdd-pop *";
   for (const el of document.querySelectorAll<HTMLElement>(selector)) {
     if (!el.isConnected) continue;
     if (pageMode && (el === document.body || el === document.documentElement)) continue;
@@ -68,6 +69,8 @@ export function CustomScrollbars() {
       if (maxScroll <= 1) continue;
       const shell = el.closest(".sow-modal, .insp") as HTMLElement | null;
       const inner = shell !== null;
+      const popupEl = el.closest(".catdd-pop") as HTMLElement | null;
+      const popup = popupEl !== null;
       const id = idOf(el);
       map.set(id, el);
 
@@ -87,14 +90,16 @@ export function CustomScrollbars() {
         MIN_THUMB,
         Math.min(trackH, (trackH * el.clientHeight) / el.scrollHeight),
       );
+      const popupRect = popupEl?.getBoundingClientRect();
       next.push({
         id,
-        top: r.top + (inner ? 12 : 0),
-        height: trackH,
-        right: Math.max(0, window.innerWidth - r.right) + 4,
+        top: popup && popupRect ? r.top - popupRect.top : r.top + (inner ? 12 : 0),
+        height: popup ? r.height : trackH,
+        right: popup ? 4 : Math.max(0, window.innerWidth - r.right) + 4,
         thumbHeight,
         thumbTop: (el.scrollTop / maxScroll) * (trackH - thumbHeight),
         inner,
+        popup,
       });
     }
     byId.current = map;
@@ -205,28 +210,37 @@ export function CustomScrollbars() {
 
   return (
     <>
-      {bars.map((bar) => (
-        <div
-          key={bar.id}
-          id={`mainScrollbar-${bar.id}`}
-          className={bar.inner ? "main-scrollbar inner" : "main-scrollbar"}
-          style={{ top: bar.top, height: bar.height, right: bar.right }}
-          aria-hidden="true"
-        >
+      {bars.map((bar) => {
+        const node = (
           <div
-            id={`mainScrollbarThumb-${bar.id}`}
-            className="main-scrollbar-thumb"
-            style={{ height: bar.thumbHeight, transform: `translateY(${bar.thumbTop}px)` }}
-            onPointerDown={(e) => {
-              const el = byId.current.get(bar.id);
-              if (!el) return;
-              e.preventDefault();
-              drag.current = { el, startY: e.clientY, startTop: el.scrollTop };
-              document.body.style.userSelect = "none";
-            }}
-          />
-        </div>
-      ))}
+            key={bar.id}
+            id={`mainScrollbar-${bar.id}`}
+            className={`main-scrollbar${bar.inner ? " inner" : ""}${bar.popup ? " popup" : ""}`}
+            style={{ top: bar.top, height: bar.height, right: bar.right }}
+            aria-hidden="true"
+          >
+            <div
+              id={`mainScrollbarThumb-${bar.id}`}
+              className="main-scrollbar-thumb"
+              style={{ height: bar.thumbHeight, transform: `translateY(${bar.thumbTop}px)` }}
+              onPointerDown={(e) => {
+                const el = byId.current.get(bar.id);
+                if (!el) return;
+                e.preventDefault();
+                drag.current = { el, startY: e.clientY, startTop: el.scrollTop };
+                document.body.style.userSelect = "none";
+              }}
+            />
+          </div>
+        );
+        if (bar.popup) {
+          const el = byId.current.get(bar.id);
+          const host = el?.closest(".catdd-pop") as HTMLElement | null;
+          if (!host) return null;
+          return createPortal(node, host);
+        }
+        return node;
+      })}
     </>
   );
 }

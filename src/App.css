@@ -1705,15 +1705,23 @@ select:focus {
 }
 
 /* Overzichtelijke gewaskaart (vervangt het rommelige crop-row blokje) */
-.crop-card {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface-1, transparent);
-  padding: 14px;
+.crop-card-view {
   display: flex;
   flex-direction: column;
   gap: 14px;
   margin: 10px 0;
+}
+
+.crop-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 10px 0;
+  box-shadow: var(--shadow);
 }
 
 .crop-card-head {
@@ -1734,19 +1742,27 @@ select:focus {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
-  font-weight: 700;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 0 16px;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface);
   color: var(--ink);
   cursor: pointer;
   text-align: left;
 }
 
 .crop-select-btn:hover {
-  border-color: var(--accent);
+  border-color: var(--primary);
+  background: var(--surface);
+}
+
+.crop-select-btn:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--sow-tint);
 }
 
 .crop-select-btn .crop-icon {
@@ -1763,9 +1779,9 @@ select:focus {
 }
 
 .crop-select-caret {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
-  transition: transform 0.15s;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   flex: none;
 }
 
@@ -1779,14 +1795,15 @@ select:focus {
   left: 0;
   right: 0;
   z-index: 60;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow-lg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow);
   padding: 6px;
   min-width: 220px;
-  transform-origin: 50% 0;
-  animation: crop-select-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: top center;
+  animation: catdd-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
 }
 
 @keyframes crop-select-in {
@@ -1809,13 +1826,20 @@ select:focus {
 .crop-select-search {
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 10px;
+  padding: 10px 12px;
   margin-bottom: 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 13px;
-  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--surface);
   color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.crop-select-search:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--sow-tint);
 }
 
 .crop-select-list {
@@ -1855,27 +1879,32 @@ select:focus {
 .crop-select-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
+  padding: 9px 11px;
   border: 1px solid transparent;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
+  border-radius: 9px;
   background: transparent;
   color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.crop-select-item:hover {
-  background: var(--surface-2);
-  border-color: var(--border);
+.crop-select-item:hover:not(:disabled) {
+  background: var(--sow-tint);
+  border-color: transparent;
+  color: var(--primary);
 }
 
-.crop-select-item.selected {
-  background: var(--surface-2);
-  border-color: var(--accent);
+.crop-select-item.selected,
+.crop-select-item.selected:hover:not(:disabled) {
+  background: var(--primary);
+  border-color: transparent;
+  color: var(--on-primary);
+  font-weight: 700;
 }
 
 .crop-select-item .crop-icon {
@@ -1907,8 +1936,9 @@ select:focus {
 .crop-stat {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 9px 12px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-width: 0;
 }
 
 .crop-stat dt {
@@ -1921,10 +1951,11 @@ select:focus {
 
 .crop-stat dd {
   margin: 4px 0 0;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 
 .crop-sec {
@@ -1934,25 +1965,25 @@ select:focus {
 
 .crop-sec h5 {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--ink);
+  letter-spacing: 0.06em;
+  color: var(--muted);
   display: flex;
   align-items: center;
   gap: 7px;
 }
 
 .crop-sec h5 i {
-  color: var(--accent);
-  font-size: 12px;
+  color: var(--primary);
+  font-size: 11px;
 }
 
 .crop-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
 }
 
 .crop-grid-3 {
@@ -2412,17 +2443,19 @@ select:focus {
 }
 
 .crop-row-remove {
-  border: none;
+  border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 13px;
-  padding: 4px 7px;
-  border-radius: 7px;
+  padding: 6px 8px;
+  border-radius: 8px;
   line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease;
 }
 
-.crop-row-remove:hover {
-  background: var(--surface-2);
+.crop-row-remove:hover:not(:disabled) {
+  background: transparent;
   color: var(--danger);
 }
 
@@ -2465,46 +2498,60 @@ select:focus {
 }
 
 .nudge-label {
-  font-size: 10px;
-  font-weight: 500;
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  margin-bottom: 6px;
 }
 
 .nudge-controls {
   display: flex;
   align-items: center;
   gap: 2px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  min-height: 48px;
+  padding: 4px;
 }
 
 .nudge-controls button {
-  border: none;
+  border: 0;
   background: transparent;
   padding: 0;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 10px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--ink-soft);
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
 
 .nudge-controls button:hover:not(:disabled) {
-  background: var(--panel);
-  color: var(--ink);
+  background: transparent;
+  color: var(--primary);
+}
+
+.nudge-controls button:active:not(:disabled) {
+  transform: none;
 }
 
 .nudge-value {
-  min-width: 40px;
+  flex: 1;
+  min-width: 0;
   text-align: center;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
 }
 
 .crops-add {
@@ -3085,21 +3132,55 @@ select:focus {
 .catdd-pop button.catdd-item .catdd-check {
   margin-left: auto;
 }
-/* actief item: icoon in een rondje met de gewaskleur als achtergrond */
-.catdd-pop .catdd-item.is-active .crop-icon {
-  width: 32px;
-  height: 32px;
-  flex: none;
+
+.scopedd-pop {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 6px;
+}
+.main-scrollbar.popup {
+  position: absolute;
+  width: 6px;
+  z-index: 5;
+}
+.main-scrollbar.popup .main-scrollbar-thumb {
+  width: 6px;
+}
+.scopedd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  max-height: min(320px, 52dvh);
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.scopedd-list::-webkit-scrollbar {
+  display: none;
+}
+.insp-dot-crop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--crop-color, var(--sow-tint));
-  font-size: 20px;
-  line-height: 1;
+  background: var(--sow-tint);
+  color: var(--primary);
+  box-shadow: none;
   overflow: hidden;
-  padding: 3px;
-  box-sizing: border-box;
+  font-size: 20px;
+}
+.insp-dot-crop .crop-icon,
+.insp-dot-crop img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.catdd-pop .catdd-item.is-active .crop-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  font-size: 20px;
 }
 /* dropdown in een formulierveld: altijd volle breedte, label boven trigger */
 .shop-form-field .catdd {
@@ -3122,20 +3203,18 @@ select:focus {
   grid-column: 1 / -1;
 }
 .catdd-pop .crop-select-search {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   width: 100%;
-  margin: 2px 2px 8px;
+  margin: 0 0 8px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 0 16px;
-  min-height: 48px;
-  font: 500 16px/24px 'DM Sans', sans-serif;
+  border-radius: 12px;
+  padding: 0 14px;
+  min-height: 44px;
+  font: 500 15px/24px 'DM Sans', sans-serif;
   color: var(--ink);
   background: var(--surface);
   caret-color: var(--ink);
   box-sizing: border-box;
+  flex: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .catdd-pop .crop-select-search:focus {
