@@ -7,17 +7,12 @@ interface DateFieldProps {
   onChange: (value: string) => void;
 }
 
-/** "2026-03-14" -> "14 maart 2026" */
+/** "2026-03-14" -> "14/03/2026" */
 function humanDate(iso: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   const [y, m, d] = iso.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("nl-NL", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d)}/${pad(m)}/${y}`;
 }
 
 function toISO(y: number, m: number, d: number): string {
@@ -104,7 +99,7 @@ export function DateField({ id, value, onChange }: DateFieldProps) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <span>{value ? humanDate(value) : "Kies een datum"}</span>
+        <span data-empty={!value ? true : undefined}>{value ? humanDate(value) : "dd/mm/jjjj"}</span>
         <i
           className={`fa-solid fa-calendar-day${open ? " open" : ""}`}
           aria-hidden="true"

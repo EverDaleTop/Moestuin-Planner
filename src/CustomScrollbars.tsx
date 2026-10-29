@@ -50,7 +50,9 @@ interface Bar {
 /** Alle elementen met een verticale scroll-container (ongeacht overflow). */
 function collectCandidates(pageMode: boolean): HTMLElement[] {
   const out: HTMLElement[] = [];
-  const selector = pageMode ? "body, body *" : ".sow-modal, .sow-modal *";
+  const selector = pageMode
+    ? "body, body *"
+    : ".sow-modal, .sow-modal *, .insp, .insp *";
   for (const el of document.querySelectorAll<HTMLElement>(selector)) {
     if (!el.isConnected) continue;
     if (pageMode && (el === document.body || el === document.documentElement)) continue;
@@ -89,13 +91,21 @@ export function CustomScrollbars() {
       if (maxScroll <= 1) continue;
       const id = idOf(el);
       map.set(id, el);
-      const inner = !!el.closest(".sow-modal");
-      const shell = inner ? (el.closest(".sow-modal") as HTMLElement) : null;
+      const shell = el.closest(".sow-modal, .insp") as HTMLElement | null;
+      const inner = shell !== null;
       const trackH = inner ? r.height - 24 : r.height;
       const thumbHeight = Math.max(
         MIN_THUMB,
         Math.min(trackH, (trackH * el.clientHeight) / el.scrollHeight),
       );
+      let relTop = 0;
+      if (inner && shell && shell !== el) {
+        let n: HTMLElement | null = el;
+        while (n && n !== shell) {
+          relTop += n.offsetTop;
+          n = n.offsetParent as HTMLElement | null;
+        }
+      }
       next.push({
         id,
         top: r.top,
@@ -104,7 +114,7 @@ export function CustomScrollbars() {
         thumbHeight,
         thumbTop: (el.scrollTop / maxScroll) * (trackH - thumbHeight),
         inner,
-        innerTop: shell ? r.top - shell.getBoundingClientRect().top + 12 : 0,
+        innerTop: inner ? relTop + el.scrollTop + 12 : 0,
       });
     }
     byId.current = map;

@@ -22,16 +22,23 @@ export function CategoryDropdown({ categories, value, onChange, label, id, noIco
   const [closing, setClosing] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const [above, setAbove] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   const measure = () => {
     const el = triggerRef.current;
     if (!el) return;
+    const GAP = 6;
     const r = el.getBoundingClientRect();
     const width = Math.max(r.width, 200);
     // clampen met de menubreedte, zodat het menu nooit buiten beeld steekt
     const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-    setPos({ top: r.bottom + 6, left, width });
+    // geschatte menuhoogte: padding + items, gemaximeerd zoals de CSS (320px / 60dvh)
+    const estMenuH = Math.min(12 + categories.length * 41, 320, window.innerHeight * 0.6);
+    // past het omlaag niet maar omhoog wel, dan boven de trigger uitklappen
+    const flip = r.bottom + GAP + estMenuH > window.innerHeight && r.top - GAP - estMenuH >= 0;
+    setAbove(flip);
+    setPos({ top: flip ? Math.max(8, r.top - GAP - estMenuH) : r.bottom + GAP, left, width });
   };
 
   useLayoutEffect(() => {
@@ -136,7 +143,7 @@ export function CategoryDropdown({ categories, value, onChange, label, id, noIco
         createPortal(
           <ul
             id="catdd-portal"
-            className={`catdd-pop catdd-pop-portal${closing ? " closing" : ""}`}
+            className={`catdd-pop catdd-pop-portal${closing ? " closing" : ""}${above ? " catdd-pop-above" : ""}`}
             role="listbox"
             aria-label={label ?? "Categorie"}
             style={{ top: pos.top, left: pos.left, width: Math.max(pos.width, 200) }}

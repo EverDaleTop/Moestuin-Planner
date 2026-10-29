@@ -9,7 +9,7 @@ import {
 	type ExpenseCategory,
 } from './expenseCategories'
 import { CategoryDropdown } from './CategoryDropdown'
-import { DateField } from './DateField'
+import { ExpenseFormModal, type ExpenseFormData } from './ExpenseFormModal'
 
 type Mode = 'uit' | 'in'
 
@@ -38,12 +38,13 @@ function todayStr(): string {
 }
 
 function fmtEuro(v: number): string {
-	return `€${v.toFixed(2)}`
+	return `€${v.toFixed(2).replace('.', ',')}`
 }
 
-/** "+€12,50" voor inkomsten, "€12,50" voor uitgaven */
+/** "+€12,50" voor inkomsten, "-€12,50" bij negatief, anders "€12,50" */
 function fmtSigned(v: number, mode: Mode): string {
-	return mode === 'in' ? `+${fmtEuro(v)}` : fmtEuro(v)
+	const sign = v < 0 ? '-' : mode === 'in' ? '+' : ''
+	return `${sign}${fmtEuro(Math.abs(v))}`
 }
 
 /** "2026-03" -> "maart 2026" */
@@ -99,15 +100,10 @@ export function ExpensesView({
 	onUpdateIncome,
 	onRemoveIncome,
 }: Props) {
-	const form = useCollapseForm()
+	const sheet = useCollapseForm()
 	const [mode, setMode] = useState<Mode>('uit')
-	const [editingId, setEditingId] = useState<string | null>(null)
+	const [editEntry, setEditEntry] = useState<Entry | null>(null)
 	const [q, setQ] = useState('')
-
-	const [desc, setDesc] = useState('')
-	const [amount, setAmount] = useState('')
-	const [date, setDate] = useState(todayStr())
-	const [category, setCategory] = useState(EXPENSE_CATEGORIES[0].key)
 	/** filter op categorie; '' = alles */
 	const [catFilter, setCatFilter] = useState('')
 
@@ -132,8 +128,8 @@ export function ExpensesView({
 	const switchMode = (m: Mode) => {
 		setMode(m)
 		setCatFilter('')
-		resetForm()
-		if (form.open) form.closeForm()
+		setEditEntry(null)
+		sheet.closeForm()
 	}
 
 	/** gegroepeerd per maand, nieuwste maand eerst */
@@ -178,38 +174,27 @@ export function ExpensesView({
 	}, [activeList, mode])
 	const hasCharts = expenses.length > 0 || incomes.length > 0
 
-	const resetForm = () => {
-		setDesc('')
-		setAmount('')
-		setDate(todayStr())
-		setCategory((isUit ? EXPENSE_CATEGORIES : INCOME_CATEGORIES)[0].key)
-		setEditingId(null)
+	const openNew = () => {
+		setEditEntry(null)
+		sheet.openForm()
 	}
-
 	const startEdit = (e: Entry) => {
-		setEditingId(e.id)
-		setDesc(e.description)
-		setAmount(String(e.amount))
-		setDate(e.date)
-		setCategory(resolve(e).key)
-		form.openForm()
+		setEditEntry(e)
+		sheet.openForm()
 	}
-
-	const canSave = desc.trim().length > 0 && parseFloat(amount) > 0
-
-	const submit = () => {
-		if (!canSave) return
-		const value = parseFloat(amount)
-		if (editingId) {
-			if (isUit) onUpdate(editingId, { description: desc.trim(), amount: value, date, category })
-			else onUpdateIncome(editingId, { description: desc.trim(), amount: value, date, category })
-			setEditingId(null)
+	const closeForm = () => {
+		setEditEntry(null)
+		sheet.closeForm()
+	}
+	const saveForm = (data: ExpenseFormData) => {
+		if (editEntry) {
+			if (isUit) onUpdate(editEntry.id, data)
+			else onUpdateIncome(editEntry.id, data)
 		} else {
-			if (isUit) onAdd({ description: desc.trim(), amount: value, date, category })
-			else onAddIncome({ description: desc.trim(), amount: value, date, category })
+			if (isUit) onAdd(data)
+			else onAddIncome(data)
 		}
-		resetForm()
-		form.closeForm()
+		closeForm()
 	}
 
 	const removeEntry = (id: string) => {
@@ -224,183 +209,89 @@ export function ExpensesView({
 			: 'Nog geen inkomsten geregistreerd. Verkoop je oogst en leg het hier vast.'
 
 	return (
-		<div className='shop-page exp-page'>
-			<div className='shop-hero'>
-				<div className='shop-hero-text'>
-					<h2>
-						<i className={`fa-solid ${isUit ? 'fa-receipt' : 'fa-sack-dollar'}`} /> Uitgaven & inkomsten
-					</h2>
-					<p>Wat de tuin kost én wat hij opbrengt, per maand gegroepeerd.</p>
+		<div className='oogst-wrap exp-page'>
+			<div className='oogst-head'>
+				<div>
+					<h1 className='oogst-title'>Uitgaven</h1>
+					<p className='oogst-sub'>Wat de tuin kost én wat hij opbrengt, per maand gegroepeerd.</p>
 				</div>
-				<div className='shop-hero-actions'>
-					<div className='shop-filters' role='group' aria-label='Uitgaven of inkomsten'>
+				<div className='exp-head-actions'>
+					<div className='exp-mode' role='group' aria-label='Uitgaven of inkomsten'>
 						<button
-							className={`shop-filter ${isUit ? 'shop-filter-active' : ''}`}
 							onClick={() => switchMode('uit')}
 							aria-pressed={isUit}>
 							<i className='fa-solid fa-receipt' /> Uitgaven
 						</button>
 						<button
-							className={`shop-filter ${!isUit ? 'shop-filter-active' : ''}`}
 							onClick={() => switchMode('in')}
 							aria-pressed={!isUit}>
 							<i className='fa-solid fa-sack-dollar' /> Inkomsten
 						</button>
 					</div>
-					<button
-						className='btn-primary shop-add-btn'
-						onClick={() => {
-							if (form.open) {
-								resetForm()
-								form.closeForm()
-							} else {
-								resetForm()
-								form.openForm()
-							}
-						}}>
-						{form.open ? (
-							<>
-								<i className='fa-solid fa-xmark' /> Annuleren
-							</>
-						) : (
-							<>
-								<i className='fa-solid fa-plus' /> {isUit ? 'Uitgave toevoegen' : 'Inkomst toevoegen'}
-							</>
-						)}
+					<button className='oogst-add' onClick={openNew}>
+						+ {isUit ? 'Uitgave toevoegen' : 'Inkomst toevoegen'}
 					</button>
 				</div>
 			</div>
 
-			<div className='shop-stats'>
-				<div className={`shop-stat ${saldo >= 0 ? '' : 'shop-stat-negative'}`}>
-					<div className='shop-stat-icon shop-stat-icon-total'>
-						<i className='fa-solid fa-scale-balanced' />
-					</div>
-					<div className='shop-stat-info'>
-						<span className='shop-stat-value'>{fmtEuro(saldo)}</span>
-						<span className='shop-stat-label'>Saldo</span>
-					</div>
+			<div className='oogst-stats'>
+				<div className={`oogst-stat oogst-stat-hero ${saldo < 0 ? 'oogst-stat-negative' : ''}`}>
+					<div className='oogst-stat-label'>Saldo</div>
+					<div className='oogst-stat-value'>{fmtSigned(saldo, 'uit')}</div>
 				</div>
-				<div className='shop-stat'>
-					<div className='shop-stat-icon shop-stat-icon-out'>
-						<i className='fa-solid fa-arrow-trend-down' />
-					</div>
-					<div className='shop-stat-info'>
-						<span className='shop-stat-value'>{fmtEuro(totalUit)}</span>
-						<span className='shop-stat-label'>Uitgaven</span>
-					</div>
+				<div className='oogst-stat'>
+					<div className='oogst-stat-label'>Uitgaven</div>
+					<div className='oogst-stat-value'>{fmtEuro(totalUit)}</div>
 				</div>
-				<div className='shop-stat'>
-					<div className='shop-stat-icon shop-stat-icon-done'>
-						<i className='fa-solid fa-arrow-trend-up' />
-					</div>
-					<div className='shop-stat-info'>
-						<span className='shop-stat-value'>{fmtEuro(totalIn)}</span>
-						<span className='shop-stat-label'>Inkomsten</span>
-					</div>
+				<div className='oogst-stat'>
+					<div className='oogst-stat-label'>Inkomsten</div>
+					<div className='oogst-stat-value'>{fmtEuro(totalIn)}</div>
 				</div>
-				<div className='shop-stat'>
-					<div className='shop-stat-icon shop-stat-icon-neutral'>
-						<i className='fa-solid fa-calendar-day' />
-					</div>
-					<div className='shop-stat-info'>
-						<span className='shop-stat-value'>{fmtEuro(monthNetto)}</span>
-						<span className='shop-stat-label'>Deze maand</span>
-					</div>
+				<div className='oogst-stat'>
+					<div className='oogst-stat-label'>Deze maand</div>
+					<div className='oogst-stat-value'>{fmtSigned(monthNetto, 'uit')}</div>
 				</div>
 			</div>
 
-			{form.mounted && (
-				<div ref={form.formRef} className={`shop-form ${form.open ? '' : 'shop-form-closing'}`}>
-					<div className='shop-form-inner'>
-						<div className='shop-form-panel'>
-							<div className='shop-form-header'>
-								<i className={`fa-solid ${isUit ? 'fa-receipt' : 'fa-sack-dollar'}`} />
-								<span>
-									{editingId
-										? isUit
-											? 'Uitgave bewerken'
-											: 'Inkomst bewerken'
-										: isUit
-											? 'Nieuwe uitgave'
-											: 'Nieuwe inkomst'}
-								</span>
-							</div>
-							<div className='shop-form-grid'>
-								<div className='shop-form-field'>
-									<label>Omschrijving *</label>
-									<input
-										type='text'
-										value={desc}
-										autoFocus
-										onChange={(e) => setDesc(e.target.value)}
-										placeholder={isUit ? 'Bijv. Biologische tomatenzaden' : 'Bijv. Tomaten verkocht'}
-									/>
-								</div>
-								<div className='shop-form-field'>
-									<label>Bedrag (€) *</label>
-									<input
-										type='number'
-										min='0.01'
-										step='0.01'
-										value={amount}
-										onChange={(e) => setAmount(e.target.value)}
-										placeholder='0.00'
-									/>
-								</div>
-								<div className='shop-form-field'>
-									<label>Datum</label>
-									<DateField value={date} onChange={setDate} />
-								</div>
-								<div className='shop-form-field shop-form-field-wide'>
-									<CategoryDropdown
-										id='exp-cat'
-										label='Categorie'
-										categories={cats}
-										value={category}
-										onChange={setCategory}
-									/>
-								</div>
-							</div>
-							<div className='shop-form-footer'>
-								<button className='btn-primary' onClick={submit} disabled={!canSave}>
-									<i className='fa-solid fa-check' />{' '}
-									{editingId ? 'Wijziging opslaan' : 'Toevoegen'}
-								</button>
-								<button
-									className='btn-ghost'
-									onClick={() => {
-										resetForm()
-										form.closeForm()
-									}}>
-									<i className='fa-solid fa-xmark' /> Annuleren
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>
-			)}
+			<ExpenseFormModal
+				mounted={sheet.mounted}
+				open={sheet.open}
+				edit={editEntry}
+				mode={mode}
+				onClose={closeForm}
+				onSave={saveForm}
+			/>
 
-			<div className='shop-toolbar'>
-				<div className='shop-search'>
+			<div className='bood-toolbar'>
+				<label className='oogst-search-label'>
 					<i className='fa-solid fa-magnifying-glass' />
 					<input
+						className='oogst-search-input'
 						value={q}
 						onChange={(e) => setQ(e.target.value)}
 						placeholder={isUit ? 'Zoek in uitgaven…' : 'Zoek in inkomsten…'}
 						aria-label={isUit ? 'Zoek in uitgaven' : 'Zoek in inkomsten'}
 					/>
+				</label>
+				<div className='bood-filters'>
+					<div>
+						<CategoryDropdown
+							id='exp-catfilter'
+							noIcons
+							categories={[{ key: '', label: 'Alle categorieën', icon: 'fa-layer-group', tone: 'grey' }, ...cats]}
+							value={catFilter}
+							onChange={setCatFilter}
+						/>
+					</div>
 				</div>
 			</div>
 
 			{hasCharts && (
-				<div className='exp-charts'>
-					<div className='exp-card'>
-						<div className='exp-card-head'>
-							<h3>
-								<i className='fa-solid fa-chart-column' /> Per maand
-							</h3>
-							<span className='exp-card-sub'>laatste 12 maanden</span>
+				<div className='oogst-charts'>
+					<div className='oogst-card oogst-chart'>
+						<div className='oogst-chart-head'>
+							<div className='oogst-chart-title'>Per maand</div>
+							<div className='oogst-chart-sub'>laatste 12 maanden</div>
 						</div>
 						<div className='exp-legend exp-legend-inline'>
 							<span className='exp-legend-row'>
@@ -411,10 +302,10 @@ export function ExpensesView({
 							</span>
 						</div>
 						<div className='exp-bars' role='img' aria-label='Uitgaven en inkomsten per maand'>
-							{months.map((m) => (
+							{months.map((m, i) => (
 								<div key={m.key} className='exp-bar-col'>
 									<span className='exp-bar-value'>
-										{m.out + m.inc > 0 ? fmtEuro(m.inc - m.out) : ''}
+										{m.out + m.inc > 0 ? fmtSigned(m.inc - m.out, 'uit') : ''}
 									</span>
 									<div className='exp-bar-track exp-bar-track-duo'>
 										<div
@@ -428,18 +319,16 @@ export function ExpensesView({
 											title={`${monthLabel(m.key)} in: ${fmtEuro(m.inc)}`}
 										/>
 									</div>
-									<span className='exp-bar-label'>{m.label}</span>
+									<span className={i === months.length - 1 ? 'mh-active' : 'exp-bar-label'}>{m.label.toUpperCase()}</span>
 								</div>
 							))}
 						</div>
 					</div>
 
-					<div className='exp-card'>
-						<div className='exp-card-head'>
-							<h3>
-								<i className='fa-solid fa-chart-pie' /> Verdeling
-							</h3>
-							<span className='exp-card-sub'>{isUit ? 'alle uitgaven' : 'alle inkomsten'}</span>
+					<div className='oogst-card oogst-chart'>
+						<div className='oogst-chart-head'>
+							<div className='oogst-chart-title'>Verdeling</div>
+							<div className='oogst-chart-sub'>{isUit ? 'alle uitgaven' : 'alle inkomsten'}</div>
 						</div>
 						<div className='exp-donut-wrap'>
 							<svg className='exp-donut' viewBox='0 0 42 42' role='img' aria-label='Verdeling per categorie'>
@@ -485,65 +374,60 @@ export function ExpensesView({
 			)}
 
 			{groups.length === 0 ? (
-				<div className='shop-empty'>
+				<div className='oogst-card oogst-empty'>
 					<i className={`fa-solid ${isUit ? 'fa-receipt' : 'fa-sack-dollar'}`} />
 					<p>{emptyText}</p>
 				</div>
 			) : (
-				<div key={`${mode}-${catFilter}`}>
-			{groups.map((group, gi) => (
-				<div
-					key={group.key}
-					className='exp-month'
-					style={{ animationDelay: `${Math.min(gi, 11) * 35}ms` }}>
-					<div className='exp-month-head'>
-						<h3>{monthLabel(group.key)}</h3>
-						<span className={`exp-month-total ${isUit ? '' : 'exp-month-total-in'}`}>
-							{fmtSigned(group.total, mode)}
-						</span>
-					</div>
-					<div className='he-list'>
-						{group.items.map((e) => {
-							const cat = resolve(e)
-							return (
-								<div key={e.id} className='he-row exp-row'>
-									<div className={`exp-icon exp-icon-${cat.tone}`}>
-										<i className={`fa-solid ${cat.icon}`} />
-									</div>
-									<div className='he-row-main'>
-										<div className='he-row-title'>{e.description}</div>
-										<div className='he-row-meta'>
-											{e.date}
-											<span className={`exp-badge exp-badge-${cat.tone}`}>
-												<i className={`fa-solid ${cat.icon}`} />
-												{cat.label}
-											</span>
+				<div className='oogst-card oogst-list' key={`${mode}-${catFilter}`}>
+				{groups.map((group, gi) => (
+					<div key={group.key} style={{ animationDelay: `${Math.min(gi, 11) * 35}ms` }}>
+						<div className='oogst-month-head'>
+							<div className='oogst-month-title'>{monthLabel(group.key)}</div>
+							<div className={`oogst-month-sum ${isUit ? 'exp-total-uit' : 'exp-total-in'}`}>{fmtSigned(group.total, mode)}</div>
+						</div>
+						<div className='oogst-month-items'>
+							{group.items.map((e) => {
+								const cat = resolve(e)
+								return (
+									<div key={e.id} className='oogst-row'>
+										<div className={`exp-icon exp-icon-${cat.tone}`}>
+											<i className={`fa-solid ${cat.icon}`} />
+										</div>
+										<div className='oogst-row-main'>
+											<div className='oogst-row-title'>
+												<b>{e.description}</b>
+											</div>
+											<div className='oogst-chips'>
+												<span className='oogst-chip'>{e.date}</span>
+												<span className={`exp-badge exp-badge-${cat.tone}`}>
+													<i className={`fa-solid ${cat.icon}`} />
+													{cat.label}
+												</span>
+											</div>
+										</div>
+										<div className={`oogst-row-total ${isUit ? 'exp-total-uit' : 'exp-total-in'}`}>
+											{fmtSigned(e.amount, mode)}
+										</div>
+										<div className='pd-card-actions'>
+											<button onClick={() => startEdit(e)} title='Bewerken' aria-label='Bewerken'>
+												<i className='fa-solid fa-pen' />
+											</button>
+											<button
+												className='btn-danger'
+												onClick={() => removeEntry(e.id)}
+												title='Verwijderen'
+												aria-label='Verwijderen'>
+												<i className='fa-solid fa-trash' />
+											</button>
 										</div>
 									</div>
-									<div className={`exp-amount ${isUit ? '' : 'exp-amount-green'}`}>
-										{fmtSigned(e.amount, mode)}
-									</div>
-									<div className='he-row-actions'>
-										<button
-											className='he-row-btn'
-											onClick={() => startEdit(e)}
-											title='Bewerken'>
-											<i className='fa-solid fa-pen' />
-										</button>
-										<button
-											className='he-row-btn he-row-btn-danger'
-											onClick={() => removeEntry(e.id)}
-											title='Verwijderen'>
-											<i className='fa-solid fa-trash' />
-										</button>
-									</div>
-								</div>
-							)
-						})}
+								)
+							})}
+						</div>
 					</div>
+				))}
 				</div>
-			))}
-			</div>
 			)}
 		</div>
 	)

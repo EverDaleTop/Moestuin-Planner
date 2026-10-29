@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import type { ShoppingItem } from "./types";
-import { api } from "./api";
 import { useCollapseForm } from "./useCollapseForm";
 import { lineTotal, parseQty } from "./shopping";
 import { EXPENSE_CATEGORIES, categoryByKey } from "./expenseCategories";
 import { CategoryDropdown } from "./CategoryDropdown";
+import { ShoppingFormModal } from "./ShoppingFormModal";
 
 interface Props {
   items: ShoppingItem[];
@@ -27,55 +27,16 @@ function normalizeUrl(url: string): string {
 }
 
 export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDone }: Props) {
-  const form = useCollapseForm();
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const sheet = useCollapseForm();
+  const [editEntry, setEditEntry] = useState<ShoppingItem | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "done">("all");
   const [catFilter, setCatFilter] = useState("");
-
-  const [title, setTitle] = useState("");
-  const [url, setUrl] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [price, setPrice] = useState("");
-  const [note, setNote] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [source, setSource] = useState("");
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0].key);
-  const [fetching, setFetching] = useState(false);
-  const [fetchMsg, setFetchMsg] = useState("");
 
   const toggleDone = (item: ShoppingItem) => {
     const next = !item.done;
     onUpdate(item.id, { done: next });
     onToggleDone?.(item, next);
-  };
-
-  const fetchFromUrl = async () => {
-    const u = normalizeUrl(url);
-    if (!u) {
-      setFetchMsg("Plak eerst een productlink.");
-      return;
-    }
-    setFetching(true);
-    setFetchMsg("");
-    try {
-      const info = await api.previewLink(u);
-      let filled = 0;
-      if (info.title && !title.trim()) { setTitle(info.title); filled++; }
-      if (info.price !== undefined && !price) { setPrice(String(info.price)); filled++; }
-      if (info.description && !note.trim()) { setNote(info.description); filled++; }
-      if (info.image) { setImageUrl(info.image); filled++; }
-      if (info.source) { setSource(info.source); filled++; }
-      setFetchMsg(
-        filled > 0
-          ? "Productinfo opgehaald — controleer en pas aan waar nodig."
-          : "Link bereikt, maar er stond geen titel/prijs/afbeelding in. Vul handmatig aan."
-      );
-    } catch (e: any) {
-      setFetchMsg(e?.message ?? "Ophalen mislukt. Vul handmatig aan.");
-    } finally {
-      setFetching(false);
-    }
   };
 
   const openCount = items.filter((i) => !i.done).length;
@@ -118,257 +79,84 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
     return list.sort((a, b) => b.createdAt - a.createdAt);
   }, [items, q, filter, catFilter]);
 
-  const resetForm = () => {
-    setTitle("");
-    setUrl("");
-    setQuantity("");
-    setPrice("");
-    setNote("");
-    setImageUrl("");
-    setSource("");
-    setCategory(EXPENSE_CATEGORIES[0].key);
-    setFetchMsg("");
-    setEditingId(null);
+  const openNew = () => {
+    setEditEntry(null);
+    sheet.openForm();
   };
-
   const startEdit = (item: ShoppingItem) => {
-    setEditingId(item.id);
-    setTitle(item.title);
-    setUrl(item.url ?? "");
-    setQuantity(item.quantity ?? "");
-    setPrice(item.price !== undefined ? String(item.price) : "");
-    setNote(item.note ?? "");
-    setImageUrl(item.imageUrl ?? "");
-    setSource(item.source ?? "");
-    setCategory(item.category ?? EXPENSE_CATEGORIES[0].key);
-    setFetchMsg("");
-    form.openForm();
+    setEditEntry(item);
+    sheet.openForm();
   };
-
-  const canSave = title.trim().length > 0 || normalizeUrl(url).length > 0;
-
-  const submit = () => {
-    if (!canSave) return;
-    const urlNorm = normalizeUrl(url);
-    const priceNum = parseFloat(price);
-    const payload = {
-      title: title.trim() || urlNorm.replace(/^https?:\/\//, "").slice(0, 60) || "Product",
-      url: urlNorm || undefined,
-      quantity: quantity.trim() || undefined,
-      price: isNaN(priceNum) ? undefined : priceNum,
-      note: note.trim() || undefined,
-      imageUrl: imageUrl.trim() || undefined,
-      source: source.trim() || undefined,
-      category: category.trim() || undefined,
-    };
-    if (editingId) {
-      onUpdate(editingId, payload);
-    } else {
-      onAdd(payload);
-    }
-    resetForm();
-    form.closeForm();
+  const closeForm = () => {
+    setEditEntry(null);
+    sheet.closeForm();
+  };
+  const saveForm = (data: Omit<ShoppingItem, "id" | "createdAt" | "done">) => {
+    if (editEntry) onUpdate(editEntry.id, data);
+    else onAdd(data);
+    closeForm();
   };
 
   const clearDone = () => {
     items.filter((i) => i.done).forEach((i) => onRemove(i.id));
   };
 
-  /** Klik op de kaart: open de productlink, of bewerken als er geen link is. */
+  /** Klik op de kaart: altijd bewerken via de modal; de productlink zit op het icoontje. */
   const openCard = (item: ShoppingItem) => {
-    if (item.url) {
-      window.open(normalizeUrl(item.url), "_blank", "noopener,noreferrer");
-    } else {
-      startEdit(item);
-    }
+    startEdit(item);
   };
 
   return (
-    <div className="shop-page bood-page">
-      <div className="shop-hero">
-        <div className="shop-hero-text">
-          <h2>
-            <i className="fa-solid fa-cart-shopping" /> Boodschappenlijst
-          </h2>
-          <p>Plak een productlink en haal titel, prijs en afbeelding automatisch op.</p>
+    <div className="oogst-wrap bood-page">
+      <div className="oogst-head">
+        <div>
+          <h1 className="oogst-title">Boodschappen</h1>
+          <p className="oogst-sub">Plak een productlink en haal titel, prijs en afbeelding automatisch op.</p>
         </div>
-        <button
-          className="btn-primary shop-add-btn"
-          onClick={() => {
-            if (form.open) {
-              resetForm();
-              form.closeForm();
-            } else {
-              resetForm();
-              form.openForm();
-            }
-          }}
-        >
-          {form.open ? (
-            <>
-              <i className="fa-solid fa-xmark" /> Annuleren
-            </>
-          ) : (
-            <>
-              <i className="fa-solid fa-plus" /> Product toevoegen
-            </>
-          )}
+        <button className="oogst-add" onClick={openNew}>
+          + Product toevoegen
         </button>
       </div>
 
-      <div className="shop-stats">
-        <div className="shop-stat">
-          <div className="shop-stat-icon shop-stat-icon-open">
-            <i className="fa-solid fa-cart-shopping" />
-          </div>
-          <div className="shop-stat-info">
-            <span className="shop-stat-value">{openCount}</span>
-            <span className="shop-stat-label">Open</span>
-          </div>
+      <div className="oogst-stats">
+        <div className="oogst-stat oogst-stat-hero">
+          <div className="oogst-stat-label">Open</div>
+          <div className="oogst-stat-value">{openCount}</div>
         </div>
-        <div className="shop-stat">
-          <div className="shop-stat-icon shop-stat-icon-done">
-            <i className="fa-solid fa-check" />
-          </div>
-          <div className="shop-stat-info">
-            <span className="shop-stat-value">{doneCount}</span>
-            <span className="shop-stat-label">Afgevinkt</span>
-          </div>
+        <div className="oogst-stat">
+          <div className="oogst-stat-label">Afgevinkt</div>
+          <div className="oogst-stat-value">{doneCount}</div>
         </div>
-        <div className="shop-stat">
-          <div className="shop-stat-icon shop-stat-icon-total">
-            <i className="fa-solid fa-coins" />
-          </div>
-          <div className="shop-stat-info">
-            <span className="shop-stat-value">{fmtEuro(totalOpen)}</span>
-            <span className="shop-stat-label">Verwacht totaal</span>
-          </div>
+        <div className="oogst-stat">
+          <div className="oogst-stat-label">Verwacht totaal</div>
+          <div className="oogst-stat-value">{fmtEuro(totalOpen)}</div>
         </div>
       </div>
 
-      {form.mounted && (
-        <div ref={form.formRef} className={`shop-form ${form.open ? "" : "shop-form-closing"}`}>
-          <div className="shop-form-inner">
-            <div className="shop-form-panel">
-            <div className="shop-form-header">
-              <i className="fa-solid fa-link" />
-              <span>Productlink</span>
-            </div>
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://winkel.nl/product…"
-              inputMode="url"
-              autoFocus
-              className="shop-form-url"
-            />
-            <div className="shop-form-actions">
-              <button className="btn-primary" onClick={fetchFromUrl} disabled={fetching || !url.trim()} type="button">
-                <i className={`fa-solid ${fetching ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}`} />{" "}
-                {fetching ? "Ophalen…" : "Haal info op van link"}
-              </button>
-              {fetchMsg && <span className="shop-fetch-msg">{fetchMsg}</span>}
-            </div>
+      <ShoppingFormModal
+        mounted={sheet.mounted}
+        open={sheet.open}
+        edit={editEntry}
+        onClose={closeForm}
+        onSave={saveForm}
+      />
 
-            {imageUrl && (
-              <div className="shop-form-preview">
-                <img src={imageUrl} alt="" className="shop-form-thumb" onError={() => setImageUrl("")} />
-                <div className="shop-form-preview-info">
-                  <span className="shop-form-preview-label">Afbeelding (automatisch)</span>
-                  <input type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
-                </div>
-              </div>
-            )}
-
-            <div className="shop-form-grid">
-              <div className="shop-form-field">
-                <label>Productnaam</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Wordt gevuld via de link…"
-                />
-              </div>
-              <div className="shop-form-field">
-                <label>Aantal</label>
-                <input
-                  type="text"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  placeholder="Bijv. 2x of 3 zakken"
-                />
-              </div>
-              <div className="shop-form-field">
-                <label>Richtprijs (€)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="shop-form-field">
-                <label>Notitie (optioneel)</label>
-                <input
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Bijv. ras, maat, alternatief…"
-                />
-              </div>
-              <div className="shop-form-field shop-form-field-wide">
-                <CategoryDropdown
-                  id="shop-cat"
-                  label="Categorie"
-                  noIcons
-                  categories={EXPENSE_CATEGORIES}
-                  value={category}
-                  onChange={setCategory}
-                />
-              </div>
-            </div>
-
-          <div className="shop-form-footer">
-              <button className="btn-primary" onClick={submit} disabled={!canSave}>
-                <i className="fa-solid fa-check" />{" "}
-                {editingId ? "Wijziging opslaan" : "Toevoegen aan lijst"}
-              </button>
-              {editingId && (
-                <button
-                  className="btn-ghost"
-                  onClick={() => {
-                    resetForm();
-                    form.closeForm();
-                  }}
-                >
-                  <i className="fa-solid fa-xmark" /> Annuleren
-                </button>
-              )}
-            </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="shop-toolbar">
-        <div className="shop-search">
+      <div className="bood-toolbar">
+        <label className="oogst-search-label bood-search">
           <i className="fa-solid fa-magnifying-glass" />
           <input
+            className="oogst-search-input"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Zoek product…"
             aria-label="Zoek product"
           />
-        </div>
+        </label>
+        <div className="bood-filters">
         {usedCats.length > 0 && (
           <div className="bood-catfilter">
             <CategoryDropdown
               id="bood-catfilter"
-              label="Filter op categorie"
               noIcons
               categories={filterCats}
               value={catFilter}
@@ -379,17 +167,17 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
         <div className="bood-statusfilter">
           <CategoryDropdown
             id="bood-statusfilter"
-            label="Filter op status"
             noIcons
             categories={statusOptions}
             value={filter}
             onChange={(key) => setFilter(key as "all" | "open" | "done")}
           />
         </div>
+        </div>
       </div>
 
       {filtered.length === 0 && (
-        <div className="shop-empty">
+        <div className="oogst-card oogst-empty">
           <i className="fa-solid fa-cart-shopping" />
           <p>
             Nog niets op de lijst. Voeg hierboven een product toe, plak er een linkje bij en vink af wat je al
@@ -407,12 +195,12 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
             style={{ animationDelay: `${Math.min(i, 11) * 35}ms` }}
             className={`shop-card ${item.done ? "shop-card-done" : ""}`}
             onClick={() => openCard(item)}
-            role={item.url ? "link" : "button"}
+            role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === "Enter") openCard(item);
             }}
-            aria-label={`${item.title} openen`}
+            aria-label={`${item.title} bewerken`}
           >
             {item.imageUrl && (
             <div className="shop-card-media">

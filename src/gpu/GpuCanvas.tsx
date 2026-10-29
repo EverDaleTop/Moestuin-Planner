@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { GpuRenderer, type DrawItem } from "./Renderer";
 import type {
   Crop,
@@ -677,6 +678,35 @@ export function GpuCanvas({
   }, []);
 
   const [objSearch, setObjSearch] = useState("");
+  const [menuClosing, setMenuClosing] = useState(false);
+  const menuCloseTimer = useRef<number | null>(null);
+  const menuWasOpen = useRef(false);
+
+  useEffect(() => {
+    if (objectMenuOpen) {
+      menuWasOpen.current = true;
+      setMenuClosing(false);
+      if (menuCloseTimer.current !== null) {
+        window.clearTimeout(menuCloseTimer.current);
+        menuCloseTimer.current = null;
+      }
+      return;
+    }
+    if (menuWasOpen.current) {
+      menuWasOpen.current = false;
+      setMenuClosing(true);
+      menuCloseTimer.current = window.setTimeout(() => {
+        setMenuClosing(false);
+        menuCloseTimer.current = null;
+      }, 220);
+    }
+    return () => {
+      if (menuCloseTimer.current !== null) {
+        window.clearTimeout(menuCloseTimer.current);
+        menuCloseTimer.current = null;
+      }
+    };
+  }, [objectMenuOpen]);
 
   const camRef = useRef<Cam>({ x: 0, y: 0, zoom: 1 });
   const draftRef = useRef<Map<string, R>>(new Map());
@@ -3221,8 +3251,9 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           dpr). Dan zou het canvas op een telefoon dpr keer te groot zijn. */}
       <canvas ref={gpuRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
       <canvas ref={ovRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
-      {objectMenuOpen && (
+      {(objectMenuOpen || menuClosing) && (
         <ObjectMenu
+          closing={menuClosing}
           search={objSearch}
           onSearchChange={setObjSearch}
           onClose={() => handlersRef.current.onObjectMenuOpenChange(false)}
@@ -3238,11 +3269,13 @@ function ObjectMenu({
   onSearchChange,
   onClose,
   onItemPointerDown,
+  closing,
 }: {
   search: string;
   onSearchChange: (v: string) => void;
   onClose: () => void;
   onItemPointerDown: (def: GardenObjectDef, e: React.PointerEvent) => void;
+  closing: boolean;
 }) {
   const s = search.trim().toLowerCase();
   const filtered = GARDEN_OBJECTS.filter(
@@ -3251,44 +3284,126 @@ function ObjectMenu({
       o.name.toLowerCase().includes(s) ||
       o.keywords.toLowerCase().includes(s)
   );
-  return (
+
+  const dragStartY = useRef(0);
+  const dragOffsetRef = useRef(0);
+  const [dragOffset, setDragOffsetState] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [grabbed, setGrabbed] = useState(false);
+  const [dragClosing, setDragClosing] = useState(false);
+
+  const setDragOffset = (v: number) => {
+    dragOffsetRef.current = v;
+    setDragOffsetState(v);
+  };
+
+  const onGripDown = (e: React.PointerEvent) => {
+    dragStartY.current = e.clientY;
+    dragOffsetRef.current = 0;
+    setDragClosing(false);
+    setGrabbed(true);
+    setDragging(true);
+    setDragOffsetState(0);
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onGripMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const next = Math.max(0, e.clientY - dragStartY.current);
+    dragOffsetRef.current = next;
+    setDragOffsetState(next);
+  };
+  const endDrag = () => {
+    if (!dragging) return;
+    setDragging(false);
+    if (dragOffsetRef.current > 90) {
+      setDragClosing(true);
+      setDragOffset(window.innerHeight);
+      onClose();
+    } else {
+      setDragOffset(0);
+    }
+  };
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  return createPortal(
     <div
-      className="obj-menu"
-      onPointerDown={(e) => e.stopPropagation()}
+      className={`sow-modal-overlay${closing || dragClosing ? " closing" : ""}${dragClosing ? " drag-closing" : ""}`}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div className="obj-menu-head">
-        <span className="obj-menu-title">Voorwerpen</span>
-        <button
-          type="button"
-          className="obj-menu-close"
-          onClick={onClose}
-          aria-label="Sluiten"
-        >
-          <i className="fa-solid fa-xmark" />
-        </button>
-      </div>
-      <input
-        className="obj-menu-search"
-        value={search}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder="Zoek voorwerp…"
-      />
-      <div className="obj-menu-grid">
-        {filtered.map((def) => (
+      <div
+        className="sow-modal obj-menu-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Voorwerpen"
+        style={
+          grabbed
+            ? {
+                transform: `translateY(${dragOffset}px)`,
+                transition: dragging
+                  ? "none"
+                  : "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)",
+                animation: "none",
+              }
+            : undefined
+        }
+      >
+        <div
+          className="sow-modal-grip"
+          aria-hidden="true"
+          onPointerDown={onGripDown}
+          onPointerMove={onGripMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+        />
+        <div className="sow-modal-head">
+          <h3>
+            <i className="fa-solid fa-shapes" aria-hidden="true" /> Voorwerpen
+          </h3>
           <button
-            key={def.key}
             type="button"
-            className="obj-menu-item"
-            onPointerDown={(e) => onItemPointerDown(def, e)}
+            className="sow-modal-close"
+            onClick={onClose}
+            aria-label="Sluiten"
           >
-            <i className={def.icon} />
-            <span>{def.name}</span>
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
           </button>
-        ))}
-        {filtered.length === 0 && (
-          <div className="obj-menu-empty">Geen resultaten.</div>
-        )}
+        </div>
+        <input
+          className="obj-menu-search"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Zoek voorwerp…"
+          aria-label="Zoek voorwerp"
+        />
+        <div className="sow-modal-body">
+          <div className="obj-menu-grid">
+            {filtered.map((def) => (
+              <button
+                key={def.key}
+                type="button"
+                className="obj-menu-item"
+                onPointerDown={(e) => onItemPointerDown(def, e)}
+              >
+                <i className={def.icon} aria-hidden="true" />
+                <span>{def.name}</span>
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="obj-menu-empty">Geen resultaten.</div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

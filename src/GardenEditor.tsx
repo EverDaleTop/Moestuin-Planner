@@ -406,6 +406,7 @@ export function GardenEditor(props: Props) {
 	const [tool, setTool] = useState<EditorTool>('select')
 	const [frameType, setFrameType] = useState<'bed' | 'path'>('bed')
 	const [objectMenu, setObjectMenu] = useState(false)
+	const [locked, setLocked] = useState(true)
 	const [snap, setSnap] = useState(() => {
 		try {
 			return localStorage.getItem('mp_snap') !== '0'
@@ -893,6 +894,7 @@ export function GardenEditor(props: Props) {
 							catalog={catalog}
 							tool={tool}
 							frameType={frameType}
+							locked={locked}
 							selectedIds={selectedIds}
 							selectedCropId={selectedCropId}
 							objectMenuOpen={objectMenu}
@@ -1092,6 +1094,19 @@ export function GardenEditor(props: Props) {
 									<FaIcon cls='fa-solid fa-magnet' />
 								</button>
 							</div>
+							<div
+								className='ge-tools'
+								role='group'
+								aria-label='Vergrendelen'>
+								<button
+									className={locked ? 'tool-active' : ''}
+									onClick={() => setLocked((v) => !v)}
+									aria-label={locked ? 'Ontgrendelen' : 'Vergrendelen'}
+									aria-pressed={locked}
+									data-tooltip={locked ? 'Ontgrendelen' : 'Vergrendelen'}>
+									<FaIcon cls={locked ? 'fa-solid fa-lock' : 'fa-solid fa-lock-open'} />
+								</button>
+							</div>
 						</div>
 					</div>
 					<Inspector
@@ -1113,6 +1128,19 @@ export function GardenEditor(props: Props) {
 							const el = garden.elements.find((e) => e.id === id) ?? null
 							setSelectedIds([id])
 							if (!el || el.type !== 'bed') setSelectedCropId(null)
+						}}
+						onBack={() => {
+							if (!selected) return
+							if (selected.type === 'bed') {
+								const veld = garden.elements.find((e) => e.type === 'veld')
+								if (veld) {
+									setSelectedIds([veld.id])
+									setSelectedCropId(null)
+									return
+								}
+							}
+							setSelectedIds([])
+							setSelectedCropId(null)
 						}}
 						onAddCrop={(cropId) => {
 							if (selected) onAddCrop(selected.id, cropId)

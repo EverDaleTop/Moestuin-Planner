@@ -22,6 +22,7 @@ interface Props {
   onUpdate: (patch: Partial<GardenElement>) => void;
   onRemove: () => void;
   onSelectElement: (id: string) => void;
+  onBack?: () => void;
   onToggleSelectElement?: (id: string) => void;
   onSelectCrop?: (iId: string) => void;
   onAddCrop?: (cropId: string) => void;
@@ -80,7 +81,7 @@ function elementKindName(el: GardenElement): string {
 function elementIconClass(el: GardenElement): string {
   if (el.type === "bed") return "fa-solid fa-table-cells-large";
   if (el.type === "path") return "fa-solid fa-road";
-  if (el.type === "veld") return "fa-solid fa-vector-square";
+  if (el.type === "veld") return "fa-solid fa-border-all";
   if (el.object === "gaas") return "fa-solid fa-table-cells";
   return objectDef(el.object)?.icon ?? "fa-solid fa-cube";
 }
@@ -142,20 +143,92 @@ function NumField({
   step?: number;
   suffix?: string;
 }) {
+  const round = (v: number) => Math.round(v * 100) / 100;
   return (
-    <label className="inp-field">
+    <div className="inp-field">
       <span>{label}</span>
-      <div className="inp-num">
+      <div className="step-wrap">
+        <button
+          type="button"
+          className="step-btn"
+          onClick={() => onChange(round(Math.max(min, value - step)))}
+          aria-label="Verlagen"
+        >
+          <i className="fa-solid fa-minus" />
+        </button>
         <input
+          className="pd-bare step-input"
           type="number"
-          value={Number.isFinite(value) ? Math.round(value * 100) / 100 : 0}
+          aria-label={label}
+          value={Number.isFinite(value) ? round(value) : 0}
           min={min}
-          step={step}
+          step="any"
           onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
         />
-        {suffix && <span className="inp-suffix">{suffix}</span>}
+        <button
+          type="button"
+          className="step-btn"
+          onClick={() => onChange(round(value + step))}
+          aria-label="Verhogen"
+        >
+          <i className="fa-solid fa-plus" />
+        </button>
+        {suffix && <span className="step-suffix">{suffix}</span>}
       </div>
-    </label>
+    </div>
+  );
+}
+
+const COLOR_PRESETS = [
+  "#1F4D3A",
+  "#5FA55A",
+  "#9DC08B",
+  "#E9C46A",
+  "#E76F51",
+  "#C65D5D",
+  "#7B8FD4",
+  "#B088D0",
+];
+
+function ColorField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (c: string) => void;
+}) {
+  const current = value.toLowerCase();
+  return (
+    <div className="inp-field">
+      <span>Kleur</span>
+      <div className="color-row">
+        {COLOR_PRESETS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            className={`color-dot${current === c.toLowerCase() ? " is-active" : ""}`}
+            style={{ background: c }}
+            onClick={() => onChange(c)}
+            aria-label={`Kleur ${c}`}
+            aria-pressed={current === c.toLowerCase()}
+          />
+        ))}
+        <label
+          className="color-custom"
+          style={{ background: value }}
+          title="Eigen kleur kiezen"
+        >
+          <input
+            className="pd-bare"
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            aria-label="Eigen kleur kiezen"
+          />
+          <i className="fa-solid fa-plus" aria-hidden="true" />
+        </label>
+      </div>
+    </div>
   );
 }
 
@@ -575,6 +648,7 @@ export function Inspector({
   onUpdate,
   onRemove,
   onSelectElement,
+  onBack,
   onAddCrop,
   onUpdateCrop,
   onRemoveCrop,
@@ -584,6 +658,60 @@ export function Inspector({
   onSelectActiveCrop,
 }: Props) {
   const [cropsOpen, setCropsOpen] = useState(false);
+  const [sheetShut, setSheetShut] = useState(false);
+  const dragStartY = useRef(0);
+  const dragOffsetRef = useRef(0);
+  const [dragOffset, setDragOffsetState] = useState(0);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    setSheetShut(false);
+    dragOffsetRef.current = 0;
+    setDragOffsetState(0);
+    setDragging(false);
+  }, [element?.id, activeCropId]);
+
+  const setDragOffset = (v: number) => {
+    dragOffsetRef.current = v;
+    setDragOffsetState(v);
+  };
+
+  const onGripDown = (e: React.PointerEvent) => {
+    dragStartY.current = e.clientY;
+    dragOffsetRef.current = 0;
+    setDragging(true);
+    setDragOffsetState(0);
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onGripMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const next = e.clientY - dragStartY.current;
+    dragOffsetRef.current = next;
+    setDragOffsetState(next);
+  };
+  const endGripDrag = () => {
+    if (!dragging) return;
+    setDragging(false);
+    const off = dragOffsetRef.current;
+    if (!sheetShut && off > 90) {
+      setSheetShut(true);
+      setDragOffset(0);
+    } else if (sheetShut && off < -60) {
+      setSheetShut(false);
+      setDragOffset(0);
+    } else {
+      setDragOffset(0);
+    }
+  };
+  const sheetStyle =
+    dragging || dragOffset !== 0
+      ? {
+          transform: sheetShut
+            ? `translateY(calc(100% - 42px + ${dragOffset}px))`
+            : `translateY(${dragOffset}px)`,
+          transition: dragging ? "none" : undefined,
+        }
+      : undefined;
 
   const cropById = useMemo(() => {
     const m = new Map<string, Crop>();
@@ -597,7 +725,19 @@ export function Inspector({
       return !velden.some((v) => elementInVeld(e, v));
     });
     return (
-      <aside className="insp">
+      <aside
+        className={`insp${sheetShut ? " sheet-shut" : ""}`}
+        style={sheetStyle}
+      >
+        <div
+          className="insp-grip"
+          aria-hidden="true"
+          onPointerDown={onGripDown}
+          onPointerMove={onGripMove}
+          onPointerUp={endGripDrag}
+          onPointerCancel={endGripDrag}
+        />
+        <div className="insp-view" key="lijst">
         <h4 className="insp-list-title">Elementen ({parents.length})</h4>
         <ElementList elements={parents} activeId={null} onSelect={onSelectElement} />
         {parents.length > 0 && (
@@ -605,6 +745,7 @@ export function Inspector({
             Klik een element aan om het te bewerken.
           </p>
         )}
+        </div>
       </aside>
     );
   }
@@ -623,14 +764,28 @@ export function Inspector({
   
   if (crop) {
     return (
-      <aside className="insp">
+      <aside
+        className={`insp${sheetShut ? " sheet-shut" : ""}`}
+        style={sheetStyle}
+      >
+        <div
+          className="insp-grip"
+          aria-hidden="true"
+          onPointerDown={onGripDown}
+          onPointerMove={onGripMove}
+          onPointerUp={endGripDrag}
+          onPointerCancel={endGripDrag}
+        />
+        <div className="insp-view" key={crop.instanceId}>
         <div className="insp-crop-head">
           <button
             type="button"
-            className="btn-ghost insp-crop-back"
+            className="btn-ghost insp-back"
             onClick={onDeselectCrop}
+            aria-label="Terug naar element"
+            title="Terug"
           >
-            <i className="fa-solid fa-arrow-left" /> Terug
+            <i className="fa-solid fa-arrow-left" />
           </button>
           <div className="insp-size">Gewas in {element.label}</div>
         </div>
@@ -649,13 +804,37 @@ export function Inspector({
             onDuplicateCrop={onDuplicateCrop}
           />
         </div>
+        </div>
       </aside>
     );
   }
 
   return (
-    <aside className="insp">
+    <aside
+      className={`insp${sheetShut ? " sheet-shut" : ""}`}
+      style={sheetStyle}
+    >
+      <div
+        className="insp-grip"
+        aria-hidden="true"
+        onPointerDown={onGripDown}
+        onPointerMove={onGripMove}
+        onPointerUp={endGripDrag}
+        onPointerCancel={endGripDrag}
+      />
+      <div className="insp-view" key={element.id}>
       <header className="insp-head">
+        {onBack && (
+          <button
+            type="button"
+            className="btn-ghost insp-back"
+            onClick={onBack}
+            aria-label="Terug naar elementen"
+            title="Terug"
+          >
+            <i className="fa-solid fa-arrow-left" />
+          </button>
+        )}
         <span
           className="insp-dot"
           style={{ background: element.color }}
@@ -669,9 +848,15 @@ export function Inspector({
               : `${fmtM(element.widthM)} × ${fmtM(element.heightM)} m`}
           </span>
         </div>
-        <span className="insp-badge">
-          {element.type === "bed" ? "bestand" : element.type === "object" ? "voorwerp" : "pad"}
-        </span>
+        <button
+          type="button"
+          className="btn-ghost insp-back insp-remove"
+          onClick={onRemove}
+          aria-label="Verwijderen"
+          title="Verwijderen"
+        >
+          <i className="fa-solid fa-trash" />
+        </button>
       </header>
 
       <label className="inp-field">
@@ -690,7 +875,6 @@ export function Inspector({
               value={element.widthM}
               min={0.05}
               step={0.05}
-              suffix="m"
               onChange={(v) => onUpdate({ widthM: Math.max(0.05, v) })}
             />
           </div>
@@ -706,7 +890,6 @@ export function Inspector({
             value={element.widthM / 2}
             min={0.1}
             step={0.05}
-            suffix="m"
             onChange={(v) => {
               const r = Math.max(0.1, v);
               onUpdate({ widthM: r * 2, heightM: r * 2 });
@@ -719,27 +902,21 @@ export function Inspector({
             label="Breedte (m)"
             value={element.widthM}
             step={0.1}
-            suffix="m"
             onChange={(v) => onUpdate({ widthM: v })}
           />
           <NumField
             label="Lengte (m)"
             value={element.heightM}
             step={0.1}
-            suffix="m"
             onChange={(v) => onUpdate({ heightM: v })}
           />
         </div>
       )}
 
-      <label className="inp-field inp-color">
-        <span>Kleur</span>
-        <input
-          type="color"
-          value={element.color}
-          onChange={(e) => onUpdate({ color: e.target.value })}
-        />
-      </label>
+      <ColorField
+        value={element.color}
+        onChange={(c) => onUpdate({ color: c })}
+      />
 
       {element.type === "bed" && (
         <section className="insp-crops">
@@ -817,15 +994,6 @@ export function Inspector({
         />
       )}
 
-      <button className="btn-danger btn-block" onClick={onRemove}>
-        <i className="fa-solid fa-trash" />{" "}
-        {element.type === "bed"
-          ? "Bed verwijderen"
-          : element.type === "object"
-            ? `${elementKind} verwijderen`
-            : "Pad verwijderen"}
-      </button>
-
       <section className="insp-all">
         <h4>
           {element?.type === "veld"
@@ -846,6 +1014,7 @@ export function Inspector({
           onSelect={onSelectElement}
         />
       </section>
+      </div>
     </aside>
   );
 }
