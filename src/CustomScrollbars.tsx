@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const IDS = new WeakMap<Element, number>();
 let nextId = 1;
@@ -15,6 +15,7 @@ function idOf(el: Element): number {
 
 const MIN_THUMB = 32;
 const TICK_MS = 200;
+const EDGE = 10;
 
 interface Bar {
   id: number;
@@ -25,6 +26,7 @@ interface Bar {
   thumbTop: number;
   inner: boolean;
   popup: boolean;
+  sheet: boolean;
 }
 
 function collectCandidates(pageMode: boolean): HTMLElement[] {
@@ -53,14 +55,15 @@ export function CustomScrollbars() {
   const [bars, setBars] = useState<Bar[]>([]);
   const candidates = useRef<HTMLElement[]>([]);
   const lastKey = useRef("");
-  const prevBars = useRef(new Map<number, Bar>());
   const byId = useRef(new Map<number, HTMLElement>());
+  const hosts = useRef(new Map<number, HTMLElement>());
+  const anchors = useRef(new WeakMap<HTMLElement, HTMLElement>());
   const drag = useRef<{ el: HTMLElement; startY: number; startTop: number } | null>(null);
 
   const update = useCallback(() => {
     const next: Bar[] = [];
     const map = new Map<number, HTMLElement>();
-    const prev = prevBars.current;
+    const hostMap = new Map<number, HTMLElement>();
     for (const el of candidates.current) {
       if (!el.isConnected) continue;
       const r = el.getBoundingClientRect();
@@ -71,39 +74,86 @@ export function CustomScrollbars() {
       const inner = shell !== null;
       const popupEl = el.closest(".catdd-pop") as HTMLElement | null;
       const popup = popupEl !== null;
+      const host = popupEl ?? shell;
+      if (!host && (inner || popup)) continue;
+      const closing = el.closest(".sow-modal-overlay.closing") !== null;
+      if (closing) continue;
       const id = idOf(el);
       map.set(id, el);
 
-      const closing = el.closest(".sow-modal-overlay.closing") !== null;
-      const animating =
-        !closing &&
-        ((shell?.getAnimations().some((a) => a.playState === "running") ?? false) ||
-          (inner && shell !== null && getComputedStyle(shell).transform !== "none"));
-
-      if (animating && prev.has(id)) {
-        next.push(prev.get(id) as Bar);
+      if (host === el) {
+        const grip = el.querySelector(".insp-grip") as HTMLElement | null;
+        const gripH = grip && grip.offsetHeight > 0 ? grip.offsetHeight : 0;
+        const trackTop = EDGE + gripH;
+        const trackH = Math.max(MIN_THUMB, el.clientHeight - trackTop - EDGE);
+        const thumbHeight = Math.max(
+          MIN_THUMB,
+          Math.min(trackH, (trackH * el.clientHeight) / el.scrollHeight),
+        );
+        hostMap.set(id, el);
+        const padRight = parseFloat(getComputedStyle(el).paddingRight) || 0;
+        next.push({
+          id,
+          top: EDGE + gripH,
+          height: trackH,
+          right: 4 - padRight,
+          thumbHeight,
+          thumbTop: (el.scrollTop / maxScroll) * (trackH - thumbHeight),
+          inner,
+          popup,
+          sheet: true,
+        });
         continue;
       }
 
-      const trackH = inner ? r.height - 24 : r.height;
+      if (host) {
+        hostMap.set(id, host);
+        let top = EDGE;
+        let left = 0;
+        let n: HTMLElement | null = el;
+        while (n && n !== host) {
+          top += n.offsetTop;
+          left += n.offsetLeft;
+          n = n.offsetParent as HTMLElement | null;
+        }
+        const trackH = Math.max(MIN_THUMB, el.offsetHeight - EDGE * 2);
+        const thumbHeight = Math.max(
+          MIN_THUMB,
+          Math.min(trackH, (trackH * el.clientHeight) / el.scrollHeight),
+        );
+        next.push({
+          id,
+          top,
+          height: trackH,
+          right: Math.max(0, host.clientWidth - (left + el.offsetWidth)) + EDGE,
+          thumbHeight,
+          thumbTop: (el.scrollTop / maxScroll) * (trackH - thumbHeight),
+          inner,
+          popup,
+          sheet: false,
+        });
+        continue;
+      }
+
+      const trackH = r.height - 24;
       const thumbHeight = Math.max(
         MIN_THUMB,
         Math.min(trackH, (trackH * el.clientHeight) / el.scrollHeight),
       );
-      const popupRect = popupEl?.getBoundingClientRect();
       next.push({
         id,
-        top: popup && popupRect ? r.top - popupRect.top : r.top + (inner ? 12 : 0),
-        height: popup ? r.height : trackH,
-        right: popup ? 4 : Math.max(0, window.innerWidth - r.right) + 4,
+        top: r.top + 12,
+        height: trackH,
+        right: Math.max(0, window.innerWidth - r.right) + 4,
         thumbHeight,
         thumbTop: (el.scrollTop / maxScroll) * (trackH - thumbHeight),
         inner,
         popup,
+        sheet: false,
       });
     }
     byId.current = map;
-    prevBars.current = new Map(next.map((b) => [b.id, b]));
+    hosts.current = hostMap;
     const key = next
       .map(
         (b) =>
@@ -133,11 +183,8 @@ export function CustomScrollbars() {
   const rescanPending = useRef(false);
   const scheduleRescan = useCallback(() => {
     if (rescanPending.current) return;
-    rescanPending.current = true;
-    requestAnimationFrame(() => {
-      rescanPending.current = false;
-      rescan();
-    });
+    rescanPending.current = false;
+    rescan();
   }, [rescan]);
 
   useEffect(() => {
@@ -179,8 +226,10 @@ export function CustomScrollbars() {
     if (!d) return;
     const maxScroll = d.el.scrollHeight - d.el.clientHeight;
     if (maxScroll <= 0) return;
-    const r = d.el.getBoundingClientRect();
-    const trackH = r.height - 24;
+    const shell = d.el.closest(".sow-modal, .insp, .catdd-pop") as HTMLElement | null;
+    const trackH = shell
+      ? Math.max(MIN_THUMB, d.el.offsetHeight - EDGE * 2)
+      : d.el.getBoundingClientRect().height - 24;
     const thumbHeight = Math.max(
       MIN_THUMB,
       Math.min(trackH, (trackH * d.el.clientHeight) / d.el.scrollHeight),
@@ -215,7 +264,7 @@ export function CustomScrollbars() {
           <div
             key={bar.id}
             id={`mainScrollbar-${bar.id}`}
-            className={`main-scrollbar${bar.inner ? " inner" : ""}${bar.popup ? " popup" : ""}`}
+            className={`main-scrollbar${bar.inner ? " inner" : ""}${bar.popup ? " popup" : ""}${bar.sheet ? " sheet" : ""}`}
             style={{ top: bar.top, height: bar.height, right: bar.right }}
             aria-hidden="true"
           >
@@ -233,10 +282,18 @@ export function CustomScrollbars() {
             />
           </div>
         );
-        if (bar.popup) {
-          const el = byId.current.get(bar.id);
-          const host = el?.closest(".catdd-pop") as HTMLElement | null;
-          if (!host) return null;
+        const host = hosts.current.get(bar.id);
+        if (host) {
+          if (bar.sheet) {
+            let anchor = anchors.current.get(host);
+            if (!anchor) {
+              anchor = document.createElement("div");
+              anchor.className = "scrollbar-anchor";
+              host.prepend(anchor);
+              anchors.current.set(host, anchor);
+            }
+            return createPortal(node, anchor);
+          }
           return createPortal(node, host);
         }
         return node;

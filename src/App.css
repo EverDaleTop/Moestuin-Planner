@@ -109,12 +109,12 @@ h1, h2, h3 {
 }
 
 .main-scrollbar-thumb:hover {
-  background: var(--accent);
+  background: var(--primary);
 }
 
 .main-scrollbar-thumb:active {
   cursor: grabbing;
-  background: var(--accent-2);
+  background: var(--primary);
 }
 
 html,
@@ -3140,11 +3140,11 @@ select:focus {
   padding: 6px;
 }
 .main-scrollbar.popup {
-  position: absolute;
-  width: 6px;
   z-index: 5;
+  pointer-events: none;
 }
 .main-scrollbar.popup .main-scrollbar-thumb {
+  pointer-events: auto;
   width: 6px;
 }
 .scopedd-list {
@@ -3155,6 +3155,7 @@ select:focus {
   max-height: min(320px, 52dvh);
   overscroll-behavior: contain;
   scrollbar-width: none;
+  padding-right: 8px;
 }
 .scopedd-list::-webkit-scrollbar {
   display: none;
@@ -7705,15 +7706,39 @@ textarea:not(.pd-bare textarea):not(.pd-bare):not(.inp-num textarea):not(.pd-ran
   position: relative;
   scrollbar-width: none;
 }
-.main-scrollbar.inner {
-  position: fixed;
+.main-scrollbar.inner,
+.main-scrollbar.popup {
+  position: absolute;
   width: 6px;
+  background: transparent;
 }
-.main-scrollbar.inner .main-scrollbar-thumb {
+.main-scrollbar.sheet {
+  position: absolute;
+  width: 5px;
+  background: transparent;
+  z-index: 25;
+}
+.scrollbar-anchor {
+  position: sticky;
+  top: 0;
+  height: 0;
+  width: 100%;
+  z-index: 25;
+  pointer-events: none;
+}
+.main-scrollbar.inner .main-scrollbar-thumb,
+.main-scrollbar.popup .main-scrollbar-thumb,
+.main-scrollbar.sheet .main-scrollbar-thumb {
   width: 6px;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
 }
-.main-scrollbar.inner .main-scrollbar-thumb:hover {
-  background: var(--primary);
+.main-scrollbar.sheet .main-scrollbar-thumb {
+  width: 5px;
+}
+.main-scrollbar.inner .main-scrollbar-thumb:hover,
+.main-scrollbar.popup .main-scrollbar-thumb:hover,
+.main-scrollbar.sheet .main-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink) 38%, transparent);
 }
 @keyframes sow-overlay-in {
   from { opacity: 0; }

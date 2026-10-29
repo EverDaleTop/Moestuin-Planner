@@ -676,7 +676,8 @@ export function Inspector({
   };
   const onGripMove = (e: React.PointerEvent) => {
     if (!dragging) return;
-    const next = e.clientY - dragStartY.current;
+    const delta = e.clientY - dragStartY.current;
+    const next = sheetShut ? Math.min(0, delta) : Math.max(0, delta);
     dragOffsetRef.current = next;
     setDragOffsetState(next);
   };
@@ -684,6 +685,11 @@ export function Inspector({
     if (!dragging) return;
     setDragging(false);
     const off = dragOffsetRef.current;
+    if (Math.abs(off) < 10) {
+      setSheetShut(false);
+      setDragOffset(0);
+      return;
+    }
     if (!sheetShut && off > 90) {
       setSheetShut(true);
       setDragOffset(0);
@@ -694,18 +700,13 @@ export function Inspector({
       setDragOffset(0);
       return;
     }
-    if (sheetShut && Math.abs(off) < 10) {
-      setSheetShut(false);
-      setDragOffset(0);
-      return;
-    }
     setDragOffset(0);
   };
   const sheetStyle =
     dragging || dragOffset !== 0
       ? {
           transform: sheetShut
-            ? `translateY(calc(100% - 42px + ${dragOffset}px))`
+            ? `translateY(calc(100% - 34px + ${dragOffset}px))`
             : `translateY(${dragOffset}px)`,
           transition: dragging ? "none" : undefined,
         }
