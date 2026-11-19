@@ -9726,6 +9726,24 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   }
 }
 
+@media (min-width: 769px) {
+  /* Canvas ook op desktop onder de zwevende navbar door laten lopen. */
+  .ge-wrap > .ge-body {
+    margin-top: -72px;
+  }
+  .ge-wrap > .ge-body .insp {
+    padding-top: 88px;
+  }
+}
+@media (min-width: 769px) and (max-width: 1024px) {
+  .ge-wrap > .ge-body {
+    margin-top: -64px;
+  }
+  .ge-wrap > .ge-body .insp {
+    padding-top: 80px;
+  }
+}
+
 /* ---------- Auth screen: volledige restyle ---------- */
 .auth-shell {
   min-height: 100dvh;
