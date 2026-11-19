@@ -1285,6 +1285,7 @@ select:focus {
   display: flex;
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 .ge-canvas {
@@ -1476,10 +1477,14 @@ select:focus {
 
 /* ---------- Inspector ---------- */
 .insp {
-  position: relative;
-  width: 320px;
+  position: absolute;
+  top: 84px;
+  right: 12px;
+  bottom: 12px;
+  width: min(320px, calc(100% - 24px));
   flex-shrink: 0;
-  margin: 84px 12px 12px 0;
+  margin: 0;
+  z-index: 20;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -5347,6 +5352,7 @@ html {
   /* Inspector: zwevend bottom-sheet, in dezelfde taal als de navbar */
   .insp {
     position: absolute;
+    top: auto;
     left: 8px;
     right: 8px;
     bottom: 8px;
@@ -9777,7 +9783,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
     margin-top: -64px;
   }
   .ge-wrap > .ge-body .insp {
-    margin-top: 76px;
+    top: 76px;
   }
 }
 
