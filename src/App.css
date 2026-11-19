@@ -5324,23 +5324,23 @@ html {
     flex: none;
   }
 
-  /* Inspector: bottom sheet over the canvas, zelfde taal als de modals */
+  /* Inspector: zwevend bottom-sheet, in dezelfde taal als de navbar */
   .insp {
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
     width: auto;
-    max-height: 70dvh;
+    max-height: 68dvh;
     z-index: 20;
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: none;
     background: var(--surface);
-    border: 0;
-    border-radius: 20px 20px 0 0;
-    box-shadow: var(--shadow);
-    padding: 0 20px calc(20px + env(safe-area-inset-bottom));
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    box-shadow: 0 12px 40px rgba(22, 38, 28, 0.16);
+    padding: 0 18px calc(18px + env(safe-area-inset-bottom));
     transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .insp-grip {
@@ -5352,8 +5352,9 @@ html {
     align-items: center;
     height: 34px;
     padding: 8px 0;
-    margin: 0 -20px;
+    margin: 0 -18px;
     background: var(--surface);
+    border-radius: 20px 20px 0 0;
     touch-action: none;
     cursor: grab;
     flex: none;
