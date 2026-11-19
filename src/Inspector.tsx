@@ -831,9 +831,7 @@ export function Inspector({
           aria-expanded={!sheetShut}
           title={sheetShut ? "Openen" : "Inklappen"}
         >
-          <span className="insp-rail-dots" aria-hidden="true">
-            <i /><i /><i />
-          </span>
+          <span className="insp-rail-gripbar" aria-hidden="true" />
         </button>
         <div className="insp-view" key="lijst">
         <h4 className="insp-list-title">
@@ -898,9 +896,7 @@ export function Inspector({
           aria-expanded={!sheetShut}
           title={sheetShut ? "Openen" : "Inklappen"}
         >
-          <span className="insp-rail-dots" aria-hidden="true">
-            <i /><i /><i />
-          </span>
+          <span className="insp-rail-gripbar" aria-hidden="true" />
         </button>
         <div className="insp-view" key={crop.instanceId}>
         <header className="insp-head">
@@ -1001,9 +997,7 @@ export function Inspector({
         aria-expanded={!sheetShut}
         title={sheetShut ? "Openen" : "Inklappen"}
       >
-        <span className="insp-rail-dots" aria-hidden="true">
-          <i /><i /><i />
-        </span>
+        <span className="insp-rail-gripbar" aria-hidden="true" />
       </button>
       <div className="insp-view" key={element.id}>
       <header className="insp-head">

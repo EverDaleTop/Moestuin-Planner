@@ -1520,12 +1520,11 @@ select:focus {
   color: var(--primary);
   background: var(--sow-tint);
 }
-.insp-rail-dots { display: flex; flex-direction: column; gap: 4px; }
-.insp-rail-dots i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
+.insp-rail-gripbar {
+  width: 5px;
+  height: 44px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--ink) 20%, transparent);
 }
 @media (max-width: 768px) {
   .insp-rail { display: none !important; }
