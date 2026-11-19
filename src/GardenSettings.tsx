@@ -416,13 +416,11 @@ export function GardenSettings({
             type="button"
             role="switch"
             aria-checked={prefs.enabled}
-            className="gs-switch"
+            className={`gs-toggle${prefs.enabled ? " is-on" : ""}`}
             onClick={() => void toggleReminders()}
             aria-label="Zaaien herinneringen"
           >
-            <span className="theme-switch-track" aria-hidden="true">
-              <span className="theme-switch-knob" />
-            </span>
+            <span className="gs-toggle-knob" aria-hidden="true" />
           </button>
         </div>
 

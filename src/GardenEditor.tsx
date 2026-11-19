@@ -1333,7 +1333,7 @@ export function GardenEditor(props: Props) {
 					/>
 				</div>
 			) : editorTab === 'instellingen' ? (
-				<div className='shop-scroll'>
+				<div className='shop-scroll settings-scroll'>
 					<div className='shop-page'>
 						<GardenSettings
 							garden={garden}

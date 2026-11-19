@@ -33,7 +33,7 @@ function collectCandidates(pageMode: boolean): HTMLElement[] {
   const out: HTMLElement[] = [];
   const selector = pageMode
     ? "body, body *"
-    : ".sow-modal, .sow-modal *, .insp, .insp *, .catdd-pop, .catdd-pop *";
+    : ".sow-modal, .sow-modal *, .insp, .insp *, .catdd-pop, .catdd-pop *, .settings-scroll, .settings-scroll *";
   for (const el of document.querySelectorAll<HTMLElement>(selector)) {
     if (!el.isConnected) continue;
     if (pageMode && (el === document.body || el === document.documentElement)) continue;
