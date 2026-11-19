@@ -7,7 +7,6 @@ import { CategoryDropdown } from "./CategoryDropdown";
 import {
   checkSowReminders,
   getNotifyPrefs,
-  permissionState,
   requestNotifyPermission,
   saveNotifyPrefs,
 } from "./notifications";
@@ -60,11 +59,9 @@ export function GardenSettings({
   const [transferTarget, setTransferTarget] = useState<string | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
   const [prefs, setPrefs] = useState(() => getNotifyPrefs(garden.id));
-  const [permission, setPermission] = useState(() => permissionState());
 
   useEffect(() => {
     setPrefs(getNotifyPrefs(garden.id));
-    setPermission(permissionState());
   }, [garden.id]);
 
   const savePrefs = (next: typeof prefs) => {
@@ -78,7 +75,6 @@ export function GardenSettings({
       return;
     }
     const ok = await requestNotifyPermission();
-    setPermission(permissionState());
     if (ok) savePrefs({ ...prefs, enabled: true });
   };
 
@@ -423,6 +419,7 @@ export function GardenSettings({
           <div className="gs-reminder-controls">
             <CategoryDropdown
               id="gs-reminder-days"
+              noIcons
               categories={REMINDER_DAY_OPTIONS}
               value={String(prefs.daysBefore)}
               onChange={(key) => savePrefs({ ...prefs, daysBefore: Number(key) })}
@@ -439,12 +436,6 @@ export function GardenSettings({
             </button>
           </div>
         </div>
-
-        {permission === "denied" && (
-          <p className="gs-hint">
-            Browsermeldingen zijn geblokkeerd. Sta ze toe in je browserinstellingen.
-          </p>
-        )}
 
         {reminders.length > 0 && (
           <ul className="gs-reminders">
