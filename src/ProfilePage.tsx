@@ -75,6 +75,10 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
       setPassError("Nieuwe wachtwoorden komen niet overeen.");
       return;
     }
+    if (next.length < 4) {
+      setPassError("Nieuw wachtwoord moet minimaal 4 tekens zijn.");
+      return;
+    }
     setPassBusy(true);
     setPassError(null);
     setPassOk(false);
@@ -269,7 +273,7 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
                 <button
                   className="btn-primary"
                   onClick={() => void savePassword()}
-                  disabled={passBusy || !current || !next || !confirm}
+                  disabled={passBusy || !current || !next || !confirm || next.length < 4}
                 >
                   {passBusy ? "Opslaan…" : "Wachtwoord wijzigen"}
                 </button>
