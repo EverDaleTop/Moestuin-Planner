@@ -1511,9 +1511,11 @@ select:focus {
   border-radius: 0 12px 12px 0;
   background: var(--surface);
   color: var(--ink-soft);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   transition: color 0.15s ease, background-color 0.15s ease;
 }
+.insp-rail:active { cursor: grabbing; }
 .insp-rail:hover:not(:disabled) {
   color: var(--primary);
   background: var(--sow-tint);

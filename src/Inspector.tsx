@@ -667,6 +667,11 @@ export function Inspector({
   const [confirmDelete, setConfirmDelete] = useState<null | "element" | "crop">(null);
   const dragStartY = useRef(0);
   const dragOffsetRef = useRef(0);
+  const railStartX = useRef(0);
+  const railOffsetRef = useRef(0);
+  const railDidDrag = useRef(false);
+  const [railDragging, setRailDragging] = useState(false);
+  const [railOffset, setRailOffsetState] = useState(0);
   const [dragOffset, setDragOffsetState] = useState(0);
   const [dragging, setDragging] = useState(false);
   const prevSelection = useRef({
@@ -685,6 +690,9 @@ export function Inspector({
     dragOffsetRef.current = 0;
     setDragOffsetState(0);
     setDragging(false);
+    setRailDragging(false);
+    railOffsetRef.current = 0;
+    setRailOffsetState(0);
   }, [element?.id, activeCropId]);
 
   const setDragOffset = (v: number) => {
@@ -738,6 +746,47 @@ export function Inspector({
         }
       : undefined;
 
+  // Horizontaal dragen aan de rail (desktop): naar rechts sluiten, naar links openen.
+  const railStyle =
+    railDragging || railOffset !== 0
+      ? {
+          transform: sheetShut
+            ? `translateX(calc(100% - 44px + ${railOffset}px))`
+            : `translateX(${railOffset}px)`,
+          transition: railDragging ? "none" : undefined,
+        }
+      : undefined;
+  const asideStyle = railStyle ?? sheetStyle;
+
+  const onRailDown = (e: React.PointerEvent) => {
+    railStartX.current = e.clientX;
+    railOffsetRef.current = 0;
+    railDidDrag.current = false;
+    setRailDragging(true);
+    setRailOffsetState(0);
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onRailMove = (e: React.PointerEvent) => {
+    if (!railDragging) return;
+    const delta = e.clientX - railStartX.current;
+    if (Math.abs(delta) > 4) railDidDrag.current = true;
+    const next = sheetShut ? Math.min(0, delta) : Math.max(0, delta);
+    railOffsetRef.current = next;
+    setRailOffsetState(next);
+  };
+  const onRailUp = () => {
+    if (!railDragging) return;
+    setRailDragging(false);
+    const off = railOffsetRef.current;
+    if (!railDidDrag.current) {
+      setRailOffsetState(0);
+      return;
+    }
+    if (!sheetShut && off > 90) setSheetShut(true);
+    else if (sheetShut && off < -60) setSheetShut(false);
+    setRailOffsetState(0);
+  };
+
   const cropById = useMemo(() => {
     const m = new Map<string, Crop>();
     catalog.forEach((c) => m.set(c.id, c));
@@ -752,7 +801,7 @@ export function Inspector({
     return (
       <aside
         className={`insp${sheetShut ? " sheet-shut" : ""}`}
-        style={sheetStyle}
+        style={asideStyle}
       >
         <div
           className="insp-grip"
@@ -767,7 +816,17 @@ export function Inspector({
         <button
           type="button"
           className={`insp-rail${sheetShut ? " is-shut" : ""}`}
-          onClick={() => setSheetShut((v) => !v)}
+          onPointerDown={onRailDown}
+          onPointerMove={onRailMove}
+          onPointerUp={onRailUp}
+          onPointerCancel={onRailUp}
+          onClick={() => {
+            if (railDidDrag.current) {
+              railDidDrag.current = false;
+              return;
+            }
+            setSheetShut((v) => !v);
+          }}
           aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
           aria-expanded={!sheetShut}
           title={sheetShut ? "Openen" : "Inklappen"}
@@ -809,7 +868,7 @@ export function Inspector({
     return (
       <aside
         className={`insp${sheetShut ? " sheet-shut" : ""}`}
-        style={sheetStyle}
+        style={asideStyle}
       >
         <div
           className="insp-grip"
@@ -824,7 +883,17 @@ export function Inspector({
         <button
           type="button"
           className={`insp-rail${sheetShut ? " is-shut" : ""}`}
-          onClick={() => setSheetShut((v) => !v)}
+          onPointerDown={onRailDown}
+          onPointerMove={onRailMove}
+          onPointerUp={onRailUp}
+          onPointerCancel={onRailUp}
+          onClick={() => {
+            if (railDidDrag.current) {
+              railDidDrag.current = false;
+              return;
+            }
+            setSheetShut((v) => !v);
+          }}
           aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
           aria-expanded={!sheetShut}
           title={sheetShut ? "Openen" : "Inklappen"}
@@ -902,7 +971,7 @@ export function Inspector({
   return (
     <aside
       className={`insp${sheetShut ? " sheet-shut" : ""}`}
-      style={sheetStyle}
+      style={asideStyle}
     >
       <div
         className="insp-grip"
@@ -917,7 +986,17 @@ export function Inspector({
       <button
         type="button"
         className={`insp-rail${sheetShut ? " is-shut" : ""}`}
-        onClick={() => setSheetShut((v) => !v)}
+        onPointerDown={onRailDown}
+        onPointerMove={onRailMove}
+        onPointerUp={onRailUp}
+        onPointerCancel={onRailUp}
+        onClick={() => {
+          if (railDidDrag.current) {
+            railDidDrag.current = false;
+            return;
+          }
+          setSheetShut((v) => !v);
+        }}
         aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
         aria-expanded={!sheetShut}
         title={sheetShut ? "Openen" : "Inklappen"}
