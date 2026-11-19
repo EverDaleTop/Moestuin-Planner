@@ -5290,6 +5290,9 @@ html {
   /* Body: canvas fills the whole area, inspector floats as a bottom sheet */
   .ge-body {
     position: relative;
+    /* Canvas loopt onder de zwevende navbar door, net als de andere pagina's. */
+    margin-top: -70px;
+    padding-top: 70px;
   }
   .ge-canvas {
     position: absolute;
@@ -5299,7 +5302,7 @@ html {
 
   /* Toolbar: floating pill at the top of the canvas, wraps, larger buttons */
   .ge-bottom-toolbar {
-    top: 10px;
+    top: 80px;
     bottom: auto;
     left: 8px;
     right: 8px;
