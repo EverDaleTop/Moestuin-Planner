@@ -813,9 +813,13 @@ export function Inspector({
         >
           {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
         </div>
-        <button
-          type="button"
-          className={`insp-rail${sheetShut ? " is-shut" : ""}`}
+        <div
+          className={`sow-modal-grip insp-rail${sheetShut ? " is-shut" : ""}`}
+          role="button"
+          tabIndex={0}
+          aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
+          aria-expanded={!sheetShut}
+          title={sheetShut ? "Openen" : "Inklappen"}
           onPointerDown={onRailDown}
           onPointerMove={onRailMove}
           onPointerUp={onRailUp}
@@ -827,12 +831,13 @@ export function Inspector({
             }
             setSheetShut((v) => !v);
           }}
-          aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
-          aria-expanded={!sheetShut}
-          title={sheetShut ? "Openen" : "Inklappen"}
-        >
-          <span className="insp-rail-gripbar" aria-hidden="true" />
-        </button>
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setSheetShut((v) => !v);
+            }
+          }}
+        />
         <div className="insp-view" key="lijst">
         <h4 className="insp-list-title">
           <i className="fa-solid fa-layer-group" aria-hidden="true" />
@@ -878,9 +883,13 @@ export function Inspector({
         >
           {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
         </div>
-        <button
-          type="button"
-          className={`insp-rail${sheetShut ? " is-shut" : ""}`}
+        <div
+          className={`sow-modal-grip insp-rail${sheetShut ? " is-shut" : ""}`}
+          role="button"
+          tabIndex={0}
+          aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
+          aria-expanded={!sheetShut}
+          title={sheetShut ? "Openen" : "Inklappen"}
           onPointerDown={onRailDown}
           onPointerMove={onRailMove}
           onPointerUp={onRailUp}
@@ -892,12 +901,13 @@ export function Inspector({
             }
             setSheetShut((v) => !v);
           }}
-          aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
-          aria-expanded={!sheetShut}
-          title={sheetShut ? "Openen" : "Inklappen"}
-        >
-          <span className="insp-rail-gripbar" aria-hidden="true" />
-        </button>
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setSheetShut((v) => !v);
+            }
+          }}
+        />
         <div className="insp-view" key={crop.instanceId}>
         <header className="insp-head">
           <button
@@ -979,9 +989,13 @@ export function Inspector({
       >
         {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
       </div>
-      <button
-        type="button"
-        className={`insp-rail${sheetShut ? " is-shut" : ""}`}
+      <div
+        className={`sow-modal-grip insp-rail${sheetShut ? " is-shut" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
+        aria-expanded={!sheetShut}
+        title={sheetShut ? "Openen" : "Inklappen"}
         onPointerDown={onRailDown}
         onPointerMove={onRailMove}
         onPointerUp={onRailUp}
@@ -993,12 +1007,13 @@ export function Inspector({
           }
           setSheetShut((v) => !v);
         }}
-        aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
-        aria-expanded={!sheetShut}
-        title={sheetShut ? "Openen" : "Inklappen"}
-      >
-        <span className="insp-rail-gripbar" aria-hidden="true" />
-      </button>
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setSheetShut((v) => !v);
+          }
+        }}
+      />
       <div className="insp-view" key={element.id}>
       <header className="insp-head">
         {onBack && (

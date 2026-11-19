@@ -1495,7 +1495,7 @@ select:focus {
 .insp-grip {
   display: none;
 }
-.insp-rail {
+.insp-rail.sow-modal-grip {
   position: absolute;
   left: 0;
   top: 50%;
@@ -1506,6 +1506,8 @@ select:focus {
   display: none;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  margin: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1514,19 +1516,19 @@ select:focus {
   touch-action: none;
   transition: color 0.15s ease;
 }
-.insp-rail:active { cursor: grabbing; }
-.insp-rail:hover:not(:disabled) {
-  color: var(--primary);
-  background: transparent;
-}
-.insp-rail-gripbar {
+.insp-rail.sow-modal-grip:active { cursor: grabbing; }
+.insp-rail.sow-modal-grip::before {
+  content: "";
   width: 5px;
   height: 44px;
   border-radius: 99px;
   background: color-mix(in srgb, var(--ink) 20%, transparent);
 }
+.insp-rail.sow-modal-grip:hover::before {
+  background: var(--primary);
+}
 @media (max-width: 768px) {
-  .insp-rail { display: none !important; }
+  .insp-rail.sow-modal-grip { display: none !important; }
 }
 
 .insp-empty {
@@ -9821,7 +9823,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
     opacity: 0;
     pointer-events: none;
   }
-  .insp-rail { display: flex; }
+  .insp-rail.sow-modal-grip { display: flex; }
 }
 @media (min-width: 769px) and (max-width: 1024px) {
   .ge-wrap > .ge-body {
