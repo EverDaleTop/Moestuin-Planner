@@ -5,6 +5,7 @@ import { fmtM, PX_PER_M } from "./storage";
 import { cropLabel, fitCropCounts, cropAreaForCounts } from "./cropIcons";
 import { CropGlyph } from "./CropIconPicker";
 import { objectDef } from "./gardenObjects";
+import { ConfirmModal } from "./ConfirmModal";
 
 interface Props {
   locked?: boolean;
@@ -310,13 +311,21 @@ export function CropSelect({
   }, [open ]);
 
   const q = query.trim().toLowerCase();
-  const options = q.length === 0
+  const options = (q.length === 0
     ? catalog
-    : catalog.filter((c) => c.name.toLowerCase().includes(q));
+    : catalog.filter((c) => c.name.toLowerCase().includes(q))
+  )
+    .slice()
+    .sort(
+      (a, b) =>
+        a.name.localeCompare(b.name, "nl", { sensitivity: "base" }) ||
+        (a.variety ?? "").localeCompare(b.variety ?? "", "nl", { sensitivity: "base" })
+    );
 
   const openNow = () => {
     window.clearTimeout(closeTimer.current ?? undefined);
     closeTimer.current = null;
+    measure();
     setClosing(false);
     setQuery("");
     setOpen(true);
@@ -345,6 +354,7 @@ export function CropSelect({
             requestClose();
             return;
           }
+          measure();
           setClosing(false);
           setQuery("");
           setOpen(true);
@@ -649,13 +659,24 @@ export function Inspector({
   onDeselectCrop,
   activeCropId,
 }: Props) {
-  const [sheetShut, setSheetShut] = useState(false);
+  const [sheetShut, setSheetShut] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState<null | "element" | "crop">(null);
   const dragStartY = useRef(0);
   const dragOffsetRef = useRef(0);
   const [dragOffset, setDragOffsetState] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const prevSelection = useRef({
+    elementId: element?.id,
+    cropId: activeCropId,
+  });
 
   useEffect(() => {
+    // Alleen heropenen als de selectie echt verandert; bij de eerste render
+    // (en in StrictMode) blijft de sheet standaard dicht.
+    const prev = prevSelection.current;
+    const next = { elementId: element?.id, cropId: activeCropId };
+    prevSelection.current = next;
+    if (prev.elementId === next.elementId && prev.cropId === next.cropId) return;
     setSheetShut(false);
     dragOffsetRef.current = 0;
     setDragOffsetState(0);
@@ -686,7 +707,8 @@ export function Inspector({
     setDragging(false);
     const off = dragOffsetRef.current;
     if (Math.abs(off) < 10) {
-      setSheetShut(false);
+      // Tik op de greep: open of sluit de sheet.
+      setSheetShut((shut) => !shut);
       setDragOffset(0);
       return;
     }
@@ -802,10 +824,7 @@ export function Inspector({
           <button
             type="button"
             className="btn-ghost insp-back insp-remove"
-            onClick={() => {
-              onRemoveCrop(crop.instanceId);
-              onDeselectCrop();
-            }}
+            onClick={() => setConfirmDelete("crop")}
             aria-label="Gewas verwijderen"
             title="Verwijderen"
           >
@@ -824,6 +843,22 @@ export function Inspector({
           />
         </div>
         </div>
+        <ConfirmModal
+          open={confirmDelete === "crop"}
+          title="Gewas verwijderen?"
+          message={
+            <>
+              Weet je zeker dat je <strong>{cropInfo ? cropLabel(cropInfo) : "dit gewas"}</strong> uit{" "}
+              {element.label || elementKind} wilt verwijderen? Dit kan niet ongedaan worden gemaakt.
+            </>
+          }
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            onRemoveCrop(crop.instanceId);
+            setConfirmDelete(null);
+            onDeselectCrop();
+          }}
+        />
       </aside>
     );
   }
@@ -870,7 +905,7 @@ export function Inspector({
         <button
           type="button"
           className="btn-ghost insp-back insp-remove"
-          onClick={onRemove}
+          onClick={() => setConfirmDelete("element")}
           aria-label="Verwijderen"
           title="Verwijderen"
         >
@@ -944,7 +979,15 @@ export function Inspector({
             <p className="insp-hint">Nog geen gewassen in dit bed.</p>
           ) : (
             <div className="icon-picker-grid insp-crop-grid">
-              {element.crops.map((c) => {
+              {[...element.crops]
+                .sort((a, b) =>
+                  (cropById.get(a.cropId)?.name ?? "").localeCompare(
+                    cropById.get(b.cropId)?.name ?? "",
+                    "nl",
+                    { sensitivity: "base" }
+                  )
+                )
+                .map((c) => {
                 const crop = cropById.get(c.cropId);
                 return (
                   <button
@@ -989,6 +1032,21 @@ export function Inspector({
         />
       </section>
       </div>
+      <ConfirmModal
+        open={confirmDelete === "element"}
+        title={`${elementKind} verwijderen?`}
+        message={
+          <>
+            Weet je zeker dat je <strong>{element.label || elementKind}</strong> wilt verwijderen? Dit kan
+            niet ongedaan worden gemaakt.
+          </>
+        }
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => {
+          setConfirmDelete(null);
+          onRemove();
+        }}
+      />
     </aside>
   );
 }

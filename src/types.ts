@@ -71,6 +71,8 @@ export interface GardenTombstones {
   elements: Record<string, number>;
   /** verwijderde gewas-stukjes (instanceId) binnen bedden */
   crops: Record<string, number>;
+  /** verwijderde gewassen uit de gewassenlijst van deze tuin */
+  catalog: Record<string, number>;
   harvests: Record<string, number>;
   sowings: Record<string, number>;
   expenses: Record<string, number>;
@@ -168,6 +170,8 @@ export interface Expense {
   shoppingItemId?: string;
   /** gekozen categorie, zie src/expenseCategories.ts */
   category?: string;
+  /** user id van de deelnemer voor wie deze uitgave is (optioneel) */
+  assigneeId?: string;
   /** laatste wijziging (ms sinds epoch) */
   updatedAt?: number;
 }
@@ -180,6 +184,8 @@ export interface Income {
   date: string;
   /** gekozen categorie, zie src/expenseCategories.ts (INCOME_CATEGORIES) */
   category?: string;
+  /** user id van de deelnemer voor wie deze inkomst is (optioneel) */
+  assigneeId?: string;
   /** laatste wijziging (ms sinds epoch) */
   updatedAt?: number;
 }
@@ -201,6 +207,8 @@ export interface ShoppingItem {
   category?: string;
   note?: string;
   done: boolean;
+  /** user id van de deelnemer voor wie dit product is (optioneel) */
+  assigneeId?: string;
   createdAt: number;
   /** laatste wijziging (ms sinds epoch) */
   updatedAt?: number;
@@ -226,6 +234,8 @@ export interface Garden {
   name: string;
   createdAt: number;
   elements: GardenElement[];
+  /** gewassenlijst van déze tuin; standaard gevuld met de algemene lijst */
+  cropCatalog?: Crop[];
   harvests: HarvestEntry[];
   sowings: SowingEntry[];
   expenses: Expense[];
@@ -254,5 +264,4 @@ export interface User {
 
 export interface AppData {
   gardens: Garden[];
-  cropCatalog: Crop[];
 }

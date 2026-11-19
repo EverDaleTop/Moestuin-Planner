@@ -120,6 +120,11 @@ export const api = {
     });
   },
 
+  /** Account definitief verwijderen. */
+  deleteAccount(): Promise<{ ok: true }> {
+    return req("/me", { method: "DELETE" });
+  },
+
   putCatalog(cropCatalog: Crop[], deletedCropIds?: Record<string, number>): Promise<{ cropCatalog: Crop[] }> {
     return req("/catalog", {
       method: "PUT",

@@ -44,6 +44,11 @@ async function main(): Promise<void> {
       immutable: true,
     })
   );
+  // Zelf-gehoste lettertypen: één maand cachen (bestandsnamen zijn stabiel).
+  app.use(
+    "/fonts",
+    express.static(path.join(distDir, "fonts"), { maxAge: "30d" })
+  );
   app.use(express.static(distDir, { index: false }));
   // SPA fallback (Express 5: use a middleware instead of a "*" route)
   app.use((req, res, next) => {
@@ -58,7 +63,7 @@ async function main(): Promise<void> {
   });
 
   server.listen(PORT, () => {
-    console.log(`Pluktuintje server draait op http://localhost:${PORT}`);
+    console.log(`Oogstplan server draait op http://localhost:${PORT}`);
   });
 
   const shutdown = () => {

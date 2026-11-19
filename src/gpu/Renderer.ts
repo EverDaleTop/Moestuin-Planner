@@ -70,6 +70,12 @@ export class GpuRenderer {
   private view = { width: 0, height: 0 };
   /** effen achtergrondkleur van het canvas (thema) */
   private bgBase: [number, number, number, number] = [1, 1, 1, 1];
+  /** laatst gezette achtergrond (hex), zodat we niet elke frame parsen */
+  private bgHex = "";
+  /** herbruikbare vertexbuffer: geen Float32Array per frame (GC-hikjes) */
+  private data = new Float32Array(0);
+  /** geparseerde kleuren per hex-string, één keer per kleur */
+  private colorCache = new Map<string, [number, number, number, number]>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -143,7 +149,19 @@ export class GpuRenderer {
   /** Effen achtergrondkleur van het canvas (thema). Geen gradient: het canvas
  *  wist hiermee en tekent de elementen erbovenop, precies als eerst. */
   setBackground(base: string) {
+    if (base === this.bgHex) return;
+    this.bgHex = base;
     this.bgBase = hexToRgba(base, 1);
+  }
+
+  /** Kleur uit de cache (hex → rgba), zodat renderen niet elke frame parset. */
+  private rgba(hex: string): [number, number, number, number] {
+    let c = this.colorCache.get(hex);
+    if (!c) {
+      c = hexToRgba(hex, 1);
+      this.colorCache.set(hex, c);
+    }
+    return c;
   }
 
   /** Render rectangles using an orthographic (px) camera, single batched draw. */
@@ -165,23 +183,21 @@ export class GpuRenderer {
     const zoom = camera.zoom || 1;
     const camX = camera.x || 0;
     const camY = camera.y || 0;
-    const data = new Float32Array(items.length * 6 * STRIDE);
+    const need = items.length * 6 * STRIDE;
+    if (this.data.length < need) this.data = new Float32Array(need);
+    const data = this.data;
     let ptr = 0;
 
-    const toNdc = {
-      x: (v: number) => ((v * zoom + camX) / width) * 2 - 1,
-      y: (v: number) => 1 - ((v * zoom + camY) / height) * 2,
-    };
+    const toNdcX = (v: number) => ((v * zoom + camX) / width) * 2 - 1;
+    const toNdcY = (v: number) => 1 - ((v * zoom + camY) / height) * 2;
 
     for (const item of items) {
       const { x, y, w, h } = item.rect;
-      const [r, g, b, a] = item.selected
-        ? hexToRgba("#6fd6a4", 1)
-        : hexToRgba(item.color, 1);
-      const x0 = toNdc.x(x);
-      const y0 = toNdc.y(y);
-      const x1 = toNdc.x(x + w);
-      const y1 = toNdc.y(y + h);
+      const [r, g, b, a] = this.rgba(item.selected ? "#6fd6a4" : item.color);
+      const x0 = toNdcX(x);
+      const y0 = toNdcY(y);
+      const x1 = toNdcX(x + w);
+      const y1 = toNdcY(y + h);
       // two triangles (6 vertices)
       const xs = [x0, x1, x0, x0, x1, x1];
       const ys = [y0, y0, y1, y1, y0, y1];
@@ -198,7 +214,7 @@ export class GpuRenderer {
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, ptr), gl.DYNAMIC_DRAW);
     gl.drawArrays(gl.TRIANGLES, 0, items.length * 6);
   }
 

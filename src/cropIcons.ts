@@ -95,6 +95,28 @@ export const CROP_ICONS: CropIconDef[] = [
   { key: "augurk", label: "Augurk", fi: "fi-rr-cucumber", char: "\uf503", emoji: "🥒" },
   { key: "courgette", label: "Courgette", fi: "fi-rr-cucumber", char: "\uf503", emoji: "🥒" },
   { key: "spinazie", label: "Spinazie", fi: "fi-rr-leafy-green", char: "\uf88d", emoji: "🥬" },
+
+  // Aanvulling met eigen icoonafbeeldingen (specifiekere gewassen dan de
+  // generieke Flaticon-set: eigen kruiden, bessen en koolsoorten).
+  { key: "basilicum", label: "Basilicum", emoji: "🌿" },
+  { key: "bieslook", label: "Bieslook", emoji: "🌿" },
+  { key: "dille", label: "Dille", emoji: "🌿" },
+  { key: "peterselie", label: "Peterselie", emoji: "🌿" },
+  { key: "salie", label: "Salie", emoji: "🌿" },
+  { key: "tijm", label: "Tijm", emoji: "🌿" },
+  { key: "rabarber", label: "Rabarber", emoji: "🌱" },
+  { key: "raapstelen", label: "Raapstelen", emoji: "🥬" },
+  { key: "kapucijner", label: "Kapucijner", emoji: "🫛" },
+  { key: "framboos", label: "Framboos", emoji: "🫐" },
+  { key: "braam", label: "Braam", emoji: "🫐" },
+  { key: "chinesekool", label: "Chinese kool", emoji: "🥬" },
+  { key: "rodekool", label: "Rode kool", emoji: "🥬" },
+  { key: "spitskool", label: "Spitskool", emoji: "🥬" },
+  { key: "cucameloen", label: "Cucameloen", emoji: "🍈" },
+  { key: "bloemen", label: "Bloemen", emoji: "🌸" },
+  { key: "oregano", label: "Oregano", emoji: "🌿" },
+  { key: "punt-paprika", label: "Puntpaprika", emoji: "🌶️" },
+  { key: "caribische-peper", label: "Caribische peper", emoji: "🌶️" },
 ];
 export const DEFAULT_CROP_ICON = "kiemplant";
 
@@ -256,10 +278,11 @@ const NAME_EMOJI: [RegExp, string][] = [
  * bladgroente, pastinaak → wortel). Specifiek vóór algemeen zetten.
  */
 const NAME_KEY: [RegExp, string][] = [
+  [/punt.?paprika/i, "punt-paprika"],
   [/paprika/i, "paprika"],
   [/jalap/i, "jalapeno"],
   [/cayenne/i, "cayennepeper"],
-  [/adjuma|madame jeanette|caribische peper/i, "adjuma-caribische-peper"],
+  [/adjuma|madame jeanette|caribische peper/i, "caribische-peper"],
   [/habanero/i, "habanero"],
   [/rawit|lombok|tabasco/i, "rawit-lombok"],
   [/peper|chili|sambal/i, "peper-heet"],
@@ -283,13 +306,31 @@ const NAME_KEY: [RegExp, string][] = [
   [/mierikswortel/i, "mierikswortel"],
   [/koolrabi/i, "raap-koolraap"],
   [/rammenas/i, "radijs"],
+  [/raapsteel|raapstelen/i, "raapstelen"],
   [/raap|meiraap|knolraap|koolraap/i, "raap-koolraap"],
   [/venkel/i, "venkel"],
-  [/witte kool|spitskool|savooie|rode kool/i, "witte-kool"],
+  [/chinese kool|chinesekool|paksoi/i, "chinesekool"],
+  [/rode kool|rodekool/i, "rodekool"],
+  [/spitskool/i, "spitskool"],
+  [/witte kool|savooie/i, "witte-kool"],
   [/tauge|microgroente/i, "kiemplant"],
   [/biet|kroot/i, "raap-koolraap"],
   [/banaan/i, "banaan"],
-  [/basilicum|peterselie|bieslook|tijm|rozemarijn|munt|dille|koriander|oregano|bonenkruid|kervel|salie/i, "blad"],
+  [/rabarber/i, "rabarber"],
+  [/kapucijner/i, "kapucijner"],
+  [/cucameloen|charentais|cucamelon/i, "cucameloen"],
+  [/framboos/i, "framboos"],
+  [/braam|bramen/i, "braam"],
+  [/bessen|blauwe bes|bosbes|aalbes|kruisbes/i, "bessen"],
+  [/basilicum/i, "basilicum"],
+  [/bieslook|chives/i, "bieslook"],
+  [/dille/i, "dille"],
+  [/peterselie/i, "peterselie"],
+  [/salie/i, "salie"],
+  [/tijm/i, "tijm"],
+  [/oregano/i, "oregano"],
+  [/bloemen|snijbloem|sierbloem/i, "bloemen"],
+  [/rozemarijn|munt|koriander|bonenkruid|kervel|kruid/i, "blad"],
 ];
 
 function iconKeyForCropName(name?: string): string | undefined {
@@ -473,6 +514,16 @@ export function plantPositions(
       spots.push({ x: x0 + c * sx, y: y0 + r * sy });
     }
   }
-  const size = Math.max(3.5, Math.min(14, Math.min(sx, sy) * 0.42));
+  // Icoongrootte in wereld-px, met een harde boven- én ondergrens zodat alle
+  // gewassen ongeveer even groot ogen: één los plantje mag niet enorm worden
+  // en dicht geplante gewassen (wortel, radijs) mogen niet tot spikkels
+  // krimpen. Binnen die band volgt het icoon de kleinste plantafstand, zodat
+  // het bij normale stand netjes tussen de planten past.
+  const ICON_MAX_PX = 16;
+  const ICON_MIN_PX = 10;
+  const size = Math.min(
+    ICON_MAX_PX,
+    Math.max(ICON_MIN_PX, Math.min(sx, sy) * 0.9)
+  );
   return { spots, size };
 }

@@ -4,10 +4,14 @@ import { useCollapseForm } from "./useCollapseForm";
 import { lineTotal, parseQty } from "./shopping";
 import { EXPENSE_CATEGORIES, categoryByKey } from "./expenseCategories";
 import { CategoryDropdown } from "./CategoryDropdown";
-import { ShoppingFormModal } from "./ShoppingFormModal";
+import { ShoppingFormModal, type ShopMember } from "./ShoppingFormModal";
+import { ConfirmModal } from "./ConfirmModal";
 
 interface Props {
   items: ShoppingItem[];
+  /** deelnemers van de tuin (eigenaar + gedeeld met) */
+  members: ShopMember[];
+  currentUserId?: string;
   onAdd: (entry: Omit<ShoppingItem, "id" | "createdAt" | "done">) => void;
   onUpdate: (id: string, patch: Partial<ShoppingItem>) => void;
   onRemove: (id: string) => void;
@@ -26,12 +30,18 @@ function normalizeUrl(url: string): string {
   return `https://${t}`;
 }
 
-export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDone }: Props) {
+export function ShoppingListView({ items, members, currentUserId, onAdd, onUpdate, onRemove, onToggleDone }: Props) {
   const sheet = useCollapseForm();
   const [editEntry, setEditEntry] = useState<ShoppingItem | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "done">("all");
   const [catFilter, setCatFilter] = useState("");
+  const [memberFilter, setMemberFilter] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<ShoppingItem | null>(null);
+
+  const memberById = useMemo(() => new Map(members.map((m) => [m.id, m.name])), [members]);
+  const assigneeName = (item: ShoppingItem) =>
+    item.assigneeId ? (memberById.get(item.assigneeId) ?? null) : null;
 
   const toggleDone = (item: ShoppingItem) => {
     const next = !item.done;
@@ -61,6 +71,18 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
     ],
     []
   );
+  const memberOptions = useMemo(
+    () => [
+      { key: "", label: "Iedereen", icon: "fa-user-group", tone: "grey" },
+      ...members.map((m) => ({
+        key: m.id,
+        label: m.id === currentUserId ? `${m.name} (jij)` : m.name,
+        icon: "fa-user",
+        tone: "green",
+      })),
+    ],
+    [members, currentUserId]
+  );
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -68,16 +90,18 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
     if (filter === "open") list = list.filter((i) => !i.done);
     if (filter === "done") list = list.filter((i) => i.done);
     if (catFilter) list = list.filter((i) => i.category && categoryByKey(i.category).key === catFilter);
+    if (memberFilter) list = list.filter((i) => i.assigneeId === memberFilter);
     if (s) {
       list = list.filter(
         (i) =>
           i.title.toLowerCase().includes(s) ||
           (i.note ?? "").toLowerCase().includes(s) ||
-          (i.url ?? "").toLowerCase().includes(s)
+          (i.url ?? "").toLowerCase().includes(s) ||
+          (memberById.get(i.assigneeId ?? "") ?? "").toLowerCase().includes(s)
       );
     }
     return list.sort((a, b) => b.createdAt - a.createdAt);
-  }, [items, q, filter, catFilter]);
+  }, [items, q, filter, catFilter, memberFilter, memberById]);
 
   const openNew = () => {
     setEditEntry(null);
@@ -97,15 +121,13 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
     closeForm();
   };
 
-  const clearDone = () => {
-    items.filter((i) => i.done).forEach((i) => onRemove(i.id));
+  /** Productkaart: klik opent de productpagina (als die er is). */
+  const openProduct = (item: ShoppingItem) => {
+    if (!item.url) return;
+    window.open(normalizeUrl(item.url), "_blank", "noopener,noreferrer");
   };
 
-  /** Klik op de kaart: altijd bewerken via de modal; de productlink zit op het icoontje. */
-  const openCard = (item: ShoppingItem) => {
-    startEdit(item);
-  };
-
+  /** Bewerken gaat via de expliciete potloodknop op de kaart. */
   return (
     <div className="oogst-wrap bood-page">
       <div className="oogst-head">
@@ -137,6 +159,8 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
         mounted={sheet.mounted}
         open={sheet.open}
         edit={editEntry}
+        members={members}
+        currentUserId={currentUserId}
         onClose={closeForm}
         onSave={saveForm}
       />
@@ -173,6 +197,17 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
             onChange={(key) => setFilter(key as "all" | "open" | "done")}
           />
         </div>
+        {members.length > 1 && (
+        <div className="bood-statusfilter">
+          <CategoryDropdown
+            id="bood-memberfilter"
+            noIcons
+            categories={memberOptions}
+            value={memberFilter}
+            onChange={setMemberFilter}
+          />
+        </div>
+        )}
         </div>
       </div>
 
@@ -188,19 +223,22 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
 
       {/* key op de filter: bij een filterwissel her-mounten de kaarten, zodat
           ze netjes in-faden (stagger) i.p.v. ineens te verspringen. */}
-      <div className="shop-grid" key={`${filter}-${catFilter}`}>
+      <div className="shop-grid" key={`${filter}-${catFilter}-${memberFilter}`}>
         {filtered.map((item, i) => (
           <div
             key={item.id}
             style={{ animationDelay: `${Math.min(i, 11) * 35}ms` }}
-            className={`shop-card ${item.done ? "shop-card-done" : ""}`}
-            onClick={() => openCard(item)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") openCard(item);
+            className={`shop-card ${item.done ? "shop-card-done" : ""}${item.url ? " shop-card-clickable" : ""}`}
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest("a, button, input")) return;
+              openProduct(item);
             }}
-            aria-label={`${item.title} bewerken`}
+            role={item.url ? "link" : undefined}
+            tabIndex={item.url ? 0 : undefined}
+            onKeyDown={(e) => {
+              if (item.url && e.key === "Enter") openProduct(item);
+            }}
+            aria-label={item.url ? `${item.title} openen bij de winkel` : undefined}
           >
             {item.imageUrl && (
             <div className="shop-card-media">
@@ -223,7 +261,7 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
                 </button>
                 <button
                   className="shop-card-tool shop-card-tool-danger"
-                  onClick={() => onRemove(item.id)}
+                  onClick={() => setPendingDelete(item)}
                   title="Verwijderen"
                 >
                   <i className="fa-solid fa-trash" />
@@ -255,6 +293,27 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
                   item.title
                 )}
               </div>
+              {(() => {
+                const name = assigneeName(item);
+                const self = item.assigneeId === currentUserId;
+                if (!name) return null;
+                return (
+                  <div className="shop-card-meta">
+                    <span
+                      className={`shop-card-assignee${self ? " is-self" : ""}`}
+                      title={self ? `Voor jou (${name})` : `Voor ${name}`}
+                    >
+                      <span className="shop-card-assignee-avatar" aria-hidden="true">
+                        {(name.trim()[0] ?? "?").toUpperCase()}
+                      </span>
+                      <span className="shop-card-assignee-name">
+                        <span className="shop-card-assignee-label">Voor</span>
+                        <strong>{self ? "jou" : name}</strong>
+                      </span>
+                    </span>
+                  </div>
+                );
+              })()}
               {item.note && <div className="shop-card-note">{item.note}</div>}
               <div className="shop-card-foot">
                 <div className="shop-card-prices">
@@ -262,29 +321,19 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
                     const qtyN = parseQty(item.quantity);
                     const price = item.price ?? 0;
                     const hasPrice = price > 0;
-                    if (hasPrice && qtyN > 1) {
+                    if (hasPrice) {
                       return (
                         <>
                           <span className="shop-card-price">{fmtEuro(lineTotal(item))}</span>
-                          <span className="shop-card-sub">
-                            {item.quantity} × {fmtEuro(price)}
-                          </span>
+                          {qtyN >= 1 && (
+                            <span className="shop-card-sub">
+                              {item.quantity} × {fmtEuro(price)}
+                            </span>
+                          )}
                         </>
                       );
                     }
-                    return (
-                      <>
-                        {hasPrice && (
-                          <span className="shop-card-price">{fmtEuro(price)}</span>
-                        )}
-                        {item.quantity && (
-                          <span className="shop-card-sub">
-                            {item.quantity}
-                            {hasPrice ? "" : " nodig"}
-                          </span>
-                        )}
-                      </>
-                    );
+                    return null;
                   })()}
                 </div>
                 {!item.imageUrl && (
@@ -305,7 +354,7 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
                     </button>
                     <button
                       className="shop-card-minitool shop-card-minitool-danger"
-                      onClick={() => onRemove(item.id)}
+                      onClick={() => setPendingDelete(item)}
                       title="Verwijderen"
                     >
                       <i className="fa-solid fa-trash" />
@@ -334,11 +383,25 @@ export function ShoppingListView({ items, onAdd, onUpdate, onRemove, onToggleDon
         ))}
       </div>
 
-      {doneCount > 0 && (
-        <button className="shop-clear-done" onClick={clearDone}>
-          <i className="fa-solid fa-trash" /> Afgevinkte items verwijderen ({doneCount})
-        </button>
-      )}
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Product verwijderen?"
+        message={
+          pendingDelete ? (
+            <>
+              Weet je zeker dat je <strong>{pendingDelete.title}</strong> van de boodschappenlijst wilt
+              verwijderen? Dit kan niet ongedaan worden gemaakt.
+            </>
+          ) : (
+            ""
+          )
+        }
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) onRemove(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
     </div>
   );
 }

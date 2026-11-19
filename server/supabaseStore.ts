@@ -1,5 +1,5 @@
 /**
- * Supabase-persistentie voor Pluktuintje.
+ * Supabase-persistentie voor Oogstplan.
  *
  * Gebruik: zet SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY als env-vars en de
  * server gebruikt deze store i.p.v. de lokale JSON-file. Zonder die vars valt
@@ -13,7 +13,7 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Crop, Garden } from "../src/types.ts";
-import { DEFAULT_CROP_CATALOG } from "../src/storage.ts";
+import { DEFAULT_CROP_CATALOG, dedupeCatalog, seedCatalog } from "../src/storage.ts";
 import { randomToken } from "./auth.ts";
 import type { DataStore } from "./db.ts";
 import type { Session, StoredUser } from "./types.ts";
@@ -21,6 +21,7 @@ import type { Session, StoredUser } from "./types.ts";
 function normalizeGarden(g: any): Garden {
   return {
     ...g,
+    cropCatalog: g.cropCatalog ?? [],
     elements: g.elements ?? [],
     harvests: g.harvests ?? [],
     sowings: g.sowings ?? [],
@@ -77,6 +78,11 @@ export class SupabaseStore implements DataStore {
     if (error) throw new Error(`Supabase user bijwerken mislukt: ${error.message}`);
   }
 
+  async deleteUser(id: string): Promise<void> {
+    const { error } = await this.sb.from("app_users").delete().eq("id", id);
+    if (error) throw new Error(`Supabase user verwijderen mislukt: ${error.message}`);
+  }
+
   async searchUsers(query: string, limit = 8): Promise<StoredUser[]> {
     const { data, error } = await this.sb.from("app_users").select("data");
     if (error) throw new Error(`Supabase zoeken mislukt: ${error.message}`);
@@ -108,18 +114,61 @@ export class SupabaseStore implements DataStore {
     if (error) throw new Error(`Supabase sessie verwijderen mislukt: ${error.message}`);
   }
 
+  async removeSessionsForUser(userId: string): Promise<void> {
+    const { data, error } = await this.sb.from("app_sessions").select("token,data");
+    if (error) throw new Error(`Supabase sessies lezen mislukt: ${error.message}`);
+    const tokens = (data ?? [])
+      .filter((row) => (row.data as Session | undefined)?.userId === userId)
+      .map((row) => row.token as string);
+    for (const token of tokens) {
+      await this.removeSession(token);
+    }
+  }
+
   async listGardensForUser(userId: string): Promise<Garden[]> {
     const { data, error } = await this.sb.from("app_gardens").select("data");
     if (error) throw new Error(`Supabase tuinen lezen mislukt: ${error.message}`);
-    return (data ?? [])
-      .map((r) => normalizeGarden(r.data))
+    const rows = (data ?? []).map((r) => r.data as any);
+    // Oude tuinen zonder eigen gewassenlijst: neem de bestaande (ontdubbelde)
+    // globale lijst over, zodat bestaande plantingen hun gewas houden.
+    const needsMigration = rows.some((g) => !Array.isArray(g?.cropCatalog));
+    const fallback = needsMigration ? await this.getCropCatalog() : [];
+    const gardens = rows
+      .map((raw) =>
+        normalizeGarden({
+          ...raw,
+          cropCatalog: dedupeCatalog(
+            seedCatalog(
+              Array.isArray(raw?.cropCatalog) ? raw.cropCatalog : [],
+              fallback.length > 0 ? fallback : DEFAULT_CROP_CATALOG,
+              raw?.deleted?.catalog
+            )
+          ),
+        })
+      )
       .filter((g) => g.ownerId === userId || g.sharedWith.includes(userId));
+    // Lege lijst eenmalig repareren en meteen terugschrijven, zodat dit niet
+    // bij elke refresh opnieuw hoeft.
+    const repaired = gardens.filter((g) => (g.cropCatalog ?? []).length > 0 && !rows.find((r) => r?.id === g.id)?.cropCatalog?.length);
+    for (const g of repaired) await this.putGarden(g);
+    return gardens;
   }
 
   async getGarden(id: string): Promise<Garden | undefined> {
     const { data, error } = await this.sb.from("app_gardens").select("data").eq("id", id).maybeSingle();
     if (error) throw new Error(`Supabase tuin ophalen mislukt: ${error.message}`);
-    return data ? normalizeGarden(data.data) : undefined;
+    if (!data) return undefined;
+    const raw = data.data as any;
+    return normalizeGarden({
+      ...raw,
+      cropCatalog: dedupeCatalog(
+        seedCatalog(
+          Array.isArray(raw?.cropCatalog) ? raw.cropCatalog : [],
+          await this.getCropCatalog(),
+          raw?.deleted?.catalog
+        )
+      ),
+    });
   }
 
   async putGarden(garden: Garden): Promise<void> {
@@ -136,7 +185,7 @@ export class SupabaseStore implements DataStore {
     const { data, error } = await this.sb.from("app_state").select("data").eq("key", "cropCatalog").maybeSingle();
     if (error) throw new Error(`Supabase catalogus lezen mislukt: ${error.message}`);
     const catalog = (data?.data as Crop[] | undefined) ?? [];
-    return catalog.length > 0 ? catalog : DEFAULT_CROP_CATALOG;
+    return dedupeCatalog(catalog.length > 0 ? catalog : DEFAULT_CROP_CATALOG);
   }
 
   async setCropCatalog(crops: Crop[]): Promise<void> {

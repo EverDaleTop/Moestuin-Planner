@@ -10,6 +10,7 @@ import {
 } from './expenseCategories'
 import { CategoryDropdown } from './CategoryDropdown'
 import { ExpenseFormModal, type ExpenseFormData } from './ExpenseFormModal'
+import { ConfirmModal } from './ConfirmModal'
 
 type Mode = 'uit' | 'in'
 
@@ -20,11 +21,15 @@ interface Entry {
 	amount: number
 	date: string
 	category?: string
+	assigneeId?: string
 }
 
 interface Props {
 	expenses: Expense[]
 	incomes: Income[]
+	/** deelnemers van de tuin (eigenaar + gedeeld met) */
+	members: { id: string; name: string }[]
+	currentUserId?: string
 	onAdd: (entry: Omit<Expense, 'id'>) => void
 	onUpdate: (id: string, patch: Partial<Expense>) => void
 	onRemove: (id: string) => void
@@ -93,6 +98,8 @@ function monthlySeries(out: Entry[], inc: Entry[], months: number) {
 export function ExpensesView({
 	expenses,
 	incomes,
+	members,
+	currentUserId,
 	onAdd,
 	onUpdate,
 	onRemove,
@@ -106,6 +113,24 @@ export function ExpensesView({
 	const [q, setQ] = useState('')
 	/** filter op categorie; '' = alles */
 	const [catFilter, setCatFilter] = useState('')
+	const [pendingDelete, setPendingDelete] = useState<Entry | null>(null)
+	const [memberFilter, setMemberFilter] = useState('')
+
+	const memberById = useMemo(() => new Map(members.map((m) => [m.id, m.name])), [members])
+	const assigneeName = (e: Entry) =>
+		e.assigneeId ? (memberById.get(e.assigneeId) ?? null) : null
+	const memberOptions = useMemo(
+		() => [
+			{ key: '', label: 'Iedereen', icon: 'fa-user-group', tone: 'grey' },
+			...members.map((m) => ({
+				key: m.id,
+				label: m.id === currentUserId ? `${m.name} (jij)` : m.name,
+				icon: 'fa-user',
+				tone: 'green',
+			})),
+		],
+		[members, currentUserId]
+	)
 
 	const isUit = mode === 'uit'
 	const cats: ExpenseCategory[] = isUit ? EXPENSE_CATEGORIES : INCOME_CATEGORIES
@@ -128,6 +153,7 @@ export function ExpensesView({
 	const switchMode = (m: Mode) => {
 		setMode(m)
 		setCatFilter('')
+		setMemberFilter('')
 		setEditEntry(null)
 		sheet.closeForm()
 	}
@@ -137,8 +163,9 @@ export function ExpensesView({
 		const s = q.trim().toLowerCase()
 		const resolveFn = isUit ? resolveCategory : (_d: string, c?: string) => resolveIncomeCategory(c)
 		const list = activeList
-			.filter((e) => !s || e.description.toLowerCase().includes(s))
+			.filter((e) => !s || e.description.toLowerCase().includes(s) || (memberById.get(e.assigneeId ?? '') ?? '').toLowerCase().includes(s))
 			.filter((e) => !catFilter || resolveFn(e.description, e.category).key === catFilter)
+			.filter((e) => !memberFilter || (e.assigneeId ?? '') === memberFilter)
 			.slice()
 			.sort((a, b) => b.date.localeCompare(a.date))
 
@@ -154,7 +181,22 @@ export function ExpensesView({
 			}
 		}
 		return out
-	}, [activeList, q, catFilter, isUit])
+	}, [activeList, q, catFilter, memberFilter, memberById, isUit])
+
+	/** Wie is wat kwijt: totaal per deelnemer over de actieve lijst (uit of in). */
+	const perMember = useMemo(() => {
+		const sums = new Map<string, { name: string; total: number }>()
+		for (const e of activeList) {
+			const key = e.assigneeId ?? ''
+			const name = key ? (memberById.get(key) ?? 'Onbekend') : 'Niet toegewezen'
+			const cur = sums.get(key) ?? { name, total: 0 }
+			cur.total += e.amount
+			sums.set(key, cur)
+		}
+		return [...sums.entries()]
+			.map(([key, v]) => ({ key: key || 'none', ...v }))
+			.sort((a, b) => b.total - a.total)
+	}, [activeList, memberById])
 
 	/** Data voor de grafieken. */
 	const months = useMemo(() => monthlySeries(expenses, incomes, 12), [expenses, incomes])
@@ -258,6 +300,8 @@ export function ExpensesView({
 				open={sheet.open}
 				edit={editEntry}
 				mode={mode}
+				members={members}
+				currentUserId={currentUserId}
 				onClose={closeForm}
 				onSave={saveForm}
 			/>
@@ -283,6 +327,17 @@ export function ExpensesView({
 							onChange={setCatFilter}
 						/>
 					</div>
+					{members.length > 1 && (
+						<div>
+							<CategoryDropdown
+								id='exp-memberfilter'
+								noIcons
+								categories={memberOptions}
+								value={memberFilter}
+								onChange={setMemberFilter}
+							/>
+						</div>
+					)}
 				</div>
 			</div>
 
@@ -369,6 +424,19 @@ export function ExpensesView({
 								</div>
 							))}
 						</div>
+
+						<div className='exp-person-head'>Per persoon</div>
+						<div className='exp-legend exp-person-list'>
+							{perMember.map((m) => (
+								<div key={m.key} className='exp-legend-row exp-person-row'>
+									<span className='shop-card-assignee-avatar' aria-hidden='true'>
+										{(m.name.trim()[0] ?? '?').toUpperCase()}
+									</span>
+									<span className='exp-person-name'>{m.name}</span>
+									<span className='exp-person-total'>{fmtSigned(m.total, mode)}</span>
+								</div>
+							))}
+						</div>
 					</div>
 				</div>
 			)}
@@ -379,7 +447,7 @@ export function ExpensesView({
 					<p>{emptyText}</p>
 				</div>
 			) : (
-				<div className='oogst-card oogst-list' key={`${mode}-${catFilter}`}>
+				<div className='oogst-card oogst-list' key={`${mode}-${catFilter}-${memberFilter}`}>
 				{groups.map((group, gi) => (
 					<div key={group.key} style={{ animationDelay: `${Math.min(gi, 11) * 35}ms` }}>
 						<div className='oogst-month-head'>
@@ -404,6 +472,21 @@ export function ExpensesView({
 													<i className={`fa-solid ${cat.icon}`} />
 													{cat.label}
 												</span>
+												{(() => {
+													const name = assigneeName(e)
+													if (!name) return null
+													const self = e.assigneeId === currentUserId
+													return (
+														<span
+															className='shop-card-assignee'
+															title={self ? `Voor jou (${name})` : `Voor ${name}`}>
+															<span className='shop-card-assignee-avatar' aria-hidden='true'>
+																{(name.trim()[0] ?? '?').toUpperCase()}
+															</span>
+															Voor {self ? 'jou' : name}
+														</span>
+													)
+												})()}
 											</div>
 										</div>
 										<div className={`oogst-row-total ${isUit ? 'exp-total-uit' : 'exp-total-in'}`}>
@@ -415,7 +498,7 @@ export function ExpensesView({
 											</button>
 											<button
 												className='btn-danger'
-												onClick={() => removeEntry(e.id)}
+												onClick={() => setPendingDelete(e)}
 												title='Verwijderen'
 												aria-label='Verwijderen'>
 												<i className='fa-solid fa-trash' />
@@ -429,6 +512,26 @@ export function ExpensesView({
 				))}
 				</div>
 			)}
+			<ConfirmModal
+				open={pendingDelete !== null}
+				title={isUit ? 'Uitgave verwijderen?' : 'Inkomst verwijderen?'}
+				message={
+					pendingDelete ? (
+						<>
+							Weet je zeker dat je <strong>{pendingDelete.description}</strong> (
+							{fmtSigned(pendingDelete.amount, mode)}) wilt verwijderen? Dit kan niet ongedaan
+							worden gemaakt.
+						</>
+					) : (
+						''
+					)
+				}
+				onCancel={() => setPendingDelete(null)}
+				onConfirm={() => {
+					if (pendingDelete) removeEntry(pendingDelete.id)
+					setPendingDelete(null)
+				}}
+			/>
 		</div>
 	)
 }

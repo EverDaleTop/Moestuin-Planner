@@ -24,6 +24,7 @@ export function CategoryDropdown({ categories, value, onChange, label, id, noIco
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   const [above, setAbove] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLUListElement | null>(null);
 
   const measure = () => {
     const el = triggerRef.current;
@@ -44,6 +45,23 @@ export function CategoryDropdown({ categories, value, onChange, label, id, noIco
   useLayoutEffect(() => {
     if (open) measure();
   }, [open ]);
+
+  // Laat de popup meegroeien met de langste optie (eenmalig bij openen),
+  // zodat elke naam op één regel past. Begrensd door de viewport.
+  useLayoutEffect(() => {
+    if (!open || !popRef.current) return;
+    const el = popRef.current;
+    const prev = el.style.width;
+    el.style.width = "max-content";
+    const contentW = el.scrollWidth;
+    el.style.width = prev;
+    if (contentW <= 0) return;
+    const maxW = window.innerWidth - 16;
+    const w = Math.min(Math.max(pos.width, contentW), maxW);
+    if (w <= pos.width + 1) return;
+    const left = Math.max(8, Math.min(pos.left, window.innerWidth - w - 8));
+    setPos((p) => (Math.abs(p.width - w) < 1 && p.left === left ? p : { ...p, width: w, left }));
+  }, [open, pos.width, pos.left, categories, value]);
 
   useEffect(() => {
     if (!open) return;
@@ -127,6 +145,9 @@ export function CategoryDropdown({ categories, value, onChange, label, id, noIco
             window.clearTimeout(closeTimer.current);
             closeTimer.current = null;
           }
+          // Positie al berekenen vóór de portal bestaat: anders verschijnt het
+          // menu op de eerste keer open op de verkeerde plek.
+          measure();
           setClosing(false);
           setOpen(true);
         }}
@@ -143,6 +164,7 @@ export function CategoryDropdown({ categories, value, onChange, label, id, noIco
         createPortal(
           <ul
             id="catdd-portal"
+            ref={popRef}
             className={`catdd-pop catdd-pop-portal${closing ? " closing" : ""}${above ? " catdd-pop-above" : ""}`}
             role="listbox"
             aria-label={label ?? "Categorie"}

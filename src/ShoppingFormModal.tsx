@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useState } from "react";
 import type { ShoppingItem } from "./types";
+import { SheetModal } from "./SheetModal";
 import { api } from "./api";
-import { EXPENSE_CATEGORIES } from "./expenseCategories";
+import { EXPENSE_CATEGORIES, type ExpenseCategory } from "./expenseCategories";
 import { CategoryDropdown } from "./CategoryDropdown";
+
+/** Deelnemer van de tuin die als "voor wie" gekozen kan worden. */
+export interface ShopMember {
+  id: string;
+  name: string;
+}
 
 function normalizeUrl(url: string): string {
   const t = url.trim();
@@ -59,11 +65,14 @@ interface Props {
   mounted: boolean;
   open: boolean;
   edit: ShoppingItem | null;
+  /** deelnemers van de tuin (eigenaar + gedeeld met) */
+  members: ShopMember[];
+  currentUserId?: string;
   onClose: () => void;
   onSave: (data: Omit<ShoppingItem, "id" | "createdAt" | "done">) => void;
 }
 
-export function ShoppingFormModal({ mounted, open, edit, onClose, onSave }: Props) {
+export function ShoppingFormModal({ mounted, open, edit, members, currentUserId, onClose, onSave }: Props) {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -72,8 +81,22 @@ export function ShoppingFormModal({ mounted, open, edit, onClose, onSave }: Prop
   const [imageUrl, setImageUrl] = useState("");
   const [source, setSource] = useState("");
   const [category, setCategory] = useState(EXPENSE_CATEGORIES[0].key);
+  const [assigneeId, setAssigneeId] = useState("");
   const [fetching, setFetching] = useState(false);
   const [fetchMsg, setFetchMsg] = useState("");
+
+  const memberOptions = useMemo<ExpenseCategory[]>(
+    () => [
+      { key: "", label: "Niemand in het bijzonder", icon: "fa-user-group", tone: "grey" },
+      ...members.map((m) => ({
+        key: m.id,
+        label: m.id === currentUserId ? `${m.name} (jij)` : m.name,
+        icon: "fa-user",
+        tone: "green",
+      })),
+    ],
+    [members, currentUserId]
+  );
 
   const reset = () => {
     setTitle("");
@@ -84,19 +107,13 @@ export function ShoppingFormModal({ mounted, open, edit, onClose, onSave }: Prop
     setImageUrl("");
     setSource("");
     setCategory(EXPENSE_CATEGORIES[0].key);
+    setAssigneeId("");
     setFetching(false);
     setFetchMsg("");
   };
 
   useEffect(() => {
     if (!mounted || !open) return;
-    // drag-status terugzetten: na een drag-close staat de sheet nog
-    // weggeschoven; zonder reset opent hij onzichtbaar.
-    dragOffsetRef.current = 0;
-    setDragOffsetState(0);
-    setDragging(false);
-    setDragClosing(false);
-    setGrabbed(false);
     if (edit) {
       setTitle(edit.title);
       setUrl(edit.url ?? "");
@@ -106,11 +123,14 @@ export function ShoppingFormModal({ mounted, open, edit, onClose, onSave }: Prop
       setImageUrl(edit.imageUrl ?? "");
       setSource(edit.source ?? "");
       setCategory(edit.category ?? EXPENSE_CATEGORIES[0].key);
+      setAssigneeId(
+        edit.assigneeId && members.some((m) => m.id === edit.assigneeId) ? edit.assigneeId : ""
+      );
       setFetchMsg("");
     } else {
       reset();
     }
-  }, [mounted, open, edit]);
+  }, [mounted, open, edit, members]);
 
   const fetchFromUrl = async () => {
     const u = normalizeUrl(url);
@@ -155,96 +175,21 @@ export function ShoppingFormModal({ mounted, open, edit, onClose, onSave }: Prop
       imageUrl: imageUrl.trim() || undefined,
       source: source.trim() || undefined,
       category: category.trim() || undefined,
+      assigneeId: assigneeId || undefined,
     });
   };
 
-  // drag-to-close (mobiele bottom-sheet)
-  const dragStartY = useRef(0);
-  const dragOffsetRef = useRef(0);
-  const [dragOffset, setDragOffsetState] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const [dragClosing, setDragClosing] = useState(false);
-  const [grabbed, setGrabbed] = useState(false);
-
-  const setDragOffset = (v: number) => {
-    dragOffsetRef.current = v;
-    setDragOffsetState(v);
-  };
-  const onGripDown = (e: React.PointerEvent) => {
-    dragStartY.current = e.clientY;
-    dragOffsetRef.current = 0;
-    setDragClosing(false);
-    setGrabbed(true);
-    setDragging(true);
-    setDragOffsetState(0);
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onGripMove = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    const next = Math.max(0, e.clientY - dragStartY.current);
-    dragOffsetRef.current = next;
-    setDragOffsetState(next);
-  };
-  const endDrag = () => {
-    if (!dragging) return;
-    setDragging(false);
-    if (dragOffsetRef.current > 90) {
-      setDragClosing(true);
-      setDragOffset(window.innerHeight);
-      onClose();
-    } else {
-      setDragOffset(0);
-    }
-  };
-
-  useEffect(() => {
-    if (!mounted) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [mounted, onClose]);
-
   if (!mounted) return null;
 
-  return createPortal(
-    <div
-      className={`sow-modal-overlay${open ? "" : " closing"}${dragClosing ? " drag-closing" : ""}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <SheetModal
+      mounted={mounted}
+      open={open}
+      onClose={onClose}
+      className="crop-modal"
+      ariaLabel={edit ? "Product bewerken" : "Nieuw product"}
+      resetKey={edit}
     >
-      <div
-        className={`sow-modal crop-modal${dragging ? " dragging" : ""}${dragClosing ? " drag-closing" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={edit ? "Product bewerken" : "Nieuw product"}
-        style={
-          grabbed
-            ? {
-                transform: `translateY(${dragOffset}px)`,
-                transition: dragging
-                  ? "none"
-                  : "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)",
-                animation: "none",
-              }
-            : undefined
-        }
-      >
-        <div
-          className="sow-modal-grip"
-          aria-hidden="true"
-          onPointerDown={onGripDown}
-          onPointerMove={onGripMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        />
         <div className="sow-modal-head">
           <h3>
             <i className="fa-solid fa-cart-shopping" aria-hidden="true" /> {edit ? "Product bewerken" : "Nieuw product"}
@@ -333,6 +278,15 @@ export function ShoppingFormModal({ mounted, open, edit, onClose, onSave }: Prop
                 onChange={setCategory}
               />
             </div>
+            <div className="shop-form-field shop-form-field-wide">
+              <CategoryDropdown
+                id="shop-assignee"
+                label="Voor wie?"
+                categories={memberOptions}
+                value={assigneeId}
+                onChange={setAssigneeId}
+              />
+            </div>
           </div>
         </div>
 
@@ -345,8 +299,6 @@ export function ShoppingFormModal({ mounted, open, edit, onClose, onSave }: Prop
             {edit ? "Wijziging opslaan" : "Toevoegen aan lijst"}
           </button>
         </div>
-      </div>
-    </div>,
-    document.body
+    </SheetModal>
   );
 }

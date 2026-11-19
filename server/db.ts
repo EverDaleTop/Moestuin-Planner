@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Crop, Garden } from "../src/types.ts";
-import { DEFAULT_CROP_CATALOG } from "../src/storage.ts";
+import { DEFAULT_CROP_CATALOG, dedupeCatalog, seedCatalog } from "../src/storage.ts";
 import { randomToken } from "./auth.ts";
 import type { Db, Session, StoredUser } from "./types.ts";
 
@@ -15,10 +15,12 @@ export interface DataStore {
   getUserById(id: string): Promise<StoredUser | undefined>;
   addUser(user: StoredUser): Promise<void>;
   updateUser(user: StoredUser): Promise<void>;
+  deleteUser(id: string): Promise<void>;
   searchUsers(query: string, limit: number): Promise<StoredUser[]>;
   getSession(token: string): Promise<Session | undefined>;
   addSession(session: Session): Promise<void>;
   removeSession(token: string): Promise<void>;
+  removeSessionsForUser(userId: string): Promise<void>;
   listGardensForUser(userId: string): Promise<Garden[]>;
   getGarden(id: string): Promise<Garden | undefined>;
   putGarden(garden: Garden): Promise<void>;
@@ -65,17 +67,27 @@ export class JsonStore implements DataStore {
       const raw = await fs.readFile(filePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<Db>;
       const base = emptyDb();
+      // Een lege catalogus breekt het planten volledig (er valt niks te
+      // kiezen), dus zaai in dat geval de standaardgewassen opnieuw.
+      const catalog =
+        parsed.cropCatalog && parsed.cropCatalog.length > 0
+          ? dedupeCatalog(parsed.cropCatalog)
+          : base.cropCatalog;
       db = {
         users: parsed.users ?? base.users,
         sessions: parsed.sessions ?? base.sessions,
-        // Een lege catalogus breekt het planten volledig (er valt niks te
-        // kiezen), dus zaai in dat geval de standaardgewassen opnieuw.
-        cropCatalog:
-          parsed.cropCatalog && parsed.cropCatalog.length > 0
-            ? parsed.cropCatalog
-            : base.cropCatalog,
+        cropCatalog: catalog,
         gardens: (parsed.gardens ?? []).map((g: any) => ({
           ...g,
+          // Oude tuinen hebben nog geen eigen lijst: neem de (ontdubbelde)
+          // bestaande lijst over, zodat bestaande plantingen hun gewas houden.
+          cropCatalog: dedupeCatalog(
+            seedCatalog(
+              Array.isArray(g.cropCatalog) ? g.cropCatalog : [],
+              catalog,
+              g?.deleted?.catalog
+            )
+          ),
           elements: g.elements ?? [],
           harvests: g.harvests ?? [],
           sowings: g.sowings ?? [],
@@ -132,6 +144,12 @@ export class JsonStore implements DataStore {
     this.scheduleFlush();
   }
 
+  async deleteUser(id: string): Promise<void> {
+    const before = this.db.users.length;
+    this.db.users = this.db.users.filter((u) => u.id !== id);
+    if (this.db.users.length !== before) this.scheduleFlush();
+  }
+
   async searchUsers(query: string, limit = 8): Promise<StoredUser[]> {
     const q = query.toLowerCase();
     const out: StoredUser[] = [];
@@ -156,6 +174,12 @@ export class JsonStore implements DataStore {
   async removeSession(token: string): Promise<void> {
     const before = this.db.sessions.length;
     this.db.sessions = this.db.sessions.filter((s) => s.token !== token);
+    if (this.db.sessions.length !== before) this.scheduleFlush();
+  }
+
+  async removeSessionsForUser(userId: string): Promise<void> {
+    const before = this.db.sessions.length;
+    this.db.sessions = this.db.sessions.filter((s) => s.userId !== userId);
     if (this.db.sessions.length !== before) this.scheduleFlush();
   }
 

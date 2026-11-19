@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { GpuRenderer, type DrawItem } from "./Renderer";
+import { SheetModal } from "../SheetModal";
 import type {
   Crop,
   CropAssignment,
@@ -35,6 +35,56 @@ function loadIconImage(src: string): HTMLImageElement | null {
   return null;
 }
 
+/**
+ * Voorbewerkte, kleine versie van elk icoon. De bronbestanden zijn vaak
+ * 1024×1024, maar op het canvas worden ze 4–40 px getekend. Zo'n groot beeld
+ * elke frame honderdvoudig verkleinen is duur — dat merkte je als haperend
+ * zoomen. We schalen elk icoon daarom één keer terug naar 256 px en tekenen
+ * daarna alleen nog die bitmap. 256 is ruim genoeg voor de grootste weergave
+ * (14 px icoon bij 6× zoom op een 3× scherm).
+ */
+const ICON_TEXTURE_PX = 128;
+const iconBitmapCache = new Map<string, ImageBitmap>();
+const iconBitmapPending = new Set<string>();
+const iconBitmapFailed = new Set<string>();
+
+function loadIconTexture(src: string): ImageBitmap | null {
+  const hit = iconBitmapCache.get(src);
+  if (hit) return hit;
+  if (iconBitmapFailed.has(src)) return null;
+  const img = loadIconImage(src);
+  if (!img || iconBitmapPending.has(src) || typeof createImageBitmap !== "function") {
+    return null;
+  }
+  iconBitmapPending.add(src);
+  const fail = () => {
+    // Nooit blijven proberen: het origineel blijft gewoon werken.
+    iconBitmapPending.delete(src);
+    iconBitmapFailed.add(src);
+  };
+  try {
+    createImageBitmap(img, {
+      resizeWidth: ICON_TEXTURE_PX,
+      resizeHeight: ICON_TEXTURE_PX,
+      resizeQuality: "high",
+    })
+      .then((bmp) => iconBitmapCache.set(src, bmp))
+      .catch(fail)
+      .finally(() => iconBitmapPending.delete(src));
+  } catch {
+    // Oudere browsers zonder resize-opties: gewoon het origineel blijven tekenen.
+    fail();
+  }
+  return null;
+}
+
+/**
+ * Fontgroottes op hele pixels. Bij zoomen verandert de maat elke frame; elke
+ * nieuwe (fractionele) maat dwingt de browser het lettertype opnieuw te
+ * rasteren. Afronden houdt het aantal varianten klein en het zoomen soepel.
+ */
+const fsPx = (px: number) => Math.round(px);
+
 /** Tekent het icoon van een gewas: afbeelding als die geladen is, anders emoji. */
 function drawCropIcon(
   ctx: CanvasRenderingContext2D,
@@ -42,13 +92,23 @@ function drawCropIcon(
   cropName: string | undefined,
   cx: number,
   cy: number,
-  size: number
+  size: number,
+  /** Vooraf opgezocht bronpad; scheelt een lookup per plantje per frame. */
+  src = cropIconImage(iconKey)
 ): void {
-  const src = cropIconImage(iconKey);
-  const img = src ? loadIconImage(src) : null;
-  if (img) {
-    ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
-    return;
+  if (src) {
+    const bmp = loadIconTexture(src);
+    if (bmp) {
+      ctx.drawImage(bmp, cx - size / 2, cy - size / 2, size, size);
+      return;
+    }
+    // Bitmap wordt nog gemaakt: teken zolang het origineel (of niets), zodat
+    // er tijdens het laden geen lege plekken of flikkering ontstaan.
+    const img = iconImageCache.get(src);
+    if (img?.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+      return;
+    }
   }
   ctx.fillText(cropEmoji(iconKey, cropName), cx, cy + 1);
 }
@@ -132,6 +192,15 @@ interface R {
 interface Pt {
   x: number;
   y: number;
+}
+
+/** Eén laag van de gewas-tooltip, voor de in/uitfade-animatie. */
+interface TipLayer {
+  id: string;
+  x: number;
+  y: number;
+  above: boolean;
+  alpha: number;
 }
 /** One snap guide line. `at` is the aligned coordinate; `a`..`b` is the extent
  *  along the perpendicular axis (so the line spans both involved objects);
@@ -750,6 +819,15 @@ export function GpuCanvas({
   /** laatste tik-selectie: een snelle tweede tik (dubbelklik) op hetzelfde
    *  gewas houdt het geselecteerd i.p.v. meteen weer te deselecteren. */
   const lastTapSelectRef = useRef<{ instanceId: string; t: number } | null>(null);
+  /** korte tooltip na een tik op een gewas (touch heeft geen hover) */
+  const tapTipRef = useRef<{ cropId: string; x: number; y: number; until: number } | null>(null);
+  /** animatie van de gewas-tooltip: de zichtbare laag en de uitfadende vorige */
+  const tipCurRef = useRef<TipLayer | null>(null);
+  const tipPrevRef = useRef<TipLayer | null>(null);
+  const tipFrameRef = useRef(0);
+  /** hover-highlight per gewas (0..1), zodat de vulling/rand zacht fadet */
+  const hoverAnimRef = useRef(new Map<string, number>());
+  const hoverFrameRef = useRef(0);
   /** true zolang er een live preview naar andere editors is gestuurd die nog
    *  opgeruimd moet worden (anders blijft er een ghost staan) */
   const previewSentRef = useRef(false);
@@ -1210,6 +1288,7 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
 
   const onPointerDown = (e: React.PointerEvent) => {
     coarseRef.current = e.pointerType !== "mouse";
+    tapTipRef.current = null;
     const sp = screenToLocal(e);
     downPosRef.current.set(e.pointerId, sp);
     pendingSelectRef.current = null;
@@ -1938,6 +2017,28 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
       const up = screenToLocal(e);
       if (Math.hypot(up.x - down.x, up.y - down.y) <= 10) pending();
     }
+    // Touch heeft geen hover: laat na een tik op een gewas even de naam zien.
+    if (down && e.pointerType !== "mouse") {
+      const up = screenToLocal(e);
+      if (Math.hypot(up.x - down.x, up.y - down.y) <= 10) {
+        const wp = screenToWorld(up, camRef.current);
+        const els = propsRef.current.elements;
+        for (let i = els.length - 1; i >= 0; i--) {
+          const el = els[i];
+          if (el.type !== "bed" || el.crops.length === 0) continue;
+          const a = hitCrop(wp, el);
+          if (a) {
+            tapTipRef.current = {
+              cropId: a.cropId,
+              x: up.x,
+              y: up.y,
+              until: performance.now() + 2600,
+            };
+            break;
+          }
+        }
+      }
+    }
     const g = gRef.current;
     if (g.k === "pinch") {
       // one finger still down -> keep panning with it; none -> end
@@ -2210,7 +2311,9 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
   };
 
 // Init renderer, observer, fit view, render loop.
-  useEffect(() => {
+  // Layout-effect: teken het eerste frame nog vóór de browser schildert, zodat
+  // je nooit een leeg canvas ziet voordat de elementen verschijnen.
+  useLayoutEffect(() => {
     const host_ = hostRef.current;
     const gpu = gpuRef.current;
     const ov = ovRef.current;
@@ -2278,7 +2381,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         const r = rOf(el);
         items.push({ rect: r, color: el.color, selected: false });
       }
-      renderer.setBackground(p.theme === "dark" ? "#13161b" : "#eef1f5");
+      renderer.setBackground(p.theme === "dark" ? "#0F1A14" : "#EEF2E6");
       renderer.render(items, c);
 
       // DPR kan lopend veranderen (zoom, ander scherm): buffers bijwerken.
@@ -2323,15 +2426,27 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
       const chipName = dark ? "#e7eaee" : "#171b21";
       const chipMeta = dark ? "#8a93a1" : "#70788a";
       const cropById = new Map(p.catalog.map((cr) => [cr.id, cr]));
-      // which plant is under the pointer (only meaningful inside the selected bed)
+      // Welk gewas ligt onder de muis? Over álle bedden, niet alleen de
+      // geselecteerde: zo kun je ook in een ander bed zien wat er staat.
+      let hoverCrop: CropAssignment | null = null;
       let hoverCropId: string | null = null;
-      {
-        const bedSel = selectedBedEl();
-        if (bedSel && bedSel.crops.length > 0) {
-          const hc = hitCrop(screenToWorld(mouseRef.current, c), bedSel);
-          if (hc) hoverCropId = hc.instanceId;
+      if (p.tool === "select" && !coarseRef.current && gRef.current.k === "none") {
+        const wp = screenToWorld(mouseRef.current, c);
+        for (let i = p.elements.length - 1; i >= 0 && !hoverCrop; i--) {
+          const el = p.elements[i];
+          if (el.type !== "bed" || el.crops.length === 0) continue;
+          hoverCrop = hitCrop(wp, el);
         }
+        hoverCropId = hoverCrop?.instanceId ?? null;
       }
+
+      // Hover-highlight animeren: de vulling/rand fadet zacht in en uit in
+      // plaats van meteen aan/uit te springen.
+      const hoverNow = performance.now();
+      const hoverDt = Math.min(32, Math.max(0, hoverNow - hoverFrameRef.current));
+      hoverFrameRef.current = hoverNow;
+      const hoverStep = 1 - Math.exp(-hoverDt / 55);
+
       for (const el of p.elements) {
         if (el.type !== "bed" || el.crops.length === 0) continue;
         for (const a of el.crops) {
@@ -2345,73 +2460,80 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const col = crop?.color ?? "#9aa0a6";
           const isSel = p.selectedCropId === a.instanceId;
           const isHov = hoverCropId === a.instanceId;
-          let fillAlpha = 0.22;
+
+          const prevH = hoverAnimRef.current.get(a.instanceId) ?? 0;
+          let hv = prevH + ((isHov ? 1 : 0) - prevH) * hoverStep;
+          if (hv < 0.004) hv = 0;
+          else if (hv > 0.996) hv = 1;
+          if (hv === 0) hoverAnimRef.current.delete(a.instanceId);
+          else hoverAnimRef.current.set(a.instanceId, hv);
+
+          let fillAlpha = 0.22 + 0.10 * hv;
           if (isSel) fillAlpha = 0.42;
           else if (p.selectedCropId) fillAlpha = 0.10; // dim inactive plants once one is selected
-          else if (isHov) fillAlpha = 0.32;
           ctx.globalAlpha = fillAlpha;
           ctx.fillStyle = col;
           ctx.fillRect(p0.x, p0.y, bw, bh);
           ctx.globalAlpha = 1;
-          ctx.strokeStyle = isSel || isHov ? col : "rgba(0,0,0,0.18)";
+          // neutrale rand; bij hover komt de gewaskleur er vloeiend overheen
+          ctx.strokeStyle = isSel ? col : "rgba(0,0,0,0.18)";
           ctx.lineWidth = isSel ? 2 : 1;
           ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, bw - 1, bh - 1);
+          if (!isSel && hv > 0.01) {
+            ctx.globalAlpha = hv;
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 1 + 0.5 * hv;
+            ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, bw - 1, bh - 1);
+            ctx.globalAlpha = 1;
+          }
 
           // flat plant icons arranged in the chosen layout, spacing from the
           // crop's row/plant spacing. Tijdens het resizen live het maximum
           // tonen dat past (vaste afstand), zodat je rijen er al tijdens het
           // slepen bij ziet komen; bij loslaten wordt de telling opgeslagen.
-          const rowSpacingM = a.rowSpacing ?? crop?.rowSpacing ?? 0.3;
-          const plantSpacingM = a.plantSpacing ?? crop?.plantSpacing ?? 0.2;
-          const gest = gRef.current;
-          const liveResize =
-            gest.k === "cropResize" && gest.instanceId === a.instanceId;
-          const { spots, size } = plantPositions(
-            { x: r.x, y: r.y, w: r.w, h: r.h },
-            liveResize ? 0 : a.rows,
-            liveResize ? undefined : a.cols,
-            rowSpacingM,
-            plantSpacingM,
-            a.padding ?? 0.1,
-            PX_PER_M
-          );
-          if (spots.length > 0 && bw >= 16 && bh >= 16) {
-            ctx.globalAlpha = p.selectedCropId && !isSel ? 0.45 : 1;
-            ctx.fillStyle = col;
-            ctx.font = `${size * c.zoom}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
+          if (bw >= 16 && bh >= 16) {
+            const rowSpacingM = a.rowSpacing ?? crop?.rowSpacing ?? 0.3;
+            const plantSpacingM = a.plantSpacing ?? crop?.plantSpacing ?? 0.2;
+            const gest = gRef.current;
+            const liveResize =
+              gest.k === "cropResize" && gest.instanceId === a.instanceId;
+            const { spots, size } = plantPositions(
+              { x: r.x, y: r.y, w: r.w, h: r.h },
+              liveResize ? 0 : a.rows,
+              liveResize ? undefined : a.cols,
+              rowSpacingM,
+              plantSpacingM,
+              a.padding ?? 0.1,
+              PX_PER_M
+            );
+            // Onder ~3,5 px is een icoontje niet meer dan een vlekje; die
+            // honderden stipjes tekenen kost wel tijd. Liever overslaan.
             const iconSize = size * c.zoom;
-            for (const s of spots) {
-              const sp = worldToScreen({ x: s.x, y: s.y }, c);
-              drawCropIcon(ctx, crop?.icon, crop?.name, sp.x, sp.y, iconSize);
+            if (spots.length > 0 && iconSize >= 3.5) {
+              // Bron één keer per gewas opzoeken i.p.v. per plantje per frame.
+              const iconSrc = cropIconImage(crop?.icon);
+              ctx.globalAlpha = p.selectedCropId && !isSel ? 0.45 : 1;
+              ctx.fillStyle = col;
+              ctx.font = `${Math.round(iconSize * 2) / 2}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              for (const s of spots) {
+                // Zelfde berekening als worldToScreen, maar zonder per plantje
+                // twee tijdelijke objecten aan te maken (GC-druk bij zoomen).
+                const sx = s.x * c.zoom + c.x;
+                const sy = s.y * c.zoom + c.y;
+                // buiten beeld: niets te zien, dus niet tekenen
+                if (sx < -iconSize || sy < -iconSize || sx > w + iconSize || sy > h + iconSize) {
+                  continue;
+                }
+                drawCropIcon(ctx, crop?.icon, crop?.name, sx, sy, iconSize, iconSrc);
+              }
+              ctx.globalAlpha = 1;
+              ctx.textAlign = "left";
+              ctx.textBaseline = "top";
             }
-            ctx.globalAlpha = 1;
-            ctx.textAlign = "left";
-            ctx.textBaseline = "top";
           }
-
-          // name chip for the selected/hovered plant
-          if ((isSel || isHov) && bw >= 56 && bh >= 26) {
-            const nfs = Math.max(9, Math.min(11, 10.5 * c.zoom));
-            const nm = crop?.name ?? "";
-            ctx.font = `600 ${nfs}px Inter, system-ui, sans-serif`;
-            const nw = ctx.measureText(nm).width;
-            const npx = 9;
-            const nwW = nw + npx * 2;
-            const nhh = nfs + 7;
-            ctx.fillStyle = chipBg;
-            ctx.strokeStyle = chipBorder;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.roundRect(p0.x + 3, p0.y + 3, Math.min(nwW, bw - 6), nhh, 6);
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = chipName;
-            ctx.textBaseline = "middle";
-            ctx.fillText(nm, p0.x + 3 + npx, p0.y + 3 + nhh / 2 + 1);
-            ctx.textBaseline = "top";
-          }
+          // naam van het gewas staat in de zwevende tooltip (zie einde van draw)
         }
       }
 
@@ -2511,16 +2633,20 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         }
 
         if (rw < 6 || rh < 6) continue;
+        // Afronding in wereld-eenheden, dus mee met de zoom: voorwerpen houden
+        // dezelfde vorm of je nu in- of uitzoomt (was een vaste schermradius,
+        // waardoor iets uitgezoomd veel ronder leek).
+        const objRadius = Math.max(1.5, 7 * c.zoom);
         ctx.globalAlpha = isSel ? 0.3 : 0.18;
         ctx.fillStyle = el.color;
         ctx.beginPath();
-        ctx.roundRect(p0.x, p0.y, rw, rh, 7);
+        ctx.roundRect(p0.x, p0.y, rw, rh, objRadius);
         ctx.fill();
         ctx.globalAlpha = 1;
         ctx.strokeStyle = isSel ? accent(p.theme) : "rgba(0,0,0,0.25)";
         ctx.lineWidth = isSel ? 2 : 1;
         ctx.beginPath();
-        ctx.roundRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1, 7);
+        ctx.roundRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1, objRadius);
         ctx.stroke();
 
         const size = Math.min(rw, rh) * 0.55;
@@ -2565,20 +2691,24 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const sA = worldToScreen(a, c);
           const sB = worldToScreen(b, c);
           const n = segNormal(sA.x, sA.y, sB.x, sB.y);
-          const fsG = Math.max(9, Math.min(13, 12 * c.zoom));
+          const fsG = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
           const sizeTxtG = `${fmtM(gaasLengthM(el))} m`;
           ctx.textBaseline = "top";
           ctx.font = `600 ${fsG}px Inter, system-ui, sans-serif`;
           const nameWG = ctx.measureText(el.label || "Gaas").width;
-          const smallFsG = Math.max(8, Math.min(10, 9 * c.zoom));
+          const smallFsG = fsPx(Math.max(8, Math.min(10, 9 * c.zoom)));
           ctx.font = `600 ${smallFsG}px Inter, system-ui, sans-serif`;
           const sizeWG = ctx.measureText(sizeTxtG).width;
           const chipWG = Math.max(nameWG, sizeWG) + 9 * 2;
           const chipHG = fsG + smallFsG + 5 * 2 + 1;
-          const cxG = Math.max(chipWG / 2 + 2, Math.min(w - chipWG / 2 - 2, (sA.x + sB.x) / 2 + n.x * 26));
-          const cyG = Math.max(chipHG / 2 + 2, Math.min(h - chipHG / 2 - 2, (sA.y + sB.y) / 2 + n.y * 26));
+          // Net als bij bedden: het kaartje hangt aan het element zelf en wordt
+          // niet naar de rand van het scherm getrokken. Valt de lijn buiten
+          // beeld, dan verdwijnt het kaartje dus mee.
+          const cxG = (sA.x + sB.x) / 2 + n.x * 26;
+          const cyG = (sA.y + sB.y) / 2 + n.y * 26;
           const xG = cxG - chipWG / 2;
           const yG = cyG - chipHG / 2;
+          if (xG > w || yG > h || xG + chipWG < 0 || yG + chipHG < 0) continue;
           ctx.fillStyle = chipBg;
           ctx.strokeStyle = chipBorder;
           ctx.lineWidth = 1;
@@ -2602,12 +2732,12 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
           const bw = p1.x - p0.x;
           if (bw < 46) continue;
-          const fsV = Math.max(9, Math.min(13, 12 * c.zoom));
+          const fsV = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
           const sizeTxtV = `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
           ctx.textBaseline = "top";
           ctx.font = `600 ${fsV}px Inter, system-ui, sans-serif`;
           const nameWV = ctx.measureText(el.label || "Veld").width;
-          const smallFsV = Math.max(8, Math.min(10, 9 * c.zoom));
+          const smallFsV = fsPx(Math.max(8, Math.min(10, 9 * c.zoom)));
           ctx.font = `600 ${smallFsV}px Inter, system-ui, sans-serif`;
           const sizeWV = ctx.measureText(sizeTxtV).width;
           const chipWV = Math.max(nameWV, sizeWV) + 9 * 2;
@@ -2643,7 +2773,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         const bw = p1.x - p0.x;
         const bh = p1.y - p0.y;
         if (bw < 46 || bh < 22) continue;
-        const fs = Math.max(9, Math.min(13, 12 * c.zoom));
+        const fs = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
         const sizeTxt =
           el.shape === "circle"
             ? `⌀ ${fmtM(el.widthM)}`
@@ -2653,7 +2783,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         ctx.textBaseline = "top";
         ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
         const nameW = ctx.measureText(el.label).width;
-        const smallFs = Math.max(8, Math.min(10, 9 * c.zoom));
+        const smallFs = fsPx(Math.max(8, Math.min(10, 9 * c.zoom)));
         ctx.font = `600 ${smallFs}px Inter, system-ui, sans-serif`;
         const sizeW = ctx.measureText(sizeTxt).width;
         const padX = 9;
@@ -2697,7 +2827,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           // elkaar nooit overlappen en de lijn vrij blijft.
           const n = segNormal(sA.x, sA.y, sB.x, sB.y);
           const txt = `${fmtM(gaasLengthM(singleGaas))} m`;
-          const fs = Math.max(10, Math.min(13, 11 * c.zoom));
+          const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
           ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
           ctx.textBaseline = "top";
           const tw = ctx.measureText(txt).width + 16;
@@ -2727,7 +2857,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
             const p0 = worldToScreen({ x: r.x, y: r.y }, c);
             const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
             const txt = `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
-            const fs = Math.max(10, Math.min(13, 11 * c.zoom));
+            const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
             ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
             ctx.textBaseline = "top";
             const tw = ctx.measureText(txt).width + 16;
@@ -2771,7 +2901,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
               ctx.restore();
               // naamkaartje bij het eerste geselecteerde element
               if (si === 0) {
-                const fsN = Math.max(10, Math.min(12, 11 * c.zoom));
+                const fsN = fsPx(Math.max(10, Math.min(12, 11 * c.zoom)));
                 ctx.font = `600 ${fsN}px Inter, system-ui, sans-serif`;
                 ctx.textBaseline = "top";
                 const nw = ctx.measureText(lc.username).width + 16;
@@ -2955,7 +3085,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
             const wM = Math.max(0.05, Math.round((rw / PX_PER_M) * 20) / 20);
             const hM = Math.max(0.05, Math.round((rh / PX_PER_M) * 20) / 20);
             const txt = `${fmtM(wM)} × ${fmtM(hM)}${crop ? ` · ${crop.name}` : ""}`;
-            const fs = Math.max(10, Math.min(13, 11 * c.zoom));
+            const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
             ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
             const tw = ctx.measureText(txt).width + 16;
             const th = fs + 7;
@@ -3002,7 +3132,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const wM = Math.max(0.05, Math.round((w / PX_PER_M) * 20) / 20);
           const hM = Math.max(0.05, Math.round((h / PX_PER_M) * 20) / 20);
           const txt = `${fmtM(wM)} × ${fmtM(hM)}`;
-          const fs = Math.max(10, Math.min(13, 11 * c.zoom));
+          const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
           ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
           const tw = ctx.measureText(txt).width + 16;
           const th = fs + 7;
@@ -3170,15 +3300,144 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
               ctx.textBaseline = "middle";
               ctx.fillText(txt, cx + 8, cy + th / 2 + 1);
               ctx.textBaseline = "top";
-            } else if (!p.selectedCropId && hoverCropId === a.instanceId) {
-              ctx.setLineDash([3, 3]);
-              ctx.strokeStyle = col;
-              ctx.lineWidth = 1.5;
-              ctx.strokeRect(p0.x + 1, p0.y + 1, p1.x - p0.x - 2, p1.y - p0.y - 2);
-              ctx.setLineDash([]);
+            } else if (!p.selectedCropId) {
+              const hv = hoverAnimRef.current.get(a.instanceId) ?? 0;
+              if (hv > 0.01) {
+                ctx.globalAlpha = hv;
+                ctx.setLineDash([3, 3]);
+                ctx.strokeStyle = col;
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(p0.x + 1, p0.y + 1, p1.x - p0.x - 2, p1.y - p0.y - 2);
+                ctx.setLineDash([]);
+                ctx.globalAlpha = 1;
+              }
             }
           }
         }
+      }
+
+      // ---- tooltip: welk gewas is dit? ----
+      // Muis: bij hoveren over een gewas. Touch: direct na een tik op een
+      // gewas (touch heeft geen hover) en bij het geselecteerde gewas.
+      let tipId: string | null = null;
+      let tipAnchor: Pt = { x: 0, y: 0 };
+      let tipAbove = false;
+      if (gRef.current.k === "none") {
+        const tapped = tapTipRef.current;
+        if (tapped) {
+          if (performance.now() < tapped.until) {
+            tipId = tapped.cropId;
+            tipAnchor = { x: tapped.x + 14, y: tapped.y + 14 };
+          } else {
+            tapTipRef.current = null;
+          }
+        }
+        if (!tipId && hoverCrop) {
+          tipId = hoverCrop.cropId;
+          tipAnchor = { x: mouseRef.current.x + 14, y: mouseRef.current.y + 14 };
+        } else if (!tipId && coarseRef.current && p.selectedCropId && p.tool === "select") {
+          for (const el of p.elements) {
+            if (el.type !== "bed") continue;
+            const a = el.crops.find((x) => x.instanceId === p.selectedCropId);
+            if (!a) continue;
+            const r = cropRectOf(el, a);
+            const p0 = worldToScreen({ x: r.x, y: r.y }, c);
+            const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
+            tipId = a.cropId;
+            tipAnchor = { x: (p0.x + p1.x) / 2, y: p0.y - 10 };
+            tipAbove = true;
+            break;
+          }
+        }
+      }
+
+      // Animatie: de tooltip fadet in/uit en wisselt met een crossfade, zodat
+      // hij niet "popt" en het label bij een ander gewas niet hard verspringt.
+      const nowMs = performance.now();
+      const tipDt = Math.min(64, Math.max(0, nowMs - tipFrameRef.current));
+      tipFrameRef.current = nowMs;
+      const curTip = tipCurRef.current;
+      const prevTip = tipPrevRef.current;
+      if (tipId) {
+        if (!curTip || curTip.id !== tipId) {
+          if (curTip) {
+            // Huidige label bewaren als uitfadende laag onder de nieuwe.
+            tipPrevRef.current = { ...curTip, alpha: Math.max(0.25, curTip.alpha) };
+          }
+          tipCurRef.current = {
+            id: tipId,
+            x: tipAnchor.x,
+            y: tipAnchor.y,
+            above: tipAbove,
+            alpha: 0,
+          };
+        } else {
+          curTip.x = tipAnchor.x;
+          curTip.y = tipAnchor.y;
+          curTip.above = tipAbove;
+          curTip.alpha = Math.min(1, curTip.alpha + tipDt / 110);
+        }
+      } else if (curTip) {
+        curTip.alpha = Math.max(0, curTip.alpha - tipDt / 90);
+        if (curTip.alpha <= 0.01) tipCurRef.current = null;
+      }
+      if (prevTip) {
+        prevTip.alpha = Math.max(0, prevTip.alpha - tipDt / 90);
+        if (prevTip.alpha <= 0.01) tipPrevRef.current = null;
+      }
+
+      const paintTip = (t: {
+        id: string;
+        x: number;
+        y: number;
+        above: boolean;
+        alpha: number;
+      }) => {
+        const crop = cropById.get(t.id);
+        const name = crop?.name ?? "Gewas";
+        let label = crop?.variety ? `${name} · ${crop.variety}` : name;
+        const tipFs = 12;
+        const padX = 9;
+        const padY = 6;
+        const iconSize = 16;
+        const gap = 6;
+        ctx.font = `600 ${tipFs}px Inter, system-ui, sans-serif`;
+        const maxTextW = Math.max(40, w - 8 - (padX * 2 + iconSize + gap));
+        if (ctx.measureText(label).width > maxTextW) {
+          while (label.length > 1 && ctx.measureText(`${label}…`).width > maxTextW) {
+            label = label.slice(0, -1);
+          }
+          label += "…";
+        }
+        const tw = padX * 2 + iconSize + gap + ctx.measureText(label).width;
+        const th = Math.max(iconSize, tipFs) + padY * 2;
+        let tx = t.above ? t.x - tw / 2 : t.x;
+        let ty = t.above ? t.y - th : t.y;
+        tx = Math.max(4, Math.min(w - tw - 4, tx));
+        ty = Math.max(4, Math.min(h - th - 4, ty));
+        ctx.globalAlpha = t.alpha;
+        ctx.fillStyle = dark ? "rgba(22,34,27,0.96)" : "rgba(255,255,255,0.97)";
+        ctx.strokeStyle = chipBorder;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(tx, ty, tw, th, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = chipName;
+        ctx.font = `${iconSize}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+        drawCropIcon(ctx, crop?.icon, name, tx + padX + iconSize / 2, ty + th / 2, iconSize);
+        ctx.textAlign = "left";
+        ctx.font = `600 ${tipFs}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = chipName;
+        ctx.fillText(label, tx + padX + iconSize + gap, ty + th / 2 + 1);
+        ctx.textBaseline = "top";
+        ctx.globalAlpha = 1;
+      };
+      if (prevTip && prevTip.alpha > 0.01) paintTip(prevTip);
+      if (tipCurRef.current && tipCurRef.current.alpha > 0.01) {
+        paintTip(tipCurRef.current);
       }
     };
 
@@ -3211,6 +3470,18 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
       draw();
       raf = requestAnimationFrame(loop);
     };
+    // De eerste tekening meteen doen (nog binnen de layout-fase), zodat het
+    // canvas bij de eerste paint al gevuld is. De observer kan daarna de maat
+    // verfijnen en zo nodig opnieuw fitten.
+    if (!fitted) {
+      fitted = true;
+      fitView();
+      const pending = pendingFocusRef.current;
+      if (pending && applyFocus(pending.x, pending.y)) {
+        pendingFocusRef.current = null;
+      }
+    }
+    draw();
     raf = requestAnimationFrame(loop);
 
     return () => {
@@ -3240,6 +3511,8 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         onPointerUp(e);
       }}
       onPointerLeave={() => {
+        // Buiten het canvas bestaat er geen hover: tooltip/highlight meteen weg.
+        mouseRef.current = { x: -1e6, y: -1e6 };
         if (hostRef.current) hostRef.current.style.cursor = "default";
         // Muis weg van het canvas: cursor meteen verbergen bij de anderen.
         handlersRef.current.onLiveCursor?.(null, propsRef.current.selectedIds);
@@ -3285,85 +3558,15 @@ function ObjectMenu({
       o.keywords.toLowerCase().includes(s)
   );
 
-  const dragStartY = useRef(0);
-  const dragOffsetRef = useRef(0);
-  const [dragOffset, setDragOffsetState] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const [grabbed, setGrabbed] = useState(false);
-  const [dragClosing, setDragClosing] = useState(false);
-
-  const setDragOffset = (v: number) => {
-    dragOffsetRef.current = v;
-    setDragOffsetState(v);
-  };
-
-  const onGripDown = (e: React.PointerEvent) => {
-    dragStartY.current = e.clientY;
-    dragOffsetRef.current = 0;
-    setDragClosing(false);
-    setGrabbed(true);
-    setDragging(true);
-    setDragOffsetState(0);
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onGripMove = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    const next = Math.max(0, e.clientY - dragStartY.current);
-    dragOffsetRef.current = next;
-    setDragOffsetState(next);
-  };
-  const endDrag = () => {
-    if (!dragging) return;
-    setDragging(false);
-    if (dragOffsetRef.current > 90) {
-      setDragClosing(true);
-      setDragOffset(window.innerHeight);
-      onClose();
-    } else {
-      setDragOffset(0);
-    }
-  };
-
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
-
-  return createPortal(
-    <div
-      className={`sow-modal-overlay${closing || dragClosing ? " closing" : ""}${dragClosing ? " drag-closing" : ""}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <SheetModal
+      mounted
+      open={!closing}
+      onClose={onClose}
+      closing={closing}
+      className="obj-menu-modal"
+      ariaLabel="Voorwerpen"
     >
-      <div
-        className="sow-modal obj-menu-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Voorwerpen"
-        style={
-          grabbed
-            ? {
-                transform: `translateY(${dragOffset}px)`,
-                transition: dragging
-                  ? "none"
-                  : "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)",
-                animation: "none",
-              }
-            : undefined
-        }
-      >
-        <div
-          className="sow-modal-grip"
-          aria-hidden="true"
-          onPointerDown={onGripDown}
-          onPointerMove={onGripMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        />
         <div className="sow-modal-head">
           <h3>
             <i className="fa-solid fa-shapes" aria-hidden="true" /> Voorwerpen
@@ -3402,8 +3605,6 @@ function ObjectMenu({
             )}
           </div>
         </div>
-      </div>
-    </div>,
-    document.body
+    </SheetModal>
   );
 }

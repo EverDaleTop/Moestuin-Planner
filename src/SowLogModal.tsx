@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { Crop } from "./types";
 import { CropSelect } from "./Inspector";
+import { SheetModal } from "./SheetModal";
 
 interface Props {
   mounted: boolean;
@@ -34,110 +33,15 @@ export function SowLogModal({
   onSubmit,
   onClose,
 }: Props) {
-  const sheetRef = useRef<HTMLDivElement | null>(null);
-  const dragStartY = useRef(0);
-  const dragOffsetRef = useRef(0);
-  const [dragOffset, setDragOffsetState] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const [dragClosing, setDragClosing] = useState(false);
-  /** true zodra de gebruiker de sheet heeft vastgepakt: blokkeert de
-   *  openings-animatie, zodat terugveren niet opnieuw infade't. */
-  const [grabbed, setGrabbed] = useState(false);
-
-  const setDragOffset = (v: number) => {
-    dragOffsetRef.current = v;
-    setDragOffsetState(v);
-  };
-
-  // reset bij (her)openen
-  useEffect(() => {
-    if (mounted && open) {
-      setDragClosing(false);
-      setGrabbed(false);
-      dragOffsetRef.current = 0;
-      setDragOffsetState(0);
-      setDragging(false);
-    }
-  }, [mounted, open]);
-
-  const onGripDown = (e: React.PointerEvent) => {
-    dragStartY.current = e.clientY;
-    dragOffsetRef.current = 0;
-    setDragClosing(false);
-    setGrabbed(true);
-    setDragging(true);
-    setDragOffsetState(0);
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onGripMove = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    const next = Math.max(0, e.clientY - dragStartY.current);
-    dragOffsetRef.current = next;
-    setDragOffsetState(next);
-  };
-  const endDrag = () => {
-    if (!dragging) return;
-    setDragging(false);
-    if (dragOffsetRef.current > 90) {
-      // door laten glijden naar beneden i.p.v. eerst terug te springen
-      setDragClosing(true);
-      setDragOffset(window.innerHeight);
-      onClose();
-    } else {
-      setDragOffset(0);
-    }
-  };
-  useEffect(() => {
-    if (!mounted) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [mounted, onClose]);
-
   if (!mounted) return null;
 
-  return createPortal(
-    <div
-      className={`sow-modal-overlay${open ? "" : " closing"}${dragClosing ? " drag-closing" : ""}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <SheetModal
+      mounted={mounted}
+      open={open}
+      onClose={onClose}
+      ariaLabel="Zaaien loggen"
     >
-      <div
-        ref={sheetRef}
-        className={`sow-modal${dragging ? " dragging" : ""}${dragClosing ? " drag-closing" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Zaaien loggen"
-        style={
-          grabbed
-            ? {
-                transform: `translateY(${dragOffset}px)`,
-                transition: dragging
-                  ? "none"
-                  : dragClosing
-                    ? "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)"
-                    : "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)",
-                animation: "none",
-              }
-            : undefined
-        }
-      >
-        <div
-          className="sow-modal-grip"
-          aria-hidden="true"
-          onPointerDown={onGripDown}
-          onPointerMove={onGripMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        />
         <div className="sow-modal-head">
           <h3>
             <i className="fa-solid fa-seedling" aria-hidden="true" /> Zaaien loggen
@@ -188,8 +92,6 @@ export function SowLogModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body
+    </SheetModal>
   );
 }

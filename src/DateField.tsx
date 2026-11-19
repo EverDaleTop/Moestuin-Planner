@@ -49,12 +49,10 @@ export function DateField({ id, value, onChange }: DateFieldProps) {
   // triggerbreedte) en omhoog flippen als er onder geen ruimte is.
   const POP_W = 280;
   const POP_H = 340;
-  useLayoutEffect(() => {
-    if (!open) return;
+  const measure = () => {
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    // niet te dicht tegen de rand van het scherm
     const left = Math.max(8, Math.min(r.left, window.innerWidth - POP_W - 8));
     const below = r.bottom + 6;
     const top =
@@ -62,6 +60,9 @@ export function DateField({ id, value, onChange }: DateFieldProps) {
         ? below
         : Math.max(8, r.top - 6 - POP_H);
     setPos({ top, left });
+  };
+  useLayoutEffect(() => {
+    if (open) measure();
   }, [open]);
 
   useEffect(() => {
@@ -97,7 +98,10 @@ export function DateField({ id, value, onChange }: DateFieldProps) {
         className="datepick-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) measure();
+          setOpen((o) => !o);
+        }}
       >
         <span data-empty={!value ? true : undefined}>{value ? humanDate(value) : "dd/mm/jjjj"}</span>
         <i

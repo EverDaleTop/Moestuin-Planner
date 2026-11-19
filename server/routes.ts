@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { Garden } from "../src/types.ts";
-import { id } from "../src/storage.ts";
+import { id, DEFAULT_CROP_CATALOG } from "../src/storage.ts";
 import { mergeCatalog, mergeGarden, normalizeCrop, normalizeGarden } from "../src/sync.ts";
 import type { DataStore } from "./db.ts";
 import type { AuthService } from "./auth.ts";
@@ -234,6 +234,28 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
     }
   });
 
+  /** Account definitief verwijderen: eigen tuinen weg, lidmaatschappen opruimen. */
+  router.delete("/api/me", auth.requireAuth, async (req, res) => {
+    try {
+      const me = reqUser(req);
+      const gardens = await store.listGardensForUser(me.id);
+      for (const garden of gardens) {
+        if (garden.ownerId === me.id) {
+          await store.deleteGarden(garden.id);
+        } else {
+          garden.sharedWith = garden.sharedWith.filter((uid) => uid !== me.id);
+          await store.putGarden(garden);
+          ws.broadcastGarden(garden);
+        }
+      }
+      await store.removeSessionsForUser(me.id);
+      await store.deleteUser(me.id);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message ?? "Account verwijderen mislukt." });
+    }
+  });
+
   router.put("/api/catalog", auth.requireAuth, async (req, res) => {
     const catalog = req.body?.cropCatalog;
     if (!Array.isArray(catalog)) {
@@ -287,6 +309,9 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       name,
       createdAt: Date.now(),
       elements: [],
+      // Nieuwe tuin begint met de standaardlijst als eigen kopie; daarna is
+      // hij per tuin aan te passen zonder andere tuinen te raken.
+      cropCatalog: DEFAULT_CROP_CATALOG.map(normalizeCrop),
       harvests: [],
       sowings: [],
       expenses: [],

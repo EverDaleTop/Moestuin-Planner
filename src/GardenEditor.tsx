@@ -1,4 +1,4 @@
-import {
+﻿import {
 	useCallback,
 	useEffect,
 	useMemo,
@@ -18,16 +18,19 @@ import type {
 	ShoppingItem,
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
+import { LogoMark } from './Logo'
 import type { PreviewPayload } from './realtime'
 import { Inspector, inspectorElementInVeld } from './Inspector'
 import type { PresenceMember } from './realtime'
-import { PresenceModal } from './PresenceModal'
+import { ConfirmModal } from './ConfirmModal'
 import { HarvestView } from './HarvestExpenseView'
 import { ExpensesView } from './ExpensesView'
 import { ShoppingListView } from './ShoppingListView'
 import { PlantCatalog } from './PlantDatabase'
 import { CalendarView } from './CalendarView'
-import { SidebarThemeRow } from './ThemeToggle'
+import { GardenSettings } from './GardenSettings'
+import { SidebarThemeRow, ThemeToggle } from './ThemeToggle'
+import { UserMenu } from './UserMenu'
 import { sowableInMonth, harvestableInMonth } from './sowing'
 import { PX_PER_M } from './storage'
 import type { Theme } from './useTheme'
@@ -55,37 +58,26 @@ interface MenuItem {
 	icon: string
 	/** badge rechts in het menu, bv. aantal openstaande boodschappen */
 	count?: number
-	/** icoontje vóór het getal in de badge, bv. 'fa-seedling' */
+	/** icoontje vÃ³Ã³r het getal in de badge, bv. 'fa-seedling' */
 	countIcon?: string
 	hint?: string
 }
 
-interface TabBadge {
-	count: number
-	/** icoontje vóór het getal in de badge, bv. 'fa-seedling' */
-	icon?: string
-	title: string
-}
-
 /**
  * Tab met een uitklapmenu eronder. De tab zelf toont het actieve item van de
- * groep, zodat je nooit in een vergeten submenu zit. Via `tabBadges` kun je
- * losse tellers op de tab tonen (bv. te zaaien én te oogsten); zonder die
- * prop valt hij terug op één opgetelde badge.
+ * groep, zodat je nooit in een vergeten submenu zit.
  */
 function NavMenu({
 	label,
 	icon,
 	activeKey,
 	items,
-	tabBadges,
 	onSelect,
 }: {
 	label: string
 	icon: string
 	activeKey: string
 	items: MenuItem[]
-	tabBadges?: TabBadge[]
 	onSelect: (key: string) => void
 }) {
 	const [open, setOpen] = useState(false)
@@ -110,12 +102,9 @@ function NavMenu({
 		}
 	}, [open])
 
-	// badge op de tab zelf: expliciete badges, of één opgetelde terugval
-	const total = items.reduce((s, i) => s + (i.count ?? 0), 0)
+	// badge op de tab zelf: expliciete badges, of Ã©Ã©n opgetelde terugval
 	const current = items.find((i) => i.key === activeKey)
 	const active = current !== undefined
-	const totalBadges: TabBadge[] =
-		!active && total > 0 ? [{ count: total, title: `${total} open` }] : []
 	const closeTimer = useRef<number | null>(null)
 	const closeAnimTimer = useRef<number | null>(null)
 	// actieve sleutel op het moment dat het sluiten begint: tijdens de
@@ -149,14 +138,14 @@ function NavMenu({
 			setOpen(false)
 			setClosing(false)
 			closeAnimTimer.current = null
-		}, 180)
+		}, 190)
 	}
 
 	// Hover opent, met een kleine vertraging bij sluiten zodat je van de tab
 	// naar het menu kunt bewegen zonder dat het dichtklapt.
 	const scheduleClose = () => {
 		cancelClose()
-		closeTimer.current = window.setTimeout(() => requestClose(), 140)
+		closeTimer.current = window.setTimeout(() => requestClose(), 80)
 	}
 
 	useEffect(() => cancelClose, [])
@@ -177,6 +166,7 @@ function NavMenu({
 				aria-haspopup='menu'
 				aria-expanded={open && !closing}
 				title={current?.label ?? label}>
+				<i className={`fa-solid ${icon}`} aria-hidden='true' />
 				{label}
 				<i className={`fa-solid fa-chevron-down ge-menu-caret${open && !closing ? ' open' : ''}`} />
 			</button>
@@ -199,8 +189,13 @@ function NavMenu({
 									onSelect(i.key)
 									requestClose()
 								}}>
-								<span className='ge-menu-name'>{i.label}</span>
-								{i.hint && <span className='ge-menu-hint'>{i.hint}</span>}
+								<span className='ge-menu-ic' aria-hidden='true'>
+									<i className={`fa-solid ${i.icon}`} />
+								</span>
+								<span className='ge-menu-text'>
+									<span className='ge-menu-name'>{i.label}</span>
+									{i.hint && <span className='ge-menu-hint'>{i.hint}</span>}
+								</span>
 								{shownActive && (
 									<i className='fa-solid fa-check ge-menu-check' />
 								)}
@@ -208,6 +203,9 @@ function NavMenu({
 									<span className='ge-menu-count'>
 										{i.count}
 									</span>
+								)}
+								{!shownActive && !i.count && (
+									<i className='fa-solid fa-chevron-right ge-menu-go' aria-hidden='true' />
 								)}
 							</button>
 						)
@@ -226,12 +224,17 @@ interface Props {
 	presence?: number
 	presenceMembers?: PresenceMember[]
 	currentUserId: string
+	username: string
 	userNames: Record<string, string>
+	onLogout: () => void
+	onOpenProfile: () => void
 	onUnshareMember: (userId: string) => Promise<void>
 	onNameChange: (name: string) => void
+	onGardenUpdated: (garden: Garden) => void
+	onDeleteGarden: () => void
 	onBack: () => void
 	onAddFrame: (
-		type: 'bed' | 'path',
+		type: 'bed' | 'path' | 'veld',
 		x: number,
 		y: number,
 		widthM: number,
@@ -258,7 +261,6 @@ interface Props {
 		}[],
 	) => void
 	onDuplicateElements: (ids: string[]) => string[]
-	onAddCrop: (eId: string, cropId: string) => void
 	onUpdateCrop: (
 		eId: string,
 		iId: string,
@@ -295,6 +297,8 @@ interface Props {
 	onAddCropToCatalog: (crop: Omit<Crop, 'id'>) => void
 	onUpdateCropInCatalog: (cropId: string, patch: Partial<Crop>) => void
 	onRemoveCropFromCatalog: (cropId: string) => void
+	/** korte entrance-animatie voor de canvasinhoud (alleen bij openen) */
+	animateIn?: boolean
 }
 
 export function GardenEditor(props: Props) {
@@ -306,9 +310,14 @@ export function GardenEditor(props: Props) {
 		presence,
 		presenceMembers = [],
 		currentUserId,
+		username,
 		userNames,
+		onLogout,
+		onOpenProfile,
 		onUnshareMember,
 		onNameChange,
+		onGardenUpdated,
+		onDeleteGarden,
 		onBack,
 		onAddFrame,
 		onAddObject,
@@ -317,7 +326,6 @@ export function GardenEditor(props: Props) {
 		onRemoveElements,
 		onApplyElements,
 		onDuplicateElements,
-		onAddCrop,
 		onUpdateCrop,
 		onRemoveCrop,
 		onDuplicateCrop,
@@ -348,16 +356,16 @@ export function GardenEditor(props: Props) {
 		livePreview,
 		onUpdateCropInCatalog,
 		onRemoveCropFromCatalog,
+		animateIn = false,
 	} = props
 
-	const [presenceOpen, setPresenceOpen] = useState(false)
 	const isOwner = garden.ownerId === currentUserId
 
 	/**
 	 * De server stuurt de volledige ledenlijst mee. Valt die om de een of
-	 * andere reden weg terwijl de teller wél groter is dan 1 (bv. een oudere,
+	 * andere reden weg terwijl de teller wÃ©l groter is dan 1 (bv. een oudere,
 	 * niet-herstartte server die alleen `count` stuurt), dan zorgen we
-	 * ervoor dat je jezelf in elk geval als online ziet — anders zou je
+	 * ervoor dat je jezelf in elk geval als online ziet â€” anders zou je
 	 * terwijl je in de tuin bent als "offline" verschijnen.
 	 */
 	const onlineMembers: PresenceMember[] = useMemo(() => {
@@ -372,10 +380,8 @@ export function GardenEditor(props: Props) {
 		]
 	}, [presenceMembers, presence, currentUserId, userNames])
 
-	const onlineCount = onlineMembers.length
-
 	const [editorTab, setEditorTab] = useState<
-		'canvas' | 'gewassen' | 'kalender' | 'oogst' | 'uitgaven' | 'boodschappen'
+		'canvas' | 'gewassen' | 'kalender' | 'oogst' | 'uitgaven' | 'boodschappen' | 'instellingen'
 	>(() => {
 		try {
 			const saved = localStorage.getItem('mp_editor_tab')
@@ -385,7 +391,8 @@ export function GardenEditor(props: Props) {
 				saved === 'kalender' ||
 				saved === 'oogst' ||
 				saved === 'uitgaven' ||
-				saved === 'boodschappen'
+				saved === 'boodschappen' ||
+				saved === 'instellingen'
 			) {
 				return saved
 			}
@@ -394,8 +401,10 @@ export function GardenEditor(props: Props) {
 	})
 
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+	const titleRef = useRef<HTMLInputElement | null>(null)
 	const [selectedIds, setSelectedIds] = useState<string[]>([])
 	const [selectedCropId, setSelectedCropId] = useState<string | null>(null)
+	const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
 	const [focusSignal, setFocusSignal] = useState<{ x: number; y: number; n: number } | null>(null)
 	const focusN = useRef(0)
 	const busyRef = useRef(false)
@@ -454,7 +463,7 @@ export function GardenEditor(props: Props) {
 		}
 	}, [mobileMenuOpen])
 
-	// Delete / Backspace removes the selected elements, or the selected child.
+	// Delete / Backspace vraagt eerst om bevestiging via een modaal.
 	useEffect(() => {
 		const isEditable = (t: EventTarget | null) => {
 			const el = t as HTMLElement | null
@@ -472,7 +481,7 @@ export function GardenEditor(props: Props) {
 			if (selectedIds.length === 0 && !cropContext) return
 			e.preventDefault()
 			if (busyRef.current) return
-			deleteSelectedRef.current()
+			setConfirmDeleteSelected(true)
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
@@ -488,9 +497,6 @@ export function GardenEditor(props: Props) {
 		onRemoveElements(selectedIds)
 		setSelectedIds([])
 	}
-
-	const deleteSelectedRef = useRef(deleteSelected)
-	deleteSelectedRef.current = deleteSelected
 
 	const duplicateSelected = () => {
 		if (cropContext) {
@@ -548,6 +554,10 @@ export function GardenEditor(props: Props) {
 		const onKey = (e: KeyboardEvent) => {
 			if (isEditable(e.target)) return
 			if (e.key === 'Escape') {
+				if (mobileMenuOpen) {
+					setMobileMenuOpen(false)
+					return
+				}
 				setObjectMenu(false)
 				setTool('select')
 				return
@@ -566,7 +576,7 @@ export function GardenEditor(props: Props) {
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
-	}, [toggleSnap])
+	}, [toggleSnap, mobileMenuOpen])
 
 	// Undo (Ctrl+Z) / redo (Ctrl+Y or Ctrl+Shift+Z).
 	useEffect(() => {
@@ -598,7 +608,7 @@ export function GardenEditor(props: Props) {
 	}, [onUndo, onRedo])
 
 	const handleAddFrame = (
-		type: 'bed' | 'path',
+		type: 'bed' | 'path' | 'veld',
 		x: number,
 		y: number,
 		w: number,
@@ -625,6 +635,16 @@ export function GardenEditor(props: Props) {
 		[garden.shopping],
 	)
 
+	/** deelnemers van de tuin (eigenaar eerst), o.a. voor "voor wie" bij boodschappen en uitgaven */
+	const gardenMembers = useMemo(
+		() =>
+			[garden.ownerId, ...garden.sharedWith.filter((uid) => uid !== garden.ownerId)].map((id) => ({
+				id,
+				name: userNames[id] ?? (id === currentUserId ? username : 'Onbekend'),
+			})),
+		[garden.ownerId, garden.sharedWith, userNames, currentUserId, username],
+	)
+
 	const selected = useMemo(
 		() =>
 			selectedIds.length > 0
@@ -635,8 +655,8 @@ export function GardenEditor(props: Props) {
 
 	const normCropName = (s: string) => s.trim().toLowerCase()
 
-	/** alle gewas-ids die ergens in een bed geplant staan (id óf naam, net als
-	 *  bij zaaiingen/oogsten — ids kunnen verouderd of dubbel zijn) */
+	/** alle gewas-ids die ergens in een bed geplant staan (id Ã³f naam, net als
+	 *  bij zaaiingen/oogsten â€” ids kunnen verouderd of dubbel zijn) */
 	const plantedCropIds = useMemo(() => {
 		const byId = new Map(catalog.map((c) => [c.id, c]))
 		const plantedIds = new Set<string>()
@@ -660,8 +680,8 @@ export function GardenEditor(props: Props) {
 
 	/**
 	 * "Toon in tuin" vanuit de kalender: selecteer de bedden met dit gewas,
-	 * ga naar de tuin-tab en centreer de camera erop. Matcht op id óf naam,
-	 * zodat het ook werkt bij dubbele of verouderde catalogusrijen. Bij één
+	 * ga naar de tuin-tab en centreer de camera erop. Matcht op id Ã³f naam,
+	 * zodat het ook werkt bij dubbele of verouderde catalogusrijen. Bij Ã©Ã©n
 	 * bed wordt ook de planting zelf geselecteerd voor maximale highlight.
 	 */
 	const handleLocateCrop = useCallback(
@@ -698,7 +718,7 @@ export function GardenEditor(props: Props) {
 			})
 			setTool('select')
 			setSelectedIds(beds.map((b) => b.id))
-			// Bij één bed ook de planting zelf selecteren: die krijgt dan de
+			// Bij Ã©Ã©n bed ook de planting zelf selecteren: die krijgt dan de
 			// sterke highlight + het gewaspaneel in de inspector.
 			if (beds.length === 1) {
 				const inst = beds[0].crops.find((c) => matches(c.cropId))
@@ -711,67 +731,52 @@ export function GardenEditor(props: Props) {
 		[garden.elements, catalog],
 	)
 
-	const elBox = (e: any) => {
-		if (e.object === 'gaas' && e.gaas) {
-			const t = (e.widthM || 0.1) * 100
-			const x1 = Math.min(e.gaas.a.x, e.gaas.b.x) - t
-			const y1 = Math.min(e.gaas.a.y, e.gaas.b.y) - t
-			return { x: x1, y: y1, w: Math.abs(e.gaas.b.x - e.gaas.a.x) + t * 2, h: Math.abs(e.gaas.b.y - e.gaas.a.y) + t * 2 }
-		}
-		return { x: e.x, y: e.y, w: e.widthM * 100, h: e.heightM * 100 }
-	}
 	return (
 		<div className='ge-wrap'>
 			<header className='ge-header'>
 				<div className='ge-brand'>
-					<svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true" style={{ flex: "none" }}><rect width="32" height="32" rx="10" fill="#1F4D3A"></rect><path d="M9 23c0-8 5-13 14-14 0 9-5 14-14 14z" fill="#5FA55A"></path></svg>
 					<button
-						className='btn-ghost ge-back'
+						className='ge-back'
 						onClick={onBack}
-						title='Terug naar tuinen'>
+						title='Terug naar tuinen'
+						aria-label='Terug naar tuinen'>
 						<i className='fa-solid fa-arrow-left' />
-						<span>Tuinen</span>
 					</button>
-					<span className='ge-divider' aria-hidden='true' />
-					<input
-						className='ge-title'
-						value={name}
-						onChange={(e) => setName(e.target.value)}
-						onBlur={() => name.trim() && onNameChange(name.trim())}
-						onKeyDown={(e) =>
-							e.key === 'Enter' && name.trim() && onNameChange(name.trim())
-						}
-						aria-label='Tuinnaam'
-					/>
+					<span className='ge-brand-logo' aria-hidden='true'>
+						<LogoMark size={34} />
+					</span>
+					<div className='ge-title-wrap'>
+						<input
+							ref={titleRef}
+							className='ge-title'
+							value={name}
+							onChange={(e) => setName(e.target.value)}
+							onBlur={() => name.trim() && onNameChange(name.trim())}
+							onKeyDown={(e) =>
+								e.key === 'Enter' && name.trim() && onNameChange(name.trim())
+							}
+							aria-label='Tuinnaam'
+						/>
+					</div>
 				</div>
 				<div className='ge-tabs-slot'>
 					<div className={`ge-editor-tabs${mobileMenuOpen ? ' is-open' : ''}`}>
 					<button
 						className={`nav-tab ${editorTab === 'canvas' ? 'nav-active' : ''}`}
 						onClick={() => { setEditorTab('canvas'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-map' aria-hidden='true' />
 						Tuin
 					</button>
 					<NavMenu
 						label='Gewassen'
 						icon='fa-carrot'
 						activeKey={editorTab}
-						tabBadges={[
-							{
-								count: sowableThisMonth,
-								icon: 'fa-seedling',
-								title: `${sowableThisMonth} nu te zaaien`,
-							},
-							{
-								count: harvestableThisMonth,
-								icon: 'fa-basket-shopping',
-								title: `${harvestableThisMonth} nu te oogsten`,
-							},
-						]}
 						items={[
 							{
 								key: 'gewassen',
 								label: 'Gewassenlijst',
 								icon: 'fa-seedling',
+								hint: 'Alles in deze tuin',
 							},
 							{
 								key: 'kalender',
@@ -790,6 +795,7 @@ export function GardenEditor(props: Props) {
 					<button
 						className={`nav-tab ${editorTab === 'oogst' ? 'nav-active' : ''}`}
 						onClick={() => { setEditorTab('oogst'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-basket-shopping' aria-hidden='true' />
 						Oogst
 					</button>
 					<NavMenu
@@ -801,12 +807,20 @@ export function GardenEditor(props: Props) {
 								key: 'uitgaven',
 								label: 'Uitgaven',
 								icon: 'fa-receipt',
+								hint: 'Kosten en inkomsten',
 							},
 							{
 								key: 'boodschappen',
 								label: 'Boodschappen',
 								icon: 'fa-cart-shopping',
 								count: openShopping,
+								hint: 'Wat je nog moet halen',
+							},
+							{
+								key: 'instellingen',
+								label: 'Instellingen',
+								icon: 'fa-gear',
+								hint: 'Tuinnaam en leden',
 							},
 						]}
 						onSelect={(key) => { setEditorTab(key as typeof editorTab); setMobileMenuOpen(false) }}
@@ -814,90 +828,111 @@ export function GardenEditor(props: Props) {
 				</div>
 				</div>
 				<div className='ge-actions'>
-					{onlineCount > 0 && (
-						<button
-							className='ge-presence'
-							onClick={() => setPresenceOpen(true)}
-							title='Bekijk wie er online is'>
-							<i className='fa-solid fa-users' />
-							<span>{onlineCount}</span>
-							<i className='fa-solid fa-chevron-down ge-presence-caret' />
-						</button>
-					)}
+					<UserMenu username={username} onLogout={onLogout} onOpenProfile={onOpenProfile} />
+					<ThemeToggle theme={theme} onToggle={onToggleTheme} />
 					<button
-						className='ge-nav-toggle'
+						type='button'
+						className='ge-side-toggle'
 						onClick={() => setMobileMenuOpen((o) => !o)}
-						aria-label='Menu openen'
-						aria-expanded={mobileMenuOpen}>
-						<i className='fa-solid fa-bars ge-nav-icon ge-nav-icon-bars' />
-						<i className='fa-solid fa-xmark ge-nav-icon ge-nav-icon-close' />
+						aria-label={mobileMenuOpen ? 'Menu sluiten' : 'Menu openen'}
+						aria-expanded={mobileMenuOpen}
+						aria-controls='ge-editor-sidebar'>
+						<i className='fa-solid fa-bars ge-nav-icon ge-nav-icon-bars' aria-hidden='true' />
+						<i className='fa-solid fa-xmark ge-nav-icon ge-nav-icon-close' aria-hidden='true' />
 					</button>
 				</div>
 			</header>
 			<div className={`ge-side-backdrop${mobileMenuOpen ? ' open' : ''}`} onClick={() => setMobileMenuOpen(false)} />
-			<aside className={`ge-sidebar${mobileMenuOpen ? ' open' : ''}`}>
-				<div className='ge-side-head'>
-					<span className='ge-side-title'>
-						<i className='fa-solid fa-seedling' /> Menu
+			<aside
+				id='ge-editor-sidebar'
+				className={`ge-sidebar${mobileMenuOpen ? ' open' : ''}`}
+				aria-label='Menu'>
+				<button
+					type='button'
+					className='ge-side-profile'
+					onClick={() => { setMobileMenuOpen(false); onOpenProfile() }}
+					title='Open je profiel'
+					aria-label={`Open profiel van ${username}`}>
+					<span className='gl-avatar ge-side-avatar' aria-hidden='true'>
+						{(username.trim()[0] ?? '?').toUpperCase()}
 					</span>
-				</div>
+					<span className='ge-side-profile-tx'>
+						<strong>{username}</strong>
+						<span className={`presence-tag ${isOwner ? 'presence-tag-owner' : 'presence-tag-self'}`}>
+							{isOwner ? 'Eigenaar' : 'Tuinlid'}
+						</span>
+					</span>
+					<i className='fa-solid fa-chevron-right ge-side-profile-go' aria-hidden='true' />
+				</button>
+				<div className='ge-side-sep' aria-hidden='true' />
 				<nav className='ge-side-nav'>
 					<button
 						className={`ge-side-item${editorTab === 'canvas' ? ' is-active' : ''}`}
-						onClick={() => { setEditorTab('canvas'); setMobileMenuOpen(false) }}>
-						<i className='fa-solid fa-map' />
+						onClick={() => { setEditorTab('canvas'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'canvas' ? 'page' : undefined}>
+						<i className='fa-solid fa-map' aria-hidden='true' />
 						<span className='ge-side-label'>Tuin</span>
 					</button>
 					<button
-						className={`ge-side-item${editorTab === 'gewassen' || editorTab === 'kalender' ? ' is-active' : ''}`}
-						onClick={() => { setEditorTab('gewassen'); setMobileMenuOpen(false) }}>
-						<i className='fa-solid fa-seedling' />
-						<span className='ge-side-label'>Gewassenlijst</span>
+						className={`ge-side-item${editorTab === 'gewassen' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('gewassen'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'gewassen' ? 'page' : undefined}>
+						<i className='fa-solid fa-seedling' aria-hidden='true' />
+						<span className='ge-side-label'>Gewassen</span>
 					</button>
 					<button
 						className={`ge-side-item${editorTab === 'kalender' ? ' is-active' : ''}`}
-						onClick={() => { setEditorTab('kalender'); setMobileMenuOpen(false) }}>
-						<i className='fa-solid fa-calendar-days' />
-						<span className='ge-side-label'>Zaaikalender</span>
+						onClick={() => { setEditorTab('kalender'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'kalender' ? 'page' : undefined}>
+						<i className='fa-solid fa-calendar-days' aria-hidden='true' />
+						<span className='ge-side-label'>Kalender</span>
 					</button>
 					<button
 						className={`ge-side-item${editorTab === 'oogst' ? ' is-active' : ''}`}
-						onClick={() => { setEditorTab('oogst'); setMobileMenuOpen(false) }}>
-						<i className='fa-solid fa-basket-shopping' />
+						onClick={() => { setEditorTab('oogst'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'oogst' ? 'page' : undefined}>
+						<i className='fa-solid fa-basket-shopping' aria-hidden='true' />
 						<span className='ge-side-label'>Oogst</span>
 					</button>
+					<div className='ge-side-sep' aria-hidden='true' />
 					<button
 						className={`ge-side-item${editorTab === 'uitgaven' ? ' is-active' : ''}`}
-						onClick={() => { setEditorTab('uitgaven'); setMobileMenuOpen(false) }}>
+						onClick={() => { setEditorTab('uitgaven'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'uitgaven' ? 'page' : undefined}>
 						<i className='fa-solid fa-receipt' />
 						<span className='ge-side-label'>Uitgaven</span>
 					</button>
 					<button
 						className={`ge-side-item${editorTab === 'boodschappen' ? ' is-active' : ''}`}
-						onClick={() => { setEditorTab('boodschappen'); setMobileMenuOpen(false) }}>
+						onClick={() => { setEditorTab('boodschappen'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'boodschappen' ? 'page' : undefined}>
 						<i className='fa-solid fa-cart-shopping' />
 						<span className='ge-side-label'>Boodschappen</span>
+						{openShopping > 0 && <span className='ge-side-count'>{openShopping}</span>}
+					</button>
+					<div className='ge-side-sep' aria-hidden='true' />
+					<button
+						className={`ge-side-item${editorTab === 'instellingen' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('instellingen'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'instellingen' ? 'page' : undefined}>
+						<i className='fa-solid fa-gear' aria-hidden='true' />
+						<span className='ge-side-label'>Instellingen</span>
+					</button>
+				</nav>
+				<div className='ge-side-foot'>
+					<button
+						className='ge-side-item'
+						onClick={() => { setMobileMenuOpen(false); onLogout(); }}>
+						<i className='fa-solid fa-right-from-bracket' aria-hidden='true' />
+						<span className='ge-side-label'>Uitloggen</span>
 					</button>
 					<SidebarThemeRow theme={theme} onToggle={onToggleTheme} />
-				</nav>
+				</div>
 			</aside>
-			{presenceOpen && (
-				<PresenceModal
-					gardenName={garden.name}
-					members={onlineMembers}
-					ownerId={garden.ownerId}
-					sharedWith={garden.sharedWith}
-					userNames={userNames}
-					currentUserId={currentUserId}
-					isOwner={isOwner}
-					onClose={() => setPresenceOpen(false)}
-					onKick={onUnshareMember}
-				/>
-			)}
 
 			{editorTab === 'canvas' ? (
 				<div className='ge-body'>
-					<div className='ge-canvas'>
+					<div className={`ge-canvas${animateIn ? ' is-entering' : ''}`}>
 						<GardenCanvas
 							elements={garden.elements}
 							catalog={catalog}
@@ -917,6 +952,18 @@ export function GardenEditor(props: Props) {
 								if (!el || el.type !== 'bed') setSelectedCropId(null)
 							}}
 							onSelectCrop={setSelectedCropId}
+							onToggleSelect={(ids, mode) => {
+								setSelectedCropId(null)
+								setSelectedIds((prev) => {
+									if (mode === 'add') return [...new Set([...prev, ...ids])]
+									const set = new Set(prev)
+									for (const id of ids) {
+										if (set.has(id)) set.delete(id)
+										else set.add(id)
+									}
+									return [...set]
+								})
+							}}
 							onBusyChange={onBusyChange}
 							theme={theme}
 						onApplyChanges={(updates) => onApplyElements(updates)}
@@ -1049,7 +1096,7 @@ export function GardenEditor(props: Props) {
 									setObjectMenu((o) => !o)
 								}}
 								aria-label='Voorwerp toevoegen'
-								data-tooltip='Voorwerp toevoegen (Bank, …)'>
+								data-tooltip='Voorwerp toevoegen (Bank, â€¦)'>
 								<IconObject />
 							</button>
 						</div>
@@ -1060,7 +1107,7 @@ export function GardenEditor(props: Props) {
 								<button
 									className='tool-delete'
 									disabled={selectedIds.length === 0 && !cropContext}
-									onClick={deleteSelected}
+									onClick={() => setConfirmDeleteSelected(true)}
 									aria-label='Verwijderen'
 									data-tooltip='Verwijderen (Del)'>
 									<IconTrash />
@@ -1203,10 +1250,8 @@ export function GardenEditor(props: Props) {
 			) : editorTab === 'kalender' ? (
 				<div className='shop-scroll'>
 					<CalendarView
-						gardenId={garden.id}
 						catalog={catalog}
 						sowings={garden.sowings ?? []}
-						harvests={garden.harvests}
 						plantedCropIds={plantedCropIds}
 						onAddSowing={onAddSowing}
 						onUpdateSowing={onUpdateSowing}
@@ -1229,6 +1274,8 @@ export function GardenEditor(props: Props) {
 					<ExpensesView
 						expenses={garden.expenses}
 						incomes={garden.incomes ?? []}
+						members={gardenMembers}
+						currentUserId={currentUserId}
 						onAdd={onAddExpense}
 						onUpdate={onUpdateExpense}
 						onRemove={onRemoveExpense}
@@ -1237,10 +1284,32 @@ export function GardenEditor(props: Props) {
 						onRemoveIncome={onRemoveIncome}
 					/>
 				</div>
+			) : editorTab === 'instellingen' ? (
+				<div className='shop-scroll'>
+					<div className='shop-page'>
+						<GardenSettings
+							garden={garden}
+							name={name}
+							currentUserId={currentUserId}
+							userNames={userNames}
+							onlineMembers={onlineMembers}
+							isOwner={isOwner}
+							onNameChange={(next) => {
+								setName(next)
+								onNameChange(next)
+							}}
+							onGardenUpdated={onGardenUpdated}
+							onUnshareMember={onUnshareMember}
+							onDeleteGarden={onDeleteGarden}
+						/>
+					</div>
+				</div>
 			) : (
 				<div className='shop-scroll'>
 				<ShoppingListView
 					items={garden.shopping ?? []}
+					members={gardenMembers}
+					currentUserId={currentUserId}
 					onAdd={onAddShopping}
 					onUpdate={onUpdateShopping}
 					onRemove={onRemoveShopping}
@@ -1248,6 +1317,30 @@ export function GardenEditor(props: Props) {
 				/>
 				</div>
 			)}
+			<ConfirmModal
+				open={confirmDeleteSelected}
+				title={cropContext ? 'Gewas verwijderen?' : 'Selectie verwijderen?'}
+				message={
+					cropContext ? (
+						<>
+							Weet je zeker dat je dit stuk gewas wilt verwijderen? Dit kan niet ongedaan worden
+							gemaakt.
+						</>
+					) : (
+						<>
+							Weet je zeker dat je {selectedIds.length}{" "}
+							{selectedIds.length === 1 ? "element" : "elementen"} wilt verwijderen? Dit kan niet
+							ongedaan worden gemaakt.
+						</>
+					)
+				}
+				onCancel={() => setConfirmDeleteSelected(false)}
+				onConfirm={() => {
+					setConfirmDeleteSelected(false)
+					deleteSelected()
+				}}
+			/>
 		</div>
 	)
 }
+

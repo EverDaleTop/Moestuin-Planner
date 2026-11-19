@@ -3,6 +3,9 @@ import type { User } from "./types";
 import type { Theme } from "./useTheme";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
+import { Navbar } from "./Navbar";
+import { LogoMark } from "./Logo";
+import { ConfirmModal } from "./ConfirmModal";
 import { api } from "./api";
 
 interface Props {
@@ -30,10 +33,16 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [showPasswords, setShowPasswords] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [passBusy, setPassBusy] = useState(false);
   const [passError, setPassError] = useState<string | null>(null);
   const [passOk, setPassOk] = useState(false);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const initial = (user.username.trim()[0] ?? "?").toUpperCase();
   const memberSince = new Date(user.createdAt).toLocaleDateString("nl-NL", {
@@ -81,29 +90,46 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
     }
   };
 
+  const deleteAccount = async () => {
+    if (deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await api.deleteAccount();
+      onLogout();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Account verwijderen mislukt.");
+      setDeleteOpen(false);
+      setDeleteBusy(false);
+    }
+  };
+
   return (
-    <>
-      <header className="gl-header">
-        <div className="gl-header-inner">
-          <div className="gl-brand">
-            <button className="gl-back-btn" onClick={onBack} aria-label="Terug naar tuinen">
-              <i className="fa-solid fa-arrow-left" />
+    <div className="ge-wrap">
+      <Navbar
+        className="navbar-profile"
+        brand={
+          <div className="ge-brand">
+            <button
+              className="ge-back"
+              onClick={onBack}
+              title="Terug naar tuinen"
+              aria-label="Terug naar tuinen"
+            >
+              <i className="fa-solid fa-arrow-left" aria-hidden="true" />
             </button>
-            <span className="gl-mark" aria-hidden="true">
-              <i className="fa-solid fa-carrot" />
-            </span>
-            <h1>Pluktuintje</h1>
+            <LogoMark className="gl-mark" />
+            <span className="ge-brand-title">Profiel</span>
           </div>
-          <div className="gl-account">
+        }
+        actions={
+          <>
             <UserMenu username={user.username} onLogout={onLogout} onOpenProfile={onOpenProfile} />
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-          </div>
-        </div>
-      </header>
-      <div className="gl-wrap pf-wrap">
-        <h2 className="gl-section pf-page-title">
-          <i className="fa-solid fa-circle-user" /> Profiel
-        </h2>
+          </>
+        }
+      />
+      <div className="pf-page">
         <section className="pf-card">
           <div className="pf-identity">
             <span className="pf-avatar" aria-hidden="true">
@@ -161,7 +187,7 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
               <div className="pf-passwrap">
                 <input
                   id="pf-current"
-                  type={showPasswords ? "text" : "password"}
+                  type={showCurrent ? "text" : "password"}
                   value={current}
                   onChange={(e) => {
                     setCurrent(e.target.value);
@@ -172,11 +198,11 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
                 <button
                   type="button"
                   className="pf-eye"
-                  onClick={() => setShowPasswords((s) => !s)}
-                  aria-label={showPasswords ? "Wachtwoorden verbergen" : "Wachtwoorden tonen"}
-                  aria-pressed={showPasswords}
+                  onClick={() => setShowCurrent((s) => !s)}
+                  aria-label={showCurrent ? "Wachtwoord verbergen" : "Wachtwoord tonen"}
+                  aria-pressed={showCurrent}
                 >
-                  <i className={`fa-solid ${showPasswords ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true" />
+                  <i className={`fa-solid ${showCurrent ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true" />
                 </button>
               </div>
               <div className="pf-grid">
@@ -187,7 +213,7 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
                   <div className="pf-passwrap">
                     <input
                       id="pf-next"
-                      type={showPasswords ? "text" : "password"}
+                      type={showNext ? "text" : "password"}
                       value={next}
                       onChange={(e) => {
                         setNext(e.target.value);
@@ -198,11 +224,11 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
                     <button
                       type="button"
                       className="pf-eye"
-                      onClick={() => setShowPasswords((s) => !s)}
-                      aria-label={showPasswords ? "Wachtwoorden verbergen" : "Wachtwoorden tonen"}
-                      aria-pressed={showPasswords}
+                      onClick={() => setShowNext((s) => !s)}
+                      aria-label={showNext ? "Wachtwoord verbergen" : "Wachtwoord tonen"}
+                      aria-pressed={showNext}
                     >
-                      <i className={`fa-solid ${showPasswords ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true" />
+                      <i className={`fa-solid ${showNext ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -213,7 +239,7 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
                   <div className="pf-passwrap">
                     <input
                       id="pf-confirm"
-                      type={showPasswords ? "text" : "password"}
+                      type={showConfirm ? "text" : "password"}
                       value={confirm}
                       onChange={(e) => {
                         setConfirm(e.target.value);
@@ -225,11 +251,11 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
                     <button
                       type="button"
                       className="pf-eye"
-                      onClick={() => setShowPasswords((s) => !s)}
-                      aria-label={showPasswords ? "Wachtwoorden verbergen" : "Wachtwoorden tonen"}
-                      aria-pressed={showPasswords}
+                      onClick={() => setShowConfirm((s) => !s)}
+                      aria-label={showConfirm ? "Wachtwoord verbergen" : "Wachtwoord tonen"}
+                      aria-pressed={showConfirm}
                     >
-                      <i className={`fa-solid ${showPasswords ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true" />
+                      <i className={`fa-solid ${showConfirm ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -253,11 +279,57 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
           <h2 className="pf-title">
             <i className="fa-solid fa-circle-user" /> Account
           </h2>
-          <button className="pf-logout" onClick={onLogout}>
-            <i className="fa-solid fa-right-from-bracket" /> Uitloggen
-          </button>
+          <div className="pf-account-actions">
+            <button className="pf-logout" onClick={onLogout}>
+              <i className="fa-solid fa-right-from-bracket" /> Uitloggen
+            </button>
+          </div>
         </section>
+
+        <section className="pf-card pf-danger">
+          <h2 className="pf-title">
+            <i className="fa-solid fa-triangle-exclamation" /> Gevarenzone
+          </h2>
+          <div className="pf-danger-row">
+            <div className="pf-danger-text">
+              <strong>Account verwijderen</strong>
+              <p>
+                Je account en alle tuinen waarvan jij eigenaar bent worden definitief
+                verwijderd. Dit kan niet ongedaan worden gemaakt.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="pf-danger-btn"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <i className="fa-solid fa-trash" aria-hidden="true" />
+              Account verwijderen
+            </button>
+          </div>
+          {deleteError && (
+            <div className="auth-error" role="alert">
+              {deleteError}
+            </div>
+          )}
+        </section>
+
+        <ConfirmModal
+          open={deleteOpen}
+          title="Account verwijderen?"
+          message={
+            <>
+              Weet je zeker dat je <strong>{user.username}</strong> definitief wilt
+              verwijderen? Je account en je eigen tuinen verdwijnen. Dit kan niet
+              ongedaan worden gemaakt.
+            </>
+          }
+          confirmLabel="Ja, verwijderen"
+          busy={deleteBusy}
+          onCancel={() => !deleteBusy && setDeleteOpen(false)}
+          onConfirm={() => void deleteAccount()}
+        />
       </div>
-    </>
+    </div>
   );
 }

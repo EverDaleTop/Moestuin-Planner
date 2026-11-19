@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Crop, HarvestEntry, SowingEntry } from "./types";
+import type { Crop, SowingEntry } from "./types";
 import { cropLabel } from "./cropIcons";
 import { CropGlyph } from "./CropIconPicker";
 import {
@@ -10,17 +10,33 @@ import {
   harvestWindowOf,
   monthInWindow,
   sowableInMonth,
-  sameWindow,
   windowText,
-  windowLine,
 } from "./sowing";
 import { useCollapseForm } from "./useCollapseForm";
 import { SowLogModal } from "./SowLogModal";
+import { ConfirmModal } from "./ConfirmModal";
+
+/** Gewassen op alfabet (nl), met het ras als tiebreaker. */
+const byCropName = (a: Crop, b: Crop) =>
+  a.name.localeCompare(b.name, "nl", { sensitivity: "base" }) ||
+  (a.variety ?? "").localeCompare(b.variety ?? "", "nl", { sensitivity: "base" });
+
+/**
+ * Splits een venster in één of twee balken: een venster dat het jaar rond
+ * gaat (bv. okt–feb) past niet in één grid-balk en wordt in tweeën geknipt.
+ */
+const barSpans = (w: { start: number; end: number } | null): { start: number; end: number }[] => {
+  if (!w) return [];
+  if (w.start <= w.end) return [w];
+  return [
+    { start: w.start, end: 12 },
+    { start: 1, end: w.end },
+  ];
+};
 
 interface Props {
   catalog: Crop[];
   sowings: SowingEntry[];
-  harvests: HarvestEntry[];
   
   plantedCropIds: Set<string>;
   
@@ -32,8 +48,6 @@ interface Props {
   onLocateCrop: (cropId: string) => void;
   
   unresolvedPlantings?: number;
-  
-  onLogHarvest: (cropId: string) => void;
 }
 
 
@@ -96,6 +110,7 @@ function ScopeDropdown({
   const openNow = () => {
     window.clearTimeout(closeTimer.current ?? undefined);
     closeTimer.current = null;
+    measure();
     setClosing(false);
     setOpen(true);
   };
@@ -155,7 +170,7 @@ function ScopeDropdown({
         ref={triggerRef}
         className="catdd-trigger cal-scope-trigger"
         aria-haspopup="listbox"
-        aria-expanded={open || closing}
+        aria-expanded={open && !closing}
         aria-label="Welke gewassen tonen"
         title={current.title}
         onClick={() => openNow()}
@@ -224,7 +239,6 @@ function fmtDayShort(dateStr: string): string {
 export function CalendarView({
   catalog,
   sowings,
-  harvests,
   plantedCropIds,
   veldScopes,
   onAddSowing,
@@ -232,13 +246,12 @@ export function CalendarView({
   onRemoveSowing,
   onLocateCrop,
   unresolvedPlantings = 0,
-  onLogHarvest: _onLogHarvest,
 }: Props) {
   const [q, setQ] = useState("");
   const [scopeKey, setScopeKey] = useState<string>("planted");
   
 
-  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<SowingEntry | null>(null);
   const [editDateId, setEditDateId] = useState<string | null>(null);
   const form = useCollapseForm();
   const [pickCrop, setPickCrop] = useState("");
@@ -290,7 +303,7 @@ export function CalendarView({
           sownKeys.has(c.id) ||
           sownKeys.has(`naam:${c.name.trim().toLowerCase()}`)
         );
-      }),
+      }).sort(byCropName),
     
     [catalog, month, sownKeys, plantedKeys]
   );
@@ -316,7 +329,7 @@ export function CalendarView({
   const veldScope = useMemo(
     () =>
       scopeKey.startsWith(VELD_PREFIX)
-        ? (veldScopes.find((v) => `${VELD_PREFIX}${v.id}` === scopeKey) ?? null)
+        ? ((veldScopes ?? []).find((v) => `${VELD_PREFIX}${v.id}` === scopeKey) ?? null)
         : null,
     [veldScopes, scopeKey]
   );
@@ -341,59 +354,9 @@ export function CalendarView({
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return scoped;
-    return scoped.filter((c) => c.name.toLowerCase().includes(s));
+    const list = !s ? scoped : scoped.filter((c) => c.name.toLowerCase().includes(s));
+    return [...list].sort(byCropName);
   }, [scoped, q]);
-
-  
-  const marks = useMemo(() => {
-    const sown = new Map<string, number>();
-    const harvested = new Map<string, number>();
-    for (const s of sowings) {
-      const m = Number(s.date.slice(5, 7));
-      if (!m) continue;
-      const keys = s.cropId
-        ? [s.cropId, s.cropName.trim().toLowerCase()]
-        : [s.cropName.trim().toLowerCase()];
-      for (const k of keys) sown.set(`${k}:${m}`, (sown.get(`${k}:${m}`) ?? 0) + 1);
-    }
-    for (const h of harvests) {
-      const m = Number(h.date.slice(5, 7));
-      if (!m) continue;
-      const base = (h.cropName ?? "").trim().toLowerCase();
-      const keys = h.cropId ? [h.cropId, base] : [base];
-      for (const k of keys) {
-        if (k) harvested.set(`${k}:${m}`, (harvested.get(`${k}:${m}`) ?? 0) + 1);
-      }
-    }
-    return { sown, harvested };
-  }, [sowings, harvests]);
-
-  const countFor = (crop: Crop, m: number, src: Map<string, number>): number => {
-    let n = 0;
-    for (const k of [crop.id, crop.name.trim().toLowerCase()]) {
-      n += src.get(`${k}:${m}`) ?? 0;
-    }
-    return n;
-  };
-
-  
-  const toneOf = (c: Crop, m: number) => {
-    const sow = sowWindowOf(c);
-    const harv = harvestWindowOf(c);
-    const inSow = sow !== null && monthInWindow(m, sow.start, sow.end);
-    const inHarv = harv !== null && monthInWindow(m, harv.start, harv.end);
-    const both = inSow && inHarv;
-    const cls = [
-      both ? (sameWindow(sow, harv) ? "cal-cell-cycle" : "cal-cell-both") : "",
-      !both && inSow ? "cal-cell-sow" : "",
-      !both && inHarv ? "cal-cell-harv" : "",
-    ].filter(Boolean);
-    return { inSow, inHarv, both, cls };
-  };
-
-  
-  const hlCls = "";
 
   const sortedSowings = useMemo(
     () => sowings.slice().sort((a, b) => b.date.localeCompare(a.date)),
@@ -432,7 +395,7 @@ export function CalendarView({
 
       <div className="cal-cards">
         <div style={{ background: "var(--primary)", color: "var(--bg)", borderRadius: 28, padding: 28 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--harvest)" }}>Deze maand</div>
+          <div className="cal-kicker">Deze maand</div>
           <div style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 800, fontSize: 64, lineHeight: 1, marginTop: 14 }}>{harvestOnly.length}</div>
           <div style={{ fontSize: 16, marginTop: 4 }}>gewassen te oogsten</div>
           <p style={{ fontSize: 14, margin: "16px 0 0", opacity: .85, lineHeight: 1.5 }}>
@@ -441,6 +404,9 @@ export function CalendarView({
         </div>
         <div style={{ background: "var(--surface)", borderRadius: 28, padding: 28 }}>
           <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 16 }}>Te oogsten</div>
+          {harvestOnly.length === 0 ? (
+            <p className="insp-hint" style={{ margin: 0 }}>Niets te oogsten deze maand.</p>
+          ) : (
           <div className="cal-harvest-grid">
             {harvestOnly.map((c) => {
               const h = harvestWindowOf(c);
@@ -452,6 +418,7 @@ export function CalendarView({
               );
             })}
           </div>
+          )}
         </div>
       </div>
       {}
@@ -473,8 +440,7 @@ export function CalendarView({
                 ? "Nog niets in de tuin geplant. Kies “Alle gewassen” om alles te zien."
                 : "Geen gewassen gevonden."}
           </p>
-        ) : (
-          <>
+        ) : null}
           <div className="cal-year-card">
             <div className="cal-scroll-inner">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
@@ -500,6 +466,8 @@ export function CalendarView({
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 4, background: "var(--sow)" }}></span>zaaien</span>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 4, background: "var(--harvest)" }}></span>oogsten</span>
               </div>
+              {filtered.length > 0 && (
+              <>
               <div className="cal-month-head">
                 <div></div>
                 {MONTHS_SHORT.map((m, i) => (
@@ -528,20 +496,20 @@ export function CalendarView({
                       )}
                     </span>
                     <div className="cal-bars">
-                      {sw && (
-                        <div className="z" title={`Zaaien: ${windowText(sw)}`} style={{ gridColumn: `${sw.start} / ${sw.end + 1}` }} />
-                      )}
-                      {hw && (
-                        <div className="o" title={`Oogsten: ${windowText(hw)}`} style={{ gridColumn: `${hw.start} / ${hw.end + 1}` }} />
-                      )}
+                      {barSpans(sw).map((s) => (
+                        <div key={`s${s.start}-${s.end}`} className="z" title={`Zaaien: ${windowText(sw!)}`} style={{ gridColumn: `${s.start} / ${s.end + 1}` }} />
+                      ))}
+                      {barSpans(hw).map((s) => (
+                        <div key={`o${s.start}-${s.end}`} className="o" title={`Oogsten: ${windowText(hw!)}`} style={{ gridColumn: `${s.start} / ${s.end + 1}` }} />
+                      ))}
                     </div>
                   </div>
                 );
               })}
+              </>
+              )}
             </div>
           </div>
-          </>
-        )}
       </section>
 
       {}
@@ -635,32 +603,14 @@ export function CalendarView({
                         <i className="fa-solid fa-pen" />
                       </button>
                     )}
-                    {confirmId === s.id ? (
-                      <>
-                        <span className="gl-confirm">Wissen?</span>
-                        <button
-                          className="btn-danger cal-log-confirm"
-                          onClick={() => {
-                            onRemoveSowing(s.id);
-                            setConfirmId(null);
-                          }}
-                        >
-                          Ja
-                        </button>
-                        <button className="cal-log-confirm" onClick={() => setConfirmId(null)}>
-                          Nee
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="cal-log-edit cal-log-del"
-                        onClick={() => setConfirmId(s.id)}
-                        title="Zaailog verwijderen"
-                        aria-label="Zaailog verwijderen"
-                      >
-                        <i className="fa-solid fa-trash" />
-                      </button>
-                    )}
+                    <button
+                      className="cal-log-edit cal-log-del"
+                      onClick={() => setPendingDelete(s)}
+                      title="Zaailog verwijderen"
+                      aria-label="Zaailog verwijderen"
+                    >
+                      <i className="fa-solid fa-trash" />
+                    </button>
                   </div>
                 </div>
               );
@@ -668,6 +618,25 @@ export function CalendarView({
           </div>
         )}
       </section>
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Zaailog verwijderen?"
+        message={
+          pendingDelete ? (
+            <>
+              Weet je zeker dat je de zaailog van <strong>{pendingDelete.cropName}</strong> (
+              {pendingDelete.date}) wilt verwijderen? Dit kan niet ongedaan worden gemaakt.
+            </>
+          ) : (
+            ""
+          )
+        }
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) onRemoveSowing(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
     </div>
   );
 }

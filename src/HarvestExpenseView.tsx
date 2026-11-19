@@ -3,6 +3,7 @@ import type { Crop, HarvestEntry } from './types'
 
 import { useCollapseForm } from './useCollapseForm'
 import { HarvestFormModal } from './HarvestFormModal'
+import { ConfirmModal } from './ConfirmModal'
 import { api } from './api'
 
 interface Props {
@@ -124,6 +125,7 @@ export function HarvestView({
 }: Props) {
 	const sheet = useCollapseForm()
 	const [editEntry, setEditEntry] = useState<HarvestEntry | null>(null)
+	const [pendingDelete, setPendingDelete] = useState<HarvestEntry | null>(null)
 	const [q, setQ] = useState('')
 
 	const [cropName, setCropName] = useState('')
@@ -310,9 +312,13 @@ export function HarvestView({
 		sheet.openForm()
 	}
 	const closeForm = () => {
-		setEditEntry(null)
 		sheet.closeForm()
 	}
+	// Edit pas wissen als de sheet echt weg is: anders flipt de modal tijdens
+	// de sluit-animatie al naar "Nieuwe oogst" / "Toevoegen".
+	useEffect(() => {
+		if (!sheet.mounted) setEditEntry(null)
+	}, [sheet.mounted])
 	const saveForm = (data: Omit<HarvestEntry, 'id'>) => {
 		if (editEntry) onUpdate(editEntry.id, data)
 		else onAdd(data)
@@ -525,7 +531,7 @@ export function HarvestView({
 											<button onClick={() => startEdit(h)} title="Bewerken" aria-label="Bewerken">
 												<i className="fa-solid fa-pen" />
 											</button>
-											<button className="btn-danger" onClick={() => onRemove(h.id)} title="Verwijderen" aria-label="Verwijderen">
+											<button className="btn-danger" onClick={() => setPendingDelete(h)} title="Verwijderen" aria-label="Verwijderen">
 												<i className="fa-solid fa-trash" />
 											</button>
 										</div>
@@ -537,6 +543,25 @@ export function HarvestView({
 					))}
 				</div>
 			)}
+			<ConfirmModal
+				open={pendingDelete !== null}
+				title="Oogst verwijderen?"
+				message={
+					pendingDelete ? (
+						<>
+							Weet je zeker dat je de oogst van <strong>{cropNameOf(pendingDelete)}</strong> (
+							{pendingDelete.quantity} kg) wilt verwijderen? Dit kan niet ongedaan worden gemaakt.
+						</>
+					) : (
+						''
+					)
+				}
+				onCancel={() => setPendingDelete(null)}
+				onConfirm={() => {
+					if (pendingDelete) onRemove(pendingDelete.id)
+					setPendingDelete(null)
+				}}
+			/>
 		</div>
 	)
 

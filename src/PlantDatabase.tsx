@@ -7,6 +7,7 @@ import { cropLabel } from "./cropIcons";
 import { seasonLabel } from "./sowing";
 import { useCollapseForm } from "./useCollapseForm";
 import { CropFormModal } from "./CropFormModal";
+import { ConfirmModal } from "./ConfirmModal";
 
 export function PlantCatalog({
   catalog,
@@ -20,17 +21,23 @@ export function PlantCatalog({
   onDelete: (cropId: string) => void;
 }) {
   const [q, setQ] = useState("");
-  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Crop | null>(null);
   const [editCrop, setEditCrop] = useState<Crop | null>(null);
   const sheet = useCollapseForm();
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return catalog;
-    return catalog.filter(
-      (c) =>
-        cropLabel(c).toLowerCase().includes(s) ||
-        (c.sowWindow ?? "").toLowerCase().includes(s)
+    const list = !s
+      ? catalog
+      : catalog.filter(
+          (c) =>
+            cropLabel(c).toLowerCase().includes(s) ||
+            (c.sowWindow ?? "").toLowerCase().includes(s)
+        );
+    return [...list].sort(
+      (a, b) =>
+        a.name.localeCompare(b.name, "nl", { sensitivity: "base" }) ||
+        (a.variety ?? "").localeCompare(b.variety ?? "", "nl", { sensitivity: "base" })
     );
   }, [catalog, q]);
 
@@ -53,7 +60,7 @@ export function PlantCatalog({
       <div className="pd-head">
         <div>
           <h1 className="cal-title">Gewassen</h1>
-          <p className="pd-sub">Jouw gewassen, zaaiperiodes en oogstmomenten.</p>
+          <p className="pd-sub">De gewassenlijst van deze tuin — zaaiperiodes en oogstmomenten.</p>
         </div>
       </div>
 
@@ -118,35 +125,39 @@ export function PlantCatalog({
                 >
                   <i className="fa-solid fa-pen" />
                 </button>
-                {confirmId === c.id ? (
-                  <>
-                    <span className="gl-confirm">Verwijderen?</span>
-                    <button
-                      className="btn-danger"
-                      onClick={() => {
-                        onDelete(c.id);
-                        setConfirmId(null);
-                      }}
-                    >
-                      Ja
-                    </button>
-                    <button onClick={() => setConfirmId(null)}>Nee</button>
-                  </>
-                ) : (
-                  <button
-                    className="btn-danger"
-                    onClick={() => setConfirmId(c.id)}
-                    title="Gewas verwijderen"
-                  >
-                    <i className="fa-solid fa-trash" />
-                  </button>
-                )}
+                <button
+                  className="btn-danger"
+                  onClick={() => setPendingDelete(c)}
+                  title="Gewas verwijderen"
+                  aria-label={`Gewas verwijderen: ${cropLabel(c)}`}
+                >
+                  <i className="fa-solid fa-trash" />
+                </button>
               </div>
             </div>
           </article>
         ))}
         </div>
       </section>
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Gewas verwijderen?"
+        message={
+          pendingDelete ? (
+            <>
+              Weet je zeker dat je <strong>{cropLabel(pendingDelete)}</strong> uit de database wilt
+              verwijderen? Dit kan niet ongedaan worden gemaakt.
+            </>
+          ) : (
+            ""
+          )
+        }
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) onDelete(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
     </>
   );
 }
@@ -173,7 +184,7 @@ export function PlantDatabase({
       <div className="pd-head">
         <div>
           <h1 className="cal-title">Gewassen</h1>
-          <p className="pd-sub">Jouw gewassen, zaaiperiodes en oogstmomenten.</p>
+          <p className="pd-sub">De gewassenlijst van deze tuin — zaaiperiodes en oogstmomenten.</p>
         </div>
         <div className="pd-head-actions">
           <span className="pd-count-pill">{catalog.length} gewassen</span>

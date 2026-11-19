@@ -53,6 +53,7 @@ export function emptyTombstones(): GardenTombstones {
   return {
     elements: {},
     crops: {},
+    catalog: {},
     harvests: {},
     sowings: {},
     expenses: {},
@@ -70,6 +71,7 @@ export function normalizeTombstones(d?: GardenTombstones): GardenTombstones {
   return {
     elements: { ...asMap(d?.elements) },
     crops: { ...asMap(d?.crops) },
+    catalog: { ...asMap(d?.catalog) },
     harvests: { ...asMap(d?.harvests) },
     sowings: { ...asMap(d?.sowings) },
     expenses: { ...asMap(d?.expenses) },
@@ -99,6 +101,7 @@ export function mergeTombstones(
   return {
     elements: mergeTomb(na.elements, nb.elements),
     crops: mergeTomb(na.crops, nb.crops),
+    catalog: mergeTomb(na.catalog, nb.catalog),
     harvests: mergeTomb(na.harvests, nb.harvests),
     sowings: mergeTomb(na.sowings, nb.sowings),
     expenses: mergeTomb(na.expenses, nb.expenses),
@@ -201,6 +204,7 @@ export function normalizeGarden(g: Garden): Garden {
       updatedAt: e.updatedAt ?? 0,
       crops: (e.crops ?? []).map((c) => ({ ...c, updatedAt: c.updatedAt ?? 0 })),
     })),
+    cropCatalog: (g.cropCatalog ?? []).map(normalizeCrop),
     harvests: (g.harvests ?? []).map((h) => ({ ...h, updatedAt: h.updatedAt ?? 0 })),
     sowings: (g.sowings ?? []).map((s) => ({ ...s, updatedAt: s.updatedAt ?? 0 })),
     expenses: (g.expenses ?? []).map((e) => ({ ...e, updatedAt: e.updatedAt ?? 0 })),
@@ -235,6 +239,7 @@ export function mergeGarden(
     updatedAt: Math.max(stampOf(sa), stampOf(sb)),
     createdAt: sa.createdAt,
     elements: mergeElementLists(sa.elements, sb.elements, tomb.elements, tomb.crops),
+    cropCatalog: mergeLists(sa.cropCatalog ?? [], sb.cropCatalog ?? [], (c: Crop) => c.id, tomb.catalog),
     harvests: mergeLists(sa.harvests, sb.harvests, (h: HarvestEntry) => h.id, tomb.harvests),
     sowings: mergeLists(sa.sowings, sb.sowings, (s: SowingEntry) => s.id, tomb.sowings),
     expenses: mergeLists(sa.expenses, sb.expenses, (e: Expense) => e.id, tomb.expenses),
@@ -295,6 +300,7 @@ export function reviveDeleted(restored: Garden, base: Garden | undefined): Garde
   }
   tomb.elements = scrub(elIds, tomb.elements);
   tomb.crops = scrub(cropIds, tomb.crops);
+  tomb.catalog = scrub(new Set((restored.cropCatalog ?? []).map((c) => c.id)), tomb.catalog);
   tomb.harvests = scrub(new Set(restored.harvests.map((h) => h.id)), tomb.harvests);
   tomb.sowings = scrub(new Set(restored.sowings.map((s) => s.id)), tomb.sowings);
   tomb.expenses = scrub(new Set(restored.expenses.map((e) => e.id)), tomb.expenses);
@@ -336,6 +342,7 @@ export function reviveDeleted(restored: Garden, base: Garden | undefined): Garde
     ...restored,
     updatedAt: at,
     elements: bumpCrops(restored.elements, base?.elements),
+    cropCatalog: bump(restored.cropCatalog ?? [], base?.cropCatalog),
     harvests: bump(restored.harvests, base?.harvests),
     sowings: bump(restored.sowings, base?.sowings),
     expenses: bump(restored.expenses, base?.expenses),

@@ -1,5 +1,5 @@
 [Unit]
-Description=Pluktuintje
+Description=Oogstplan
 After=network.target
 
 [Service]

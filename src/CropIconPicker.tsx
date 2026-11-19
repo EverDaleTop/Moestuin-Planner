@@ -1,5 +1,10 @@
-import { CROP_ICONS, suggestCropIcon, cropEmoji } from "./cropIcons";
-import { ALL_CROP_ICON_IMAGES, cropIconImage, iconLabelFromFile } from "./cropIconImages";
+import { ICON_LABELS, suggestCropIcon, cropEmoji } from "./cropIcons";
+import {
+  ALL_CROP_ICON_IMAGES,
+  cropIconImage,
+  iconLabelFromFile,
+  imageKeyForName,
+} from "./cropIconImages";
 
 /**
  * Eén gewas-icoon voor in de UI: de afbeelding uit
@@ -45,31 +50,25 @@ interface Props {
   cropName?: string;
 }
 
-/** Gewas-icoontjes (afbeeldingen, met emoji-terugval) om aan een gewas te koppelen. */
+/** Gewas-icoontjes: alleen de afbeeldingen uit `src/assets/crop-icons/`. */
 export function IconPicker({ value, onChange, cropName, color }: Props) {
-  const suggestion =
-    cropName && cropName.trim() ? suggestCropIcon(cropName) : undefined;
-  const showSuggestion =
-    suggestion && suggestion.key !== value && suggestion.emoji !== value;
+  const name = cropName?.trim() ?? "";
+  const semantic = name ? suggestCropIcon(name)?.key : undefined;
+  const suggestedKey =
+    (semantic && cropIconImage(semantic) ? semantic : undefined) ??
+    (name ? imageKeyForName(name) : undefined);
+  const showSuggestion = suggestedKey && suggestedKey !== value;
+  const suggestedLabel = suggestedKey
+    ? (ICON_LABELS[suggestedKey] ?? iconLabelFromFile(suggestedKey))
+    : "";
 
-  // Raster: eerst de curated icoontjes (met hun afbeelding), daarna de
-  // afbeeldingen die iemand zelf in de map heeft gezet. Een bestand dat bij een
-  // curated icoon hoort staat daar al, dus die slaan we hier over.
-  const curatedKeys = new Set(CROP_ICONS.map((i) => i.key));
-  const options = [
-    ...CROP_ICONS.map((i) => ({
-      key: i.key,
-      label: i.label,
-      emoji: i.emoji,
-      url: cropIconImage(i.key),
-    })),
-    ...ALL_CROP_ICON_IMAGES.filter((i) => !curatedKeys.has(i.key)).map((i) => ({
-      key: i.key,
-      label: iconLabelFromFile(i.key),
-      emoji: "🌱",
-      url: i.url,
-    })),
-  ];
+  // Raster: uitsluitend de afbeeldingsbestanden, op naam gesorteerd. De
+  // ingebouwde (emoji-)set doet hier niet meer mee.
+  const options = ALL_CROP_ICON_IMAGES.map((i) => ({
+    key: i.key,
+    label: ICON_LABELS[i.key] ?? iconLabelFromFile(i.key),
+    url: i.url,
+  })).sort((a, b) => a.label.localeCompare(b.label, "nl"));
 
   return (
     <div className="icon-picker" role="group" aria-label="Icoon">
@@ -78,11 +77,11 @@ export function IconPicker({ value, onChange, cropName, color }: Props) {
         <button
           type="button"
           className="icon-suggest"
-          onClick={() => onChange(suggestion.key)}
-          title={`Stel ${suggestion.emoji} in voor "${cropName?.trim()}"`}
+          onClick={() => onChange(suggestedKey!)}
+          title={`Gebruik ${suggestedLabel} voor “${name}”`}
         >
-          <CropGlyph iconKey={suggestion.key} color={color} />
-          <span>Voorgesteld voor “{cropName?.trim()}” — klik om te gebruiken</span>
+          <CropGlyph iconKey={suggestedKey} color={color} />
+          <span>Voorgesteld voor “{name}” — klik om te gebruiken</span>
         </button>
       )}
       <div className="icon-picker-grid">
@@ -92,14 +91,14 @@ export function IconPicker({ value, onChange, cropName, color }: Props) {
             <button
               type="button"
               key={o.key}
-              title={o.label}
               aria-label={o.label}
               aria-pressed={isActive}
+              title={o.label}
               className={isActive ? "icon-opt icon-opt-active" : "icon-opt"}
               onClick={() => onChange(o.key)}
             >
               <span className="crop-icon" role="img" aria-hidden="true">
-                {o.url ? <img src={o.url} alt="" aria-hidden="true" draggable={false} /> : o.emoji}
+                <img src={o.url} alt="" aria-hidden="true" draggable={false} />
               </span>
             </button>
           );

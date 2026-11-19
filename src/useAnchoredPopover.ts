@@ -18,7 +18,8 @@ export interface PopoverPos {
  */
 export function useAnchoredPopover(
   open: boolean,
-  align: "left" | "right" | "center" = "left"
+  align: "left" | "right" | "center" = "left",
+  gap = 8
 ) {
   const triggerRef = useRef<HTMLElement | null>(null);
   const popRef = useRef<HTMLElement | null>(null);
@@ -46,14 +47,14 @@ export function useAnchoredPopover(
       left = Math.max(margin, window.innerWidth - pw - margin);
     }
 
-    let top = r.bottom + 8;
+    let top = r.bottom + gap;
     if (top + ph > window.innerHeight - margin) {
-      const above = r.top - 8 - ph;
+      const above = r.top - gap - ph;
       top = above > margin ? above : Math.max(margin, window.innerHeight - ph - margin);
     }
 
     setPos({ top, left, minWidth: Math.round(r.width), ready: true });
-  }, [align]);
+  }, [align, gap]);
 
   // Eerst meten en plaatsen voordat de browser tekent: anders flitst het menu
   // even op de verkeerde plek.

@@ -15,7 +15,7 @@ function idOf(el: Element): number {
 
 const MIN_THUMB = 32;
 const TICK_MS = 200;
-const EDGE = 10;
+const EDGE = 4;
 
 interface Bar {
   id: number;
@@ -84,6 +84,10 @@ export function CustomScrollbars() {
       if (host === el) {
         const grip = el.querySelector(".insp-grip") as HTMLElement | null;
         const gripH = grip && grip.offsetHeight > 0 ? grip.offsetHeight : 0;
+        // De sticky anchor kan nooit boven de content-box uitkomen en staat
+        // dus altijd `padding-top` te laag; compenseer dat zodat de track wel
+        // bovenaan de zichtbare rand begint (en dus ook niet onderaan uitsteekt).
+        const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
         const trackTop = EDGE + gripH;
         const trackH = Math.max(MIN_THUMB, el.clientHeight - trackTop - EDGE);
         const thumbHeight = Math.max(
@@ -94,7 +98,7 @@ export function CustomScrollbars() {
         const padRight = parseFloat(getComputedStyle(el).paddingRight) || 0;
         next.push({
           id,
-          top: EDGE + gripH,
+          top: trackTop - padTop,
           height: trackH,
           right: 4 - padRight,
           thumbHeight,
@@ -135,18 +139,27 @@ export function CustomScrollbars() {
         continue;
       }
 
-      const trackH = r.height - 24;
+      // Track over de volledige viewport-hoogte: de inhoud (en de track)
+      // schuift onder de zwevende navbar door. Alleen afkappen op de
+      // viewport-randen, nooit op de navbar.
+      const trackTop = r.top + EDGE;
+      const trackBottom = r.top + r.height - EDGE;
+      const top = Math.max(trackTop, EDGE);
+      const height = Math.max(
+        MIN_THUMB,
+        Math.min(trackBottom, window.innerHeight - EDGE) - top,
+      );
       const thumbHeight = Math.max(
         MIN_THUMB,
-        Math.min(trackH, (trackH * el.clientHeight) / el.scrollHeight),
+        Math.min(height, (height * el.clientHeight) / el.scrollHeight),
       );
       next.push({
         id,
-        top: r.top + 12,
-        height: trackH,
+        top,
+        height,
         right: Math.max(0, window.innerWidth - r.right) + 4,
         thumbHeight,
-        thumbTop: (el.scrollTop / maxScroll) * (trackH - thumbHeight),
+        thumbTop: (el.scrollTop / maxScroll) * (height - thumbHeight),
         inner,
         popup,
         sheet: false,
@@ -227,9 +240,22 @@ export function CustomScrollbars() {
     const maxScroll = d.el.scrollHeight - d.el.clientHeight;
     if (maxScroll <= 0) return;
     const shell = d.el.closest(".sow-modal, .insp, .catdd-pop") as HTMLElement | null;
-    const trackH = shell
-      ? Math.max(MIN_THUMB, d.el.offsetHeight - EDGE * 2)
-      : d.el.getBoundingClientRect().height - 24;
+    // Zelfde trackhoogte als in update(): sheet-geval trekt de grip-hoogte eraf.
+    let trackH: number;
+    if (shell && d.el === shell) {
+      const gripEl = d.el.querySelector(".insp-grip") as HTMLElement | null;
+      const gripH = gripEl && gripEl.offsetHeight > 0 ? gripEl.offsetHeight : 0;
+      trackH = Math.max(MIN_THUMB, d.el.clientHeight - EDGE - gripH - EDGE);
+    } else if (shell) {
+      trackH = Math.max(MIN_THUMB, d.el.offsetHeight - EDGE * 2);
+    } else {
+      // Zelfde viewport-clamp als in update(): volledige hoogte,
+      // afgekapt op de viewport-randen.
+      const rr = d.el.getBoundingClientRect();
+      const t = Math.max(rr.top + EDGE, EDGE);
+      const b = Math.min(rr.top + rr.height - EDGE, window.innerHeight - EDGE);
+      trackH = Math.max(MIN_THUMB, b - t);
+    }
     const thumbHeight = Math.max(
       MIN_THUMB,
       Math.min(trackH, (trackH * d.el.clientHeight) / d.el.scrollHeight),

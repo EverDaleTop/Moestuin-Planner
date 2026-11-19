@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { Crop, HarvestEntry } from "./types";
+import { SheetModal } from "./SheetModal";
 import { CropSuggestions } from "./CropSuggestions";
-import { CropGlyph } from "./CropIconPicker";
-import { useCollapseForm } from "./useCollapseForm";
 import { api } from "./api";
 
 function NumField({
@@ -21,7 +19,6 @@ function NumField({
   step?: number;
   placeholder?: string;
 }) {
-  const round = (v: number) => Math.round(v * 100) / 100;
   const bump = (dir: number) => {
     const base = parseFloat(value);
     const current = Number.isFinite(base) ? base : 0;
@@ -65,25 +62,9 @@ function round2(v: number): number {
   return Math.round((v + Number.EPSILON) * 100) / 100;
 }
 
-function storePerKg(h: { storePrice?: number; storeWeightKg?: number }): number | null {
-  if (!h.storePrice || !h.storeWeightKg || h.storeWeightKg <= 0) return null;
-  return h.storePrice / h.storeWeightKg;
-}
-
 function cropKey(name: string): string {
   return name.trim().toLowerCase();
 }
-
-const FREE_COLORS = [
-  "#e5533d",
-  "#3d9e5c",
-  "#d9a13b",
-  "#7a6ff0",
-  "#2f9fb5",
-  "#c2557f",
-  "#6b8f3a",
-  "#8a6b4f",
-];
 
 function resolveCropName(h: HarvestEntry, byId: Map<string, Crop>): string {
   const own = h.cropName?.trim();
@@ -126,6 +107,8 @@ export function HarvestFormModal({
 
   const [cropName, setCropName] = useState("");
   const [cropOpen, setCropOpen] = useState(false);
+  const [cropClosing, setCropClosing] = useState(false);
+  const cropCloseTimer = useRef<number | null>(null);
   const cropAnchorRef = useRef<HTMLDivElement | null>(null);
   const [qty, setQty] = useState("1");
   const [date, setDate] = useState(todayStr());
@@ -136,13 +119,18 @@ export function HarvestFormModal({
   const [refUrl, setRefUrl] = useState("");
   const [refWeightKg, setRefWeightKg] = useState("");
   const [refStorePrice, setRefStorePrice] = useState<number | undefined>(undefined);
-  const [refTitle, setRefTitle] = useState("");
-  const [refImage, setRefImage] = useState<string | undefined>(undefined);
+  const [, setRefTitle] = useState("");
+  const [, setRefImage] = useState<string | undefined>(undefined);
   const [refBusy, setRefBusy] = useState(false);
   const [refError, setRefError] = useState<string | null>(null);
 
   const reset = useCallback(() => {
     setCropName("");
+    if (cropCloseTimer.current !== null) {
+      window.clearTimeout(cropCloseTimer.current);
+      cropCloseTimer.current = null;
+    }
+    setCropClosing(false);
     setQty("1");
     setDate(todayStr());
     setPrice("");
@@ -157,6 +145,49 @@ export function HarvestFormModal({
     setCropOpen(false);
   }, []);
 
+  // Vloeiend sluiten van de gewas-suggesties: eerst de sluit-animatie,
+  // dan pas unmounten (zelfde patroon als de andere dropdowns).
+  const cancelCropClose = useCallback(() => {
+    if (cropCloseTimer.current !== null) {
+      window.clearTimeout(cropCloseTimer.current);
+      cropCloseTimer.current = null;
+    }
+    setCropClosing(false);
+  }, []);
+
+  const openCropSuggest = useCallback(() => {
+    cancelCropClose();
+    setCropOpen(true);
+  }, [cancelCropClose]);
+
+  const requestCropClose = useCallback(() => {
+    if (!cropOpen || cropClosing) return;
+    setCropClosing(true);
+    cropCloseTimer.current = window.setTimeout(() => {
+      setCropOpen(false);
+      setCropClosing(false);
+      cropCloseTimer.current = null;
+    }, 150);
+  }, [cropOpen, cropClosing]);
+
+  useEffect(
+    () => () => {
+      if (cropCloseTimer.current !== null) window.clearTimeout(cropCloseTimer.current);
+    },
+    []
+  );
+
+  const handleCropChange = (v: string) => {
+    setCropName(v);
+    // Onder de 2 letters: vloeiend sluiten i.p.v. instant unmounten.
+    if (v.trim().length >= 2) openCropSuggest();
+    else requestCropClose();
+  };
+
+  const handleCropFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    if (e.currentTarget.value.trim().length >= 2) openCropSuggest();
+  };
+
   const loadEdit = (h: HarvestEntry) => {
     setCropName(resolveCropName(h, catalogById));
     setQty(String(h.quantity));
@@ -170,18 +201,16 @@ export function HarvestFormModal({
     setRefTitle("");
     setRefImage(undefined);
     setRefError(null);
+    if (cropCloseTimer.current !== null) {
+      window.clearTimeout(cropCloseTimer.current);
+      cropCloseTimer.current = null;
+    }
+    setCropClosing(false);
     setCropOpen(false);
   };
 
   useEffect(() => {
     if (!mounted || !open) return;
-    // drag-status terugzetten: na een drag-close staat de sheet nog
-    // weggeschoven; zonder reset opent hij onzichtbaar.
-    dragOffsetRef.current = 0;
-    setDragOffsetState(0);
-    setDragging(false);
-    setDragClosing(false);
-    setGrabbed(false);
     if (edit) loadEdit(edit);
     else {
       reset();
@@ -256,93 +285,17 @@ export function HarvestFormModal({
     reset();
   };
 
-  // drag-to-close
-  const dragStartY = useRef(0);
-  const dragOffsetRef = useRef(0);
-  const [dragOffset, setDragOffsetState] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const [dragClosing, setDragClosing] = useState(false);
-  const [grabbed, setGrabbed] = useState(false);
-
-  const setDragOffset = (v: number) => {
-    dragOffsetRef.current = v;
-    setDragOffsetState(v);
-  };
-  const onGripDown = (e: React.PointerEvent) => {
-    dragStartY.current = e.clientY;
-    dragOffsetRef.current = 0;
-    setDragClosing(false);
-    setGrabbed(true);
-    setDragging(true);
-    setDragOffsetState(0);
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onGripMove = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    const next = Math.max(0, e.clientY - dragStartY.current);
-    dragOffsetRef.current = next;
-    setDragOffsetState(next);
-  };
-  const endDrag = () => {
-    if (!dragging) return;
-    setDragging(false);
-    if (dragOffsetRef.current > 90) {
-      setDragClosing(true);
-      setDragOffset(window.innerHeight);
-      onClose();
-    } else {
-      setDragOffset(0);
-    }
-  };
-
-  useEffect(() => {
-    if (!mounted) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [mounted, onClose]);
-
   if (!mounted) return null;
 
-  return createPortal(
-    <div
-      className={`sow-modal-overlay${open ? "" : " closing"}${dragClosing ? " drag-closing" : ""}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <SheetModal
+      mounted={mounted}
+      open={open}
+      onClose={onClose}
+      className="crop-modal"
+      ariaLabel={edit ? "Oogst bewerken" : "Nieuwe oogst"}
+      resetKey={edit}
     >
-      <div
-        className={`sow-modal crop-modal${dragging ? " dragging" : ""}${dragClosing ? " drag-closing" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={edit ? "Oogst bewerken" : "Nieuwe oogst"}
-        style={
-          grabbed
-            ? {
-                transform: `translateY(${dragOffset}px)`,
-                transition: dragging
-                  ? "none"
-                  : "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)",
-                animation: "none",
-              }
-            : undefined
-        }
-      >
-        <div
-          className="sow-modal-grip"
-          aria-hidden="true"
-          onPointerDown={onGripDown}
-          onPointerMove={onGripMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        />
         <div className="sow-modal-head">
           <h3>
             <i className="fa-solid fa-carrot" aria-hidden="true" /> {edit ? "Oogst bewerken" : "Nieuwe oogst"}
@@ -361,8 +314,8 @@ export function HarvestFormModal({
                   id="harvest-crop"
                   type="text"
                   value={cropName}
-                  onChange={(e) => setCropName(e.target.value)}
-                  onFocus={() => setCropOpen(true)}
+                  onChange={(e) => handleCropChange(e.target.value)}
+                  onFocus={handleCropFocus}
                   placeholder="Bijv. Tomaat, Courgette…"
                   autoComplete="off"
                   role="combobox"
@@ -370,17 +323,18 @@ export function HarvestFormModal({
                   aria-autocomplete="list"
                 />
               </div>
-              {catalog.length > 0 && cropOpen && cropName.trim() !== "" && (
+              {catalog.length > 0 && (cropOpen || cropClosing) && (
                 <CropSuggestions
                   catalog={catalog}
                   plantedCropIds={plantedCropIds}
                   anchorRef={cropAnchorRef}
                   query={cropName}
+                  closing={cropClosing}
                   onPick={(name) => {
                     setCropName(name);
-                    setCropOpen(false);
+                    requestCropClose();
                   }}
-                  onClose={() => setCropOpen(false)}
+                  onClose={requestCropClose}
                 />
               )}
             </div>
@@ -525,8 +479,6 @@ export function HarvestFormModal({
             <i className="fa-solid fa-check" /> {edit ? "Wijziging opslaan" : "Toevoegen"}
           </button>
         </div>
-      </div>
-    </div>,
-    document.body
+    </SheetModal>
   );
 }

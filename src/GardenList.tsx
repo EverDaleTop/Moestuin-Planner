@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Garden, User } from "./types";
 import type { Theme } from "./useTheme";
 import { SidebarThemeRow, ThemeToggle } from "./ThemeToggle";
+import { ConfirmModal } from "./ConfirmModal";
 import { UserMenu } from "./UserMenu";
+import { LogoMark } from "./Logo";
+import { Navbar } from "./Navbar";
+import { LegalFooter } from "./LegalPage";
+import { ShareModal } from "./ShareModal";
+import { useCollapseForm } from "./useCollapseForm";
 import { api, inviteUrl } from "./api";
 
 interface Props {
@@ -61,9 +67,10 @@ export function GardenList({
   const [name, setName] = useState("");
   const [query] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [pendingUnshare, setPendingUnshare] = useState<string | null>(null);
   const [shareFor, setShareFor] = useState<Garden | null>(null);
-  const [shareClosing, setShareClosing] = useState(false);
-  const shareTimer = useRef(0);
+  const shareSheet = useCollapseForm();
+  const navToggleRef = useRef<HTMLButtonElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,33 +85,31 @@ export function GardenList({
   };
 
   const openShare = (g: Garden) => {
-    window.clearTimeout(shareTimer.current);
-    setShareClosing(false);
-    setShareFor(g);
     setCopied(false);
     setShareError(null);
+    setShareFor(g);
+    shareSheet.openForm();
   };
 
   const closeShare = () => {
-    if (shareClosing) return;
-    setShareClosing(true);
-    shareTimer.current = window.setTimeout(() => {
-      shareTimer.current = 0;
-      setShareFor(null);
-      setShareClosing(false);
-    }, 180);
+    shareSheet.closeForm();
   };
 
+  // Pas opruimen als de sluit-animatie klaar is.
   useEffect(() => {
-    if (!shareFor) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeShare();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  });
+    if (shareSheet.mounted) return;
+    setShareFor(null);
+    setCopied(false);
+    setShareError(null);
+  }, [shareSheet.mounted]);
 
-  useEffect(() => () => window.clearTimeout(shareTimer.current), []);
+  // Zodra de sidebar dichtgaat, haal focus van de hamburgerknop af,
+  // zodat die niet geselecteerd blijft staan tot de volgende tik elders.
+  const wasMenuOpen = useRef(false);
+  useEffect(() => {
+    if (wasMenuOpen.current && !menuOpen) navToggleRef.current?.blur();
+    wasMenuOpen.current = menuOpen;
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -175,32 +180,37 @@ export function GardenList({
     () => visible.filter((g) => !isOwner(g)).sort((a, b) => b.createdAt - a.createdAt),
     [visible, isOwner]
   );
+  const confirmGarden = confirmId ? (gardens.find((g) => g.id === confirmId) ?? null) : null;
 
   return (
     <>
-      <header className="gl-header">
-        <div className="gl-header-inner">
+      <Navbar
+        className="navbar-list"
+        brand={
           <div className="gl-brand">
-            <span className="gl-mark" aria-hidden="true">
-              <i className="fa-solid fa-carrot" />
-            </span>
-            <h1>Pluktuintje</h1>
+            <LogoMark className="gl-mark" />
+            <h1>oogstplan</h1>
           </div>
-          <div className="gl-account">
-            <UserMenu username={user.username} onLogout={onLogout} onOpenProfile={onOpenProfile} />
-            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-          </div>
-          <button
-            className="ge-nav-toggle"
-            onClick={() => setMenuOpen((o) => !o)}
-            aria-label="Menu openen"
-            aria-expanded={menuOpen}
-          >
-            <i className="fa-solid fa-bars ge-nav-icon ge-nav-icon-bars" aria-hidden="true" />
-            <i className="fa-solid fa-xmark ge-nav-icon ge-nav-icon-close" aria-hidden="true" />
-          </button>
-        </div>
-      </header>
+        }
+        actions={
+          <>
+            <div className="gl-account">
+              <UserMenu username={user.username} onLogout={onLogout} onOpenProfile={onOpenProfile} />
+              <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            </div>
+            <button
+              ref={navToggleRef}
+              className="ge-nav-toggle"
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label="Menu openen"
+              aria-expanded={menuOpen}
+            >
+              <i className="fa-solid fa-bars ge-nav-icon ge-nav-icon-bars" aria-hidden="true" />
+              <i className="fa-solid fa-xmark ge-nav-icon ge-nav-icon-close" aria-hidden="true" />
+            </button>
+          </>
+        }
+      />
       <div className={`ge-side-backdrop${menuOpen ? " open" : ""}`} onClick={() => setMenuOpen(false)} />
       <aside className={`ge-sidebar${menuOpen ? " open" : ""}`} aria-label="Menu">
         <div className="ge-side-head">
@@ -235,6 +245,7 @@ export function GardenList({
         </nav>
       </aside>
       <div className="gl-wrap" aria-busy={loading || undefined}>
+        <div className="gl-content">
         <section className="gl-hero">
           <div className="gl-hero-text">
             <h2>
@@ -300,10 +311,8 @@ export function GardenList({
                   garden={g}
                   owner
                   ownerName=""
-                  confirmId={confirmId}
                   setConfirmId={setConfirmId}
                   onOpen={onOpen}
-                  onDelete={onDelete}
                   onShare={openShare}
                 />
               ))}
@@ -326,10 +335,8 @@ export function GardenList({
                   garden={g}
                   owner={false}
                   ownerName={userNames[g.ownerId] ?? "iemand"}
-                  confirmId={confirmId}
                   setConfirmId={setConfirmId}
                   onOpen={onOpen}
-                  onDelete={onDelete}
                   onShare={openShare}
                 />
               ))}
@@ -338,76 +345,58 @@ export function GardenList({
         )}
 
         {shareFor && (
-          <div className={`share-overlay${shareClosing ? " closing" : ""}`} onClick={closeShare}>
-            <div
-              className={`share-modal${shareClosing ? " closing" : ""}`}
-              onClick={(e) => e.stopPropagation()}
-              role="dialog"
-              aria-modal="true"
-              aria-label={`Tuin delen: ${shareFor.name}`}
-            >
-              <div className="share-head">
-                <div className="share-head-main">
-                  <span className="share-tile" aria-hidden="true">
-                    <i className="fa-solid fa-share-nodes" />
-                  </span>
-                  <div>
-                    <h3>Deel tuin</h3>
-                    <div className="share-garden">{shareFor.name}</div>
-                  </div>
-                </div>
-                <button className="share-close" onClick={closeShare} aria-label="Sluiten">
-                  <i className="fa-solid fa-xmark" />
-                </button>
-              </div>
-              <p className="share-sub">
-                Stuur deze link naar iemand. Zodra die persoon de link opent en een
-                account heeft (of aanmaakt), kan hij of zij meteen meewerken.
-              </p>
-
-              <div className="share-link-row">
-                <input
-                  className="share-search"
-                  value={inviteUrl(shareFor)}
-                  readOnly
-                  onFocus={(e) => e.currentTarget.select()}
-                  aria-label="Uitnodigingslink"
-                />
-                <button className="btn-primary" onClick={() => void copyLink()}>
-                  <i className="fa-solid fa-link" /> {copied ? "Gekopieerd!" : "Kopieer"}
-                </button>
-              </div>
-              <button className="share-regenerate" onClick={() => void regenerate()}>
-                <i className="fa-solid fa-arrows-rotate" /> Nieuwe link maken
-              </button>
-              {shareError && <div className="auth-error">{shareError}</div>}
-
-              <h4 className="share-title">Heeft toegang ({shareFor.sharedWith.length})</h4>
-              {shareFor.sharedWith.length === 0 ? (
-                <p className="share-empty">Nog niemand.</p>
-              ) : (
-                <ul className="share-list">
-                  {shareFor.sharedWith.map((uid) => (
-                    <li key={uid} className="share-item">
-                      <span className="share-avatar" aria-hidden="true">
-                        {(userNames[uid] ?? "?").trim()[0]?.toUpperCase() ?? "?"}
-                      </span>
-                      <span className="share-username">{userNames[uid] ?? "…"}</span>
-                      <button
-                        className="he-row-btn he-row-btn-danger"
-                        onClick={() => void removeMember(uid)}
-                        title="Toegang intrekken"
-                      >
-                        <i className="fa-solid fa-xmark" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+          <ShareModal
+            mounted={shareSheet.mounted}
+            open={shareSheet.open}
+            garden={shareFor}
+            copied={copied}
+            error={shareError}
+            userNames={userNames}
+            onCopy={() => void copyLink()}
+            onRegenerate={() => void regenerate()}
+            onRemoveMember={setPendingUnshare}
+            onClose={closeShare}
+          />
         )}
+        </div>
+        <LegalFooter />
       </div>
+      <ConfirmModal
+        open={confirmGarden !== null}
+        title="Tuin verwijderen?"
+        message={
+          confirmGarden ? (
+            <>
+              Weet je zeker dat je <strong>{confirmGarden.name}</strong> definitief wilt verwijderen? Dit
+              kan niet ongedaan worden gemaakt.
+            </>
+          ) : (
+            ""
+          )
+        }
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => {
+          if (confirmGarden) onDelete(confirmGarden.id);
+          setConfirmId(null);
+        }}
+      />
+      <ConfirmModal
+        open={pendingUnshare !== null}
+        title="Toegang intrekken?"
+        message={
+          <>
+            Weet je zeker dat je <strong>{pendingUnshare ? (userNames[pendingUnshare] ?? "…") : "…"}</strong>{" "}
+            de toegang tot <strong>{shareFor?.name ?? "deze tuin"}</strong> wilt intrekken?
+          </>
+        }
+        confirmLabel="Ja, intrekken"
+        onCancel={() => setPendingUnshare(null)}
+        onConfirm={() => {
+          const uid = pendingUnshare;
+          setPendingUnshare(null);
+          if (uid) void removeMember(uid);
+        }}
+      />
     </>
   );
 }
@@ -416,19 +405,15 @@ function GardenCard({
   garden: g,
   owner,
   ownerName,
-  confirmId,
   setConfirmId,
   onOpen,
-  onDelete,
   onShare,
 }: {
   garden: Garden;
   owner: boolean;
   ownerName: string;
-  confirmId: string | null;
   setConfirmId: (id: string | null) => void;
   onOpen: (id: string) => void;
-  onDelete: (id: string) => void;
   onShare: (g: Garden) => void;
 }) {
   const { beds, plants } = gardenStats(g);
@@ -484,39 +469,15 @@ function GardenCard({
               <i className="fa-solid fa-user-plus" />
             </button>
           )}
-          {confirmId === g.id ? (
-            <>
-              <button
-                className="gl-icon-btn gl-icon-btn-danger"
-                onClick={() => {
-                  onDelete(g.id);
-                  setConfirmId(null);
-                }}
-                title="Ja, verwijderen"
-                aria-label="Ja, verwijderen"
-              >
-                <i className="fa-solid fa-check" />
-              </button>
-              <button
-                className="gl-icon-btn"
-                onClick={() => setConfirmId(null)}
-                title="Annuleren"
-                aria-label="Annuleren"
-              >
-                <i className="fa-solid fa-xmark" />
-              </button>
-            </>
-          ) : (
-            owner && (
-              <button
-                className="gl-icon-btn gl-icon-btn-danger"
-                onClick={() => setConfirmId(g.id)}
-                title="Tuin verwijderen"
-                aria-label={`Tuin verwijderen: ${g.name}`}
-              >
-                <i className="fa-solid fa-trash" />
-              </button>
-            )
+          {owner && (
+            <button
+              className="gl-icon-btn gl-icon-btn-danger"
+              onClick={() => setConfirmId(g.id)}
+              title="Tuin verwijderen"
+              aria-label={`Tuin verwijderen: ${g.name}`}
+            >
+              <i className="fa-solid fa-trash" />
+            </button>
           )}
         </div>
       </div>

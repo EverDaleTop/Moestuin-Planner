@@ -1,11 +1,9 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, SowingEntry, Expense, Income, ShoppingItem, TodoItem, GardenObjectKey, GaasData, User } from "./types";
-import { id, findFreeCropArea, roundM, PX_PER_M } from "./storage";
+import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, SowingEntry, Expense, Income, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
+import { id, findFreeCropArea, roundM, PX_PER_M, dedupeCatalog, DEFAULT_CROP_CATALOG, seedCatalog } from "./storage";
 import {
-  mergeCatalog,
   mergeCropAssignments,
   mergeGarden,
-  normalizeCrop,
   normalizeGarden,
   normalizeTombstones,
   reviveDeleted,
@@ -14,12 +12,15 @@ import {
 } from "./sync";
 import { fitCropCounts } from "./cropIcons";
 import { api, getToken, setToken, onUnauthorized, type MeResponse } from "./api";
-import { realtime, type LiveCursor, type LiveUpdate, type LiveStatus, type PreviewPayload, type PresenceMember } from "./realtime";
+import { realtime, type LiveCursor, type LiveUpdate, type PreviewPayload, type PresenceMember } from "./realtime";
 import { GardenList } from "./GardenList";
-import { ProfilePage } from "./ProfilePage";
-import { GardenEditor } from "./GardenEditor";
-import { AuthScreen } from "./AuthScreen";
 import { InviteScreen } from "./InviteScreen";
+import { GardenEditor } from "./GardenEditor";
+import { ProfilePage } from "./ProfilePage";
+// Auth pas laden als het nodig is (kleinere eerste lading).
+const AuthScreen = lazy(() =>
+  import("./AuthScreen").then((m) => ({ default: m.AuthScreen }))
+);
 import { useTheme } from "./useTheme";
 import { getSupabase } from "./lib/supabaseClient";
 import { objectDef } from "./gardenObjects";
@@ -33,12 +34,14 @@ interface InviteTarget {
 }
 
 const GARDENS_CACHE_KEY = "mp_gardens_cache_v1";
+const EMPTY_CROPS: Crop[] = [];
 
 interface GardensCache {
   user: User;
   userNames: Record<string, string>;
   gardens: Garden[];
-  cropCatalog: Crop[];
+  /** alleen voor oude caches: de vroegere algemene lijst */
+  cropCatalog?: Crop[];
 }
 
 function readGardensCache(): GardensCache | null {
@@ -49,12 +52,18 @@ function readGardensCache(): GardensCache | null {
     if (!parsed || typeof parsed !== "object") return null;
     if (!parsed.user || typeof parsed.user.id !== "string") return null;
     if (!Array.isArray(parsed.gardens)) return null;
+    // Caches van vóór de per-tuin-lijst hebben geen eigen catalogus; die vult
+    // de server bij de eerste sync met de bestaande (ontdubbelde) lijst.
     return {
       user: parsed.user as User,
       userNames:
         parsed.userNames && typeof parsed.userNames === "object" ? parsed.userNames : {},
-      gardens: parsed.gardens as Garden[],
-      cropCatalog: Array.isArray(parsed.cropCatalog) ? (parsed.cropCatalog as Crop[]) : [],
+      gardens: (parsed.gardens as Garden[]).map((g) => ({
+        ...g,
+        // Alleen een eigen lijst uit de cache gebruiken; oude caches hadden er
+        // geen. De server vult die bij de eerste sync met de bestaande lijst.
+        cropCatalog: Array.isArray(g.cropCatalog) ? dedupeCatalog(g.cropCatalog) : [],
+      })),
     };
   } catch {
     return null;
@@ -93,25 +102,7 @@ function clearGardensCache(): void {
 }
 
 const LAST_GARDEN_KEY = "mp_last_garden";
-const CATALOG_DELETED_KEY = "mp_catalog_deleted";
-
-function loadCatalogDeleted(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(CATALOG_DELETED_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveCatalogDeleted(deleted: Record<string, number>): void {
-  try {
-    localStorage.setItem(CATALOG_DELETED_KEY, JSON.stringify(deleted));
-  } catch {
-    // privaatmodus o.i.d.: gewoon niet onthouden
-  }
-}
+const PROFILE_OPEN_KEY = "mp_profile_open";
 
 function readLastGarden(): string | null {
   try {
@@ -125,6 +116,23 @@ function writeLastGarden(gardenId: string | null): void {
   try {
     if (gardenId) localStorage.setItem(LAST_GARDEN_KEY, gardenId);
     else localStorage.removeItem(LAST_GARDEN_KEY);
+  } catch {
+    // privaatmodus o.i.d.: gewoon niet onthouden
+  }
+}
+
+function readProfileOpen(): boolean {
+  try {
+    return localStorage.getItem(PROFILE_OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeProfileOpen(open: boolean): void {
+  try {
+    if (open) localStorage.setItem(PROFILE_OPEN_KEY, "1");
+    else localStorage.removeItem(PROFILE_OPEN_KEY);
   } catch {
     // privaatmodus o.i.d.: gewoon niet onthouden
   }
@@ -148,25 +156,21 @@ export default function App() {
   const prevActiveRef = useRef<string | null | undefined>(undefined);
   const [user, setUser] = useState<User | null>(() => initialCache?.user ?? null);
   const [data, setData] = useState<AppData>(() =>
-    initialCache
-      ? { gardens: initialCache.gardens, cropCatalog: initialCache.cropCatalog }
-      : { gardens: [], cropCatalog: [] }
+    initialCache ? { gardens: initialCache.gardens } : { gardens: [] }
   );
   const [userNames, setUserNames] = useState<Record<string, string>>(
     () => initialCache?.userNames ?? {}
   );
   const [activeId, setActiveId] = useState<string | null>(() => readLastGarden());
+  /** tuin openen: ook animeren als je direct in een tuin binnenkomt */
+  const [animateGardenIn, setAnimateGardenIn] = useState(() => readLastGarden() !== null);
   /** Profielpagina open (werkt vanaf lijst én editor; terugkeer herstelt de vorige plek). */
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(() => readProfileOpen());
   const [presence, setPresence] = useState(0);
   const [presenceMembers, setPresenceMembers] = useState<PresenceMember[]>([]);
   const [livePreview, setLivePreview] = useState<{ gardenId: string; preview: PreviewPayload } | null>(null);
   /** Live muizen + selecties van andere editors (transient; tekent het canvas zelf). */
   const liveCursorsRef = useRef(new Map<string, LiveCursor>());
-  /** throttle + selectiewijziging-detectie voor het versturen van de eigen cursor */
-  const cursorThrottleRef = useRef(0);
-  const cursorSelectionRef = useRef("");
-  const [liveStatus, setLiveStatus] = useState<LiveStatus>("offline");
   const [invite, setInvite] = useState<InviteTarget | null>(() => parseInvite());
   const [theme, toggleTheme] = useTheme();
 
@@ -175,10 +179,6 @@ export default function App() {
 
   /** Laatst bekende serverstand per tuin: alles wat hiervan afwijkt wordt (opnieuw) omhoog gestuurd. */
   const baseRef = useRef<Map<string, Garden>>(new Map());
-  /** Laatst bekende serverstand van de catalogus. */
-  const baseCatalogRef = useRef<Crop[]>([]);
-  /** tombstones van verwijderde catalogusgewassen */
-  const catalogDeletedRef = useRef<Record<string, number>>(loadCatalogDeleted());
   /** actieve tuin, ook leesbaar vanuit het realtime-effect */
   const activeGardenRef = useRef<string | null>(null);
   /** spiegel van `data`, voor de async push-logica */
@@ -187,8 +187,6 @@ export default function App() {
   /** debounce-timers en lopende pushes: nooit twee PUTs voor dezelfde tuin tegelijk */
   const pushTimerRef = useRef(new Map<string, number>());
   const pushingRef = useRef(new Set<string>());
-  const catalogTimerRef = useRef(0);
-  const catalogPushingRef = useRef(false);
   const lastMoveRef = useRef(0);
   /** eigen throttle voor previews, zodat die de sleep niet verdringen */
   const lastPreviewRef = useRef(0);
@@ -216,22 +214,10 @@ export default function App() {
     const prev = undoStack.current.pop();
     if (!prev) return;
     redoStack.current.push(cur);
-    // Een undo is een bewuste actie en moet winnen van tombstones: ruim de
-    // tombstones op van alles wat hiermee herrijst en stempel vers.
-    const tomb = { ...catalogDeletedRef.current };
-    const ids = new Set(prev.cropCatalog.map((c) => c.id));
-    const resurrected = new Set(Object.keys(tomb).filter((id) => ids.has(id)));
-    if (resurrected.size > 0) {
-      for (const id of resurrected) delete tomb[id];
-      catalogDeletedRef.current = tomb;
-      saveCatalogDeleted(tomb);
-    }
+    // reviveDeleted herstelt ook de gewassenlijst per tuin en ruimt de
+    // bijbehorende tombstones op, zodat een undo altijd wint.
     const gardens = prev.gardens.map((g) => reviveDeleted(g, baseRef.current.get(g.id)));
-    const cropCatalog =
-      resurrected.size > 0
-        ? prev.cropCatalog.map((c) => (resurrected.has(c.id) ? { ...c, updatedAt: syncNow() } : c))
-        : prev.cropCatalog;
-    setData({ gardens, cropCatalog });
+    setData({ gardens });
   }, []);
 
   const redo = useCallback(() => {
@@ -239,20 +225,8 @@ export default function App() {
     const next = redoStack.current.pop();
     if (!next) return;
     undoStack.current.push(cur);
-    const tomb = { ...catalogDeletedRef.current };
-    const ids = new Set(next.cropCatalog.map((c) => c.id));
-    const resurrected = new Set(Object.keys(tomb).filter((id) => ids.has(id)));
-    if (resurrected.size > 0) {
-      for (const id of resurrected) delete tomb[id];
-      catalogDeletedRef.current = tomb;
-      saveCatalogDeleted(tomb);
-    }
     const gardens = next.gardens.map((g) => reviveDeleted(g, baseRef.current.get(g.id)));
-    const cropCatalog =
-      resurrected.size > 0
-        ? next.cropCatalog.map((c) => (resurrected.has(c.id) ? { ...c, updatedAt: syncNow() } : c))
-        : next.cropCatalog;
-    setData({ gardens, cropCatalog });
+    setData({ gardens });
   }, []);
 
   // ----- authentication / boot -----
@@ -264,33 +238,27 @@ export default function App() {
       const fetched = res.gardens.map((g) =>
         normalizeGarden({ ...g, shopping: (g as Garden).shopping ?? [], sowings: (g as Garden).sowings ?? [] })
       );
-      const fetchedCatalog = res.cropCatalog.map(normalizeCrop);
+      // Een tuin met een lege gewassenlijst (oude bug/oude versie) krijgt de
+      // standaardgewassen terug. De serverstand blijft de basis, zodat de
+      // sync-engine de reparatie vanzelf opslaat.
+      const pool = res.cropCatalog?.length ? res.cropCatalog : DEFAULT_CROP_CATALOG;
+      const repaired = fetched.map((g) => ({
+        ...g,
+        cropCatalog: seedCatalog(g.cropCatalog ?? [], pool, g.deleted?.catalog),
+      }));
       // Lokaal werk dat nog onderweg is nooit weggooien: voeg samen met de
       // serverstand. Zonder lokale wijzigingen is dit een rechte overname.
       const localGardens = dataRef.current.gardens;
-      const localCatalog = dataRef.current.cropCatalog;
-      const gardens = fetched.map((g) => {
+      const gardens = repaired.map((g) => {
         const local = localGardens.find((x) => x.id === g.id);
         return local ? mergeGarden(local, g, "b") : g;
       });
       for (const local of localGardens) {
         if (!gardens.some((g) => g.id === local.id)) gardens.push(local);
       }
-      // Catalogus: verwijderingen van anderen leren (niet laten herrijzen),
-      // eigen nieuwere bewerkingen behouden.
-      const tomb = { ...catalogDeletedRef.current };
-      for (const b of baseCatalogRef.current) {
-        if (!fetchedCatalog.some((c) => c.id === b.id) && tomb[b.id] === undefined) {
-          tomb[b.id] = syncNow();
-        }
-      }
-      catalogDeletedRef.current = tomb;
-      saveCatalogDeleted(tomb);
-      const { list: catalog } = mergeCatalog(fetchedCatalog, localCatalog.map(normalizeCrop), {}, tomb);
       for (const g of fetched) baseRef.current.set(g.id, g);
-      baseCatalogRef.current = fetchedCatalog;
-      setData({ gardens, cropCatalog: catalog });
-      writeGardensCache({ user: res.user, userNames: res.userNames, gardens, cropCatalog: catalog });
+      setData({ gardens });
+      writeGardensCache({ user: res.user, userNames: res.userNames, gardens });
     } catch {
     }
   }, []);
@@ -308,7 +276,7 @@ export default function App() {
     const off = onUnauthorized(() => {
       setUser(null);
       realtime.disconnect();
-      setData({ gardens: [], cropCatalog: [] });
+      setData({ gardens: [] });
       setUserNames({});
       clearGardensCache();
     });
@@ -318,7 +286,6 @@ export default function App() {
     }
     if (initialCache) {
       for (const g of initialCache.gardens) baseRef.current.set(g.id, g);
-      baseCatalogRef.current = initialCache.cropCatalog;
     }
     void reloadList()
       .catch(() => setUser(null))
@@ -329,21 +296,26 @@ export default function App() {
   const handleAuthed = useCallback((u: User, token: string) => {
     setToken(token);
     setUser(u);
-    setData({ gardens: [], cropCatalog: [] });
+    setData({ gardens: [] });
     void reloadList();
   }, [reloadList]);
 
   const logout = useCallback(async () => {
-    await api.logout();
     try {
-      await getSupabase()?.auth.signOut();
+      await api.logout();
+    } catch {
+      // Sessie kan al verlopen/verwijderd zijn (bv. na account verwijderen).
+    }
+    try {
+      const sb = await getSupabase();
+      await sb?.auth.signOut();
     } catch {
     }
     realtime.disconnect();
     setUser(null);
     setActiveId(null);
     setProfileOpen(false);
-    setData({ gardens: [], cropCatalog: [] });
+    setData({ gardens: [] });
     setUserNames({});
     clearGardensCache();
   }, []);
@@ -357,7 +329,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const t = window.setTimeout(() => {
-      writeGardensCache({ user, userNames, gardens: data.gardens, cropCatalog: data.cropCatalog });
+      writeGardensCache({ user, userNames, gardens: data.gardens });
     }, 600);
     return () => window.clearTimeout(t);
   }, [user, userNames, data]);
@@ -412,55 +384,6 @@ export default function App() {
     [pushGarden]
   );
 
-  const pushCatalog = useCallback(async () => {
-    if (catalogPushingRef.current) return;
-    const cur = dataRef.current.cropCatalog;
-    if (cur.length === 0) return;
-    if (stableStringify(cur.map(normalizeCrop)) === stableStringify(baseCatalogRef.current)) return;
-    catalogPushingRef.current = true;
-    try {
-      const res = await api.putCatalog(cur, catalogDeletedRef.current);
-      const serverList = res.cropCatalog.map(normalizeCrop);
-      // Verwijderingen van anderen leren: wat in de vorige serverstand zat en
-      // nu weg is (zonder dat wij het deden) alsnog als verwijderd markeren,
-      // zodat het nooit meer herrijst.
-      const tomb = { ...catalogDeletedRef.current };
-      for (const b of baseCatalogRef.current) {
-        if (!serverList.some((c) => c.id === b.id) && tomb[b.id] === undefined) {
-          tomb[b.id] = syncNow();
-        }
-      }
-      catalogDeletedRef.current = tomb;
-      saveCatalogDeleted(tomb);
-      baseCatalogRef.current = serverList;
-      setData((prev) => {
-        const { list: merged } = mergeCatalog(
-          serverList,
-          prev.cropCatalog.map(normalizeCrop),
-          {},
-          tomb
-        );
-        if (stableStringify(merged) === stableStringify(prev.cropCatalog)) return prev;
-        return { ...prev, cropCatalog: merged };
-      });
-    } catch {
-      // later opnieuw via het sync-effect
-    } finally {
-      catalogPushingRef.current = false;
-    }
-  }, []);
-
-  const schedulePushCatalog = useCallback(
-    (delay = 350) => {
-      window.clearTimeout(catalogTimerRef.current);
-      catalogTimerRef.current = window.setTimeout(() => {
-        catalogTimerRef.current = 0;
-        void pushCatalog();
-      }, delay);
-    },
-    [pushCatalog]
-  );
-
   // ----- realtime (WebSocket) -----
   useEffect(() => {
     if (!user) return;
@@ -471,7 +394,6 @@ export default function App() {
     // bolletje eeuwig op "verbinden".
     realtime.setGarden(activeGardenRef.current);
     const stopWatchVisibility = realtime.watchVisibility();
-    const stopStatus = realtime.onStatus(setLiveStatus);
     // Diagnose in de browserconsole: __mpLive()
     (window as unknown as { __mpLive?: () => unknown }).__mpLive = () => realtime.debug();
     (window as unknown as { __mpCursors?: () => unknown }).__mpCursors = () =>
@@ -580,7 +502,6 @@ export default function App() {
     return () => {
       off();
       stopWatchVisibility();
-      stopStatus();
       realtime.disconnect();
     };
   }, [user, loadList]);
@@ -600,6 +521,11 @@ export default function App() {
   useEffect(() => {
     writeLastGarden(activeId);
   }, [activeId]);
+
+  // Onthoud of de profielpagina open stond, zodat een refresh daar blijft.
+  useEffect(() => {
+    writeProfileOpen(profileOpen);
+  }, [profileOpen]);
 
   // Een herstelde tuin die niet (meer) in je account zit mag niet blijven hangen.
   // `booted` zorgt dat dit pas ná het laden van de tuinlijst gechecked wordt.
@@ -637,18 +563,7 @@ export default function App() {
         schedulePushGarden(g.id);
       }
     }
-    // Een lege catalogus is nog nooit geladen; die mag niet naar de server,
-    // anders wist het opgeslagen gewassenassortiment bij het opstarten.
-    if (data.cropCatalog.length > 0) {
-      if (
-        stableStringify(data.cropCatalog.map(normalizeCrop)) !==
-          stableStringify(baseCatalogRef.current) &&
-        !catalogPushingRef.current
-      ) {
-        schedulePushCatalog();
-      }
-    }
-  }, [data, schedulePushGarden, schedulePushCatalog]);
+  }, [data, schedulePushGarden]);
 
   const sendLiveMove = useCallback((gId: string, updates: LiveUpdate[]) => {
     const now = Date.now();
@@ -690,24 +605,17 @@ export default function App() {
     realtime.sendPreview(gId, preview);
   }, []);
 
-  /**
-   * Eigen muis + selectie live delen (max ~12/s; een selectiewissel gaat altijd
-   * direct mee, ook zonder muisbeweging). De ontvangende kant tekent dit op
-   * het canvas: je ziet wie waar is en wat hij geselecteerd heeft.
-   */
-  const sendLiveCursor = useCallback((cursor: { x: number; y: number } | null, selection: string[]) => {
-    const gId = activeGardenRef.current;
-    if (!gId) return;
-    const now = Date.now();
-    const key = stableStringify(selection);
-    const selectionChanged = key !== cursorSelectionRef.current;
-    if (cursor && !selectionChanged && now - cursorThrottleRef.current < 80) return;
-    cursorThrottleRef.current = now;
-    cursorSelectionRef.current = key;
-    realtime.sendCursor(gId, cursor, selection.slice(0, 100));
+  const garden = data.gardens.find((g) => g.id === activeId) ?? null;
+
+  /** Open de editor zonder de tuinenlijst eerst weg te halen: de lijst blijft
+   *  staan tot het canvas zijn eerste frame heeft getekend. */
+  const openGarden = useCallback((gardenId: string) => {
+    setAnimateGardenIn(true);
+    setActiveId(gardenId);
   }, []);
 
-  const garden = data.gardens.find((g) => g.id === activeId) ?? null;
+  /** Gewassenlijst van de actieve tuin (elke tuin heeft er één). */
+  const cropCatalog = garden?.cropCatalog ?? EMPTY_CROPS;
 
   const updateGarden = useCallback((gardenId: string, updater: (g: Garden) => Garden) => {
     mutate((d) => ({
@@ -719,8 +627,14 @@ export default function App() {
   const addGarden = useCallback(async (name: string) => {
     try {
       const g = await api.createGarden(name);
-      const norm = normalizeGarden(g);
-      baseRef.current.set(norm.id, norm);
+      const raw = normalizeGarden(g);
+      const norm = {
+        ...raw,
+        cropCatalog: seedCatalog(raw.cropCatalog ?? [], DEFAULT_CROP_CATALOG, raw.deleted?.catalog),
+      };
+      // Als de server een lege lijst teruggaf, is de ruwe stand de basis zodat
+      // de sync-engine de aangevulde lijst meteen omhoog stuurt.
+      baseRef.current.set(raw.id, norm.cropCatalog.length === (raw.cropCatalog?.length ?? 0) ? norm : raw);
       setData((prev) => ({ ...prev, gardens: [...prev.gardens, norm] }));
       setActiveId(norm.id);
     } catch {
@@ -769,6 +683,7 @@ export default function App() {
   const handleInviteJoined = useCallback(
     (g: Garden) => {
       setInvite(null);
+      setProfileOpen(false);
       window.history.replaceState({}, "", "/");
       const norm = normalizeGarden(g);
       baseRef.current.set(norm.id, norm);
@@ -1009,7 +924,7 @@ export default function App() {
       cropId: string,
       at?: { x: number; y: number; w: number; h: number }
     ) => {
-      const crop = data.cropCatalog.find((c) => c.id === cropId);
+      const crop = cropCatalog.find((c) => c.id === cropId);
       if (!crop) return;
       const bed = data.gardens
         .find((g) => g.id === gId)
@@ -1058,7 +973,7 @@ export default function App() {
       }));
       return assignment.instanceId;
     },
-    [data.cropCatalog, data.gardens, updateGarden]
+    [cropCatalog, data.gardens, updateGarden]
   );
 
   const updateCrop = useCallback(
@@ -1124,34 +1039,42 @@ export default function App() {
   );
 
   const addCropToCatalog = useCallback((crop: Omit<Crop, "id">) => {
+    if (!activeId) return;
     const full: Crop = { ...crop, id: id(), updatedAt: syncNow() };
-    mutate((d) => ({ ...d, cropCatalog: [...d.cropCatalog, full] }));
-  }, [mutate]);
+    updateGarden(activeId, (g) => ({
+      ...g,
+      cropCatalog: [...(g.cropCatalog ?? []), full],
+    }));
+  }, [activeId, updateGarden]);
 
   const updateCropInCatalog = useCallback(
     (cropId: string, patch: Partial<Crop>) => {
+      if (!activeId) return;
       const at = syncNow();
-      mutate((d) => ({
-        ...d,
-        cropCatalog: d.cropCatalog.map((c) =>
+      updateGarden(activeId, (g) => ({
+        ...g,
+        cropCatalog: (g.cropCatalog ?? []).map((c) =>
           c.id === cropId ? { ...c, ...patch, updatedAt: at } : c
         ),
       }));
     },
-    [mutate]
+    [activeId, updateGarden]
   );
 
   const removeCropFromCatalog = useCallback(
     (cropId: string) => {
-      const tomb = { ...catalogDeletedRef.current, [cropId]: syncNow() };
-      catalogDeletedRef.current = tomb;
-      saveCatalogDeleted(tomb);
-      mutate((d) => ({
-        ...d,
-        cropCatalog: d.cropCatalog.filter((c) => c.id !== cropId),
+      if (!activeId) return;
+      const at = syncNow();
+      updateGarden(activeId, (g) => ({
+        ...g,
+        cropCatalog: (g.cropCatalog ?? []).filter((c) => c.id !== cropId),
+        deleted: {
+          ...normalizeTombstones(g.deleted),
+          catalog: { ...g.deleted?.catalog, [cropId]: at },
+        },
       }));
     },
-    [mutate]
+    [activeId, updateGarden]
   );
 
   const addHarvest = useCallback(
@@ -1281,10 +1204,10 @@ export default function App() {
   /** gewas dat met het gewas-gereedschap in bedden getekend wordt */
   const [activeCropId, setActiveCropId] = useState<string | null>(null);
   useEffect(() => {
-    if (!activeCropId && data.cropCatalog.length > 0) {
-      setActiveCropId(data.cropCatalog[0].id);
+    if (!cropCatalog.some((c) => c.id === activeCropId)) {
+      setActiveCropId(cropCatalog[0]?.id ?? null);
     }
-  }, [activeCropId, data.cropCatalog]);
+  }, [activeCropId, cropCatalog]);
 
   const addShopping = useCallback(
     (gId: string, entry: Omit<ShoppingItem, "id" | "createdAt" | "done">) => {
@@ -1318,38 +1241,6 @@ const removeShopping = useCallback(
     [updateGarden],
   );
 
-  const addTodo = useCallback(
-    (gId: string, entry: Omit<TodoItem, "id" | "createdAt" | "done" | "createdBy">) => {
-      const at = syncNow();
-      const full: TodoItem = { ...entry, id: id(), createdAt: at, done: false, createdBy: user?.id, updatedAt: at };
-      updateGarden(gId, (g) => ({ ...g, todos: [...(g.todos ?? []), full] }));
-    },
-    [updateGarden, user]
-  );
-
-  const updateTodo = useCallback(
-    (gId: string, todoId: string, patch: Partial<TodoItem>) => {
-      const at = syncNow();
-      updateGarden(gId, (g) => ({
-        ...g,
-        todos: (g.todos ?? []).map((t) => (t.id === todoId ? { ...t, ...patch, updatedAt: at } : t)),
-      }));
-    },
-    [updateGarden]
-  );
-
-  const removeTodo = useCallback(
-    (gId: string, todoId: string) => {
-      const at = syncNow();
-      updateGarden(gId, (g) => ({
-        ...g,
-        todos: (g.todos ?? []).filter((t) => t.id !== todoId),
-        deleted: { ...normalizeTombstones(g.deleted), todos: { ...g.deleted?.todos, [todoId]: at } },
-      }));
-    },
-    [updateGarden]
-  );
-
   /**
    * Afvinken op de boodschappenlijst boekt het product meteen als uitgave.
    * terugzetten haalt die uitgave er weer uit, zodat er geen dubbelingen
@@ -1366,6 +1257,7 @@ const removeShopping = useCallback(
           date: new Date().toISOString().slice(0, 10),
           shoppingItemId: item.id,
           category: guessCategory(item.title),
+          assigneeId: item.assigneeId,
         });
         return;
       }
@@ -1386,7 +1278,7 @@ const removeShopping = useCallback(
           userNames={userNames}
           theme={theme}
           onToggleTheme={toggleTheme}
-          onOpen={setActiveId}
+          onOpen={openGarden}
           onAdd={addGarden}
           onDelete={deleteGarden}
           onUnshare={unshareGarden}
@@ -1408,7 +1300,11 @@ const removeShopping = useCallback(
   }
 
   if (!user) {
-    return <AuthScreen theme={theme} onToggleTheme={toggleTheme} onAuthed={handleAuthed} />;
+    return (
+      <Suspense fallback={<div className="gl-boot" aria-label="Bezig met laden" />}>
+        <AuthScreen theme={theme} onToggleTheme={toggleTheme} onAuthed={handleAuthed} />
+      </Suspense>
+    );
   }
 
   if (invite) {
@@ -1439,46 +1335,44 @@ const removeShopping = useCallback(
     );
   }
 
-  if (!garden) {
-    return (
-      <GardenList
-        gardens={data.gardens}
-        user={user}
-        userNames={userNames}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        onOpen={setActiveId}
-        onAdd={addGarden}
-        onDelete={deleteGarden}
-        onUnshare={unshareGarden}
-        onGardenUpdated={onGardenUpdated}
-        onLogout={logout}
-        onOpenProfile={() => setProfileOpen(true)}
-        loading={listLoading}
-      />
-    );
-  }
-
-  return (
-    <GardenEditor
-      garden={garden}
-      catalog={data.cropCatalog}
+  const listScreen = (
+    <GardenList
+      gardens={data.gardens}
+      user={user}
+      userNames={userNames}
       theme={theme}
       onToggleTheme={toggleTheme}
+      onOpen={openGarden}
+      onAdd={addGarden}
+      onDelete={deleteGarden}
+      onUnshare={unshareGarden}
+      onGardenUpdated={onGardenUpdated}
+      onLogout={logout}
+      onOpenProfile={() => setProfileOpen(true)}
+      loading={listLoading}
+    />
+  );
+
+  if (!garden) return listScreen;
+
+  return (
+      <GardenEditor
+      garden={garden}
+      catalog={cropCatalog}
+      theme={theme}
+      onToggleTheme={toggleTheme}
+      animateIn={animateGardenIn}
       presence={presence}
       presenceMembers={presenceMembers}
-      liveStatus={liveStatus}
-      onReconnect={() => realtime.reconnect()}
       currentUserId={user.id}
       userNames={userNames}
       username={user.username}
       onLogout={logout}
       onOpenProfile={() => setProfileOpen(true)}
       onUnshareMember={(userId) => unshareGarden(garden.id, userId)}
+      onNameChange={(name) => updateGarden(garden.id, (g) => ({ ...g, name, updatedAt: syncNow() }))}
       onGardenUpdated={onGardenUpdated}
       onDeleteGarden={() => deleteGarden(garden.id)}
-      onToggleTheme={toggleTheme}
-      onNameChange={(name) => updateGarden(garden.id, (g) => ({ ...g, name, updatedAt: syncNow() }))}
       onBack={() => setActiveId(null)}
       onAddFrame={(type, x, y, w, h) => addElementAt(garden.id, type, x, y, w, h)}
       onAddObject={(key, x, y, gaas) => addObject(garden.id, key, x, y, gaas)}
@@ -1508,7 +1402,7 @@ const removeShopping = useCallback(
       onAddCropAt={(eId, wx, wy, w, h) => {
         const bed = garden.elements.find((e) => e.id === eId);
         if (!bed) return undefined;
-        const cropId = activeCropId ?? data.cropCatalog[0]?.id;
+        const cropId = activeCropId ?? cropCatalog[0]?.id;
         if (!cropId) return undefined;
         return addCropAt(garden.id, eId, cropId, {
           x: (wx - bed.x) / PX_PER_M,
@@ -1522,17 +1416,12 @@ const removeShopping = useCallback(
       onAddShopping={(entry) => addShopping(garden.id, entry)}
       onUpdateShopping={(itemId, patch) => updateShopping(garden.id, itemId, patch)}
       onRemoveShopping={(itemId) => removeShopping(garden.id, itemId)}
-      onAddTodo={(entry) => addTodo(garden.id, entry)}
-      onUpdateTodo={(todoId, patch) => updateTodo(garden.id, todoId, patch)}
-      onRemoveTodo={(todoId) => removeTodo(garden.id, todoId)}
       onToggleShoppingDone={(item, done) => toggleShoppingDone(garden.id, item, done)}
       onUndo={undo}
       onRedo={redo}
       onLiveMove={(updates) => sendLiveMove(garden.id, updates)}
       onLivePreview={(preview) => sendLivePreview(garden.id, preview)}
       livePreview={livePreview?.gardenId === garden.id ? livePreview.preview : null}
-      onLiveCursor={sendLiveCursor}
-      liveCursors={liveCursorsRef}
     />
   );
 }

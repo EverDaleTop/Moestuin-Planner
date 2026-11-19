@@ -21,7 +21,7 @@ export function UserMenu({ username, onLogout, onOpenProfile }: Props) {
   // Ook dit menu zweeft buiten de kopbalk: daar zit het dicht tegen de
   // rechterrand en de kopbalk heeft een backdrop-filter (die maakt
   // position: fixed viewport-relatief onmogelijk).
-  const anchor = useAnchoredPopover(menuOpen, "right");
+  const anchor = useAnchoredPopover(menuOpen, "center", 4);
   const initial = (username.trim()[0] ?? "?").toUpperCase();
 
   // Vloeiend sluiten: eerst de sluit-animatie, dan pas unmounten.
@@ -32,7 +32,7 @@ export function UserMenu({ username, onLogout, onOpenProfile }: Props) {
       setMenuOpen(false);
       setMenuClosing(false);
       closeTimer.current = null;
-    }, 160);
+    }, 190);
   }, [menuOpen, menuClosing]);
 
   const cancelClose = useCallback(() => {
@@ -59,7 +59,7 @@ export function UserMenu({ username, onLogout, onOpenProfile }: Props) {
     hoverCloseTimer.current = window.setTimeout(() => {
       hoverCloseTimer.current = null;
       requestCloseMenu();
-    }, 220);
+    }, 80);
   }, [requestCloseMenu]);
 
   const toggleMenu = (e: { stopPropagation: () => void }) => {
@@ -119,20 +119,18 @@ export function UserMenu({ username, onLogout, onOpenProfile }: Props) {
         aria-expanded={menuOpen && !menuClosing}
         title={username}
       >
-        <span className="gl-avatar" aria-hidden="true">
+        <span className="gl-user-avatar" aria-hidden="true">
           {initial}
         </span>
-        <span className="gl-username">{username}</span>
-        <i
-          className={`fa-solid fa-chevron-down gl-chip-chevron${menuOpen && !menuClosing ? " open" : ""}`}
-          aria-hidden="true"
-        />
+        <span className="gl-user-caret" aria-hidden="true">
+          <i className="fa-solid fa-chevron-down" />
+        </span>
       </button>
       {menuOpen &&
         createPortal(
           <div
             ref={anchor.popRef as never}
-            className={`gl-menu gl-menu-fixed gl-menu-fade${menuClosing ? " closing" : ""}`}
+            className={`gl-menu${menuClosing ? " closing" : ""}`}
             role="menu"
             aria-label="Accountmenu"
             onMouseEnter={cancelClose}
@@ -161,6 +159,7 @@ export function UserMenu({ username, onLogout, onOpenProfile }: Props) {
               </div>
               <i className="fa-solid fa-chevron-right gl-menu-head-go" aria-hidden="true" />
             </button>
+            <div className="gl-menu-sep" aria-hidden="true" />
             <button
               className="gl-menu-item gl-menu-danger"
               role="menuitem"

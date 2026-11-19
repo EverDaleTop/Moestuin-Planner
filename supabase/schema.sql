@@ -1,4 +1,4 @@
--- Pluktuintje — Supabase schema
+-- Oogstplan - Supabase schema
 -- Voer dit uit in de Supabase SQL-editor (eenmalig).
 -- De server slaat complete JSON-documenten op (zelfde vorm als data/db.json),
 -- zodat migreren simpel blijft. RLS staat uit voor de service-role;

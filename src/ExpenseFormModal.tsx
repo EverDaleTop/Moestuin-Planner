@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useState } from "react";
 import type { Expense, Income } from "./types";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "./expenseCategories";
+import { SheetModal } from "./SheetModal";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, type ExpenseCategory } from "./expenseCategories";
 import { CategoryDropdown } from "./CategoryDropdown";
 import { DateField } from "./DateField";
 
@@ -59,6 +59,7 @@ export interface ExpenseFormData {
   amount: number;
   date: string;
   category: string;
+  assigneeId?: string;
 }
 
 interface Props {
@@ -66,11 +67,14 @@ interface Props {
   open: boolean;
   edit: (Expense | Income) | null;
   mode: ExpenseMode;
+  /** deelnemers van de tuin (eigenaar + gedeeld met) */
+  members: { id: string; name: string }[];
+  currentUserId?: string;
   onClose: () => void;
   onSave: (data: ExpenseFormData) => void;
 }
 
-export function ExpenseFormModal({ mounted, open, edit, mode, onClose, onSave }: Props) {
+export function ExpenseFormModal({ mounted, open, edit, mode, members, currentUserId, onClose, onSave }: Props) {
   const isUit = mode === "uit";
   const cats = isUit ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
 
@@ -78,29 +82,40 @@ export function ExpenseFormModal({ mounted, open, edit, mode, onClose, onSave }:
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayStr());
   const [category, setCategory] = useState(cats[0].key);
+  const [assigneeId, setAssigneeId] = useState("");
+
+  const memberOptions = useMemo<ExpenseCategory[]>(
+    () => [
+      { key: "", label: "Niemand in het bijzonder", icon: "fa-user-group", tone: "grey" },
+      ...members.map((m) => ({
+        key: m.id,
+        label: m.id === currentUserId ? `${m.name} (jij)` : m.name,
+        icon: "fa-user",
+        tone: "green",
+      })),
+    ],
+    [members, currentUserId]
+  );
 
   useEffect(() => {
     if (!mounted || !open) return;
-    // drag-status terugzetten: na een drag-close staat de sheet nog
-    // weggeschoven; zonder reset opent hij onzichtbaar.
-    dragOffsetRef.current = 0;
-    setDragOffsetState(0);
-    setDragging(false);
-    setDragClosing(false);
-    setGrabbed(false);
     if (edit) {
       setDesc(edit.description);
       setAmount(String(edit.amount));
       setDate(edit.date);
       setCategory(edit.category ?? cats[0].key);
+      setAssigneeId(
+        edit.assigneeId && members.some((m) => m.id === edit.assigneeId) ? edit.assigneeId : ""
+      );
     } else {
       setDesc("");
       setAmount("");
       setDate(todayStr());
       setCategory(cats[0].key);
+      setAssigneeId("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, open, edit]);
+  }, [mounted, open, edit, members]);
 
   const canSave = desc.trim().length > 0 && parseFloat(amount) > 0;
 
@@ -111,96 +126,21 @@ export function ExpenseFormModal({ mounted, open, edit, mode, onClose, onSave }:
       amount: parseFloat(amount),
       date,
       category,
+      assigneeId: assigneeId || undefined,
     });
   };
 
-  // drag-to-close (mobiele bottom-sheet)
-  const dragStartY = useRef(0);
-  const dragOffsetRef = useRef(0);
-  const [dragOffset, setDragOffsetState] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const [dragClosing, setDragClosing] = useState(false);
-  const [grabbed, setGrabbed] = useState(false);
-
-  const setDragOffset = (v: number) => {
-    dragOffsetRef.current = v;
-    setDragOffsetState(v);
-  };
-  const onGripDown = (e: React.PointerEvent) => {
-    dragStartY.current = e.clientY;
-    dragOffsetRef.current = 0;
-    setDragClosing(false);
-    setGrabbed(true);
-    setDragging(true);
-    setDragOffsetState(0);
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onGripMove = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    const next = Math.max(0, e.clientY - dragStartY.current);
-    dragOffsetRef.current = next;
-    setDragOffsetState(next);
-  };
-  const endDrag = () => {
-    if (!dragging) return;
-    setDragging(false);
-    if (dragOffsetRef.current > 90) {
-      setDragClosing(true);
-      setDragOffset(window.innerHeight);
-      onClose();
-    } else {
-      setDragOffset(0);
-    }
-  };
-
-  useEffect(() => {
-    if (!mounted) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [mounted, onClose]);
-
   if (!mounted) return null;
 
-  return createPortal(
-    <div
-      className={`sow-modal-overlay${open ? "" : " closing"}${dragClosing ? " drag-closing" : ""}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <SheetModal
+      mounted={mounted}
+      open={open}
+      onClose={onClose}
+      className="crop-modal"
+      ariaLabel={edit ? (isUit ? "Uitgave bewerken" : "Inkomst bewerken") : isUit ? "Nieuwe uitgave" : "Nieuwe inkomst"}
+      resetKey={edit}
     >
-      <div
-        className={`sow-modal crop-modal${dragging ? " dragging" : ""}${dragClosing ? " drag-closing" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={edit ? (isUit ? "Uitgave bewerken" : "Inkomst bewerken") : isUit ? "Nieuwe uitgave" : "Nieuwe inkomst"}
-        style={
-          grabbed
-            ? {
-                transform: `translateY(${dragOffset}px)`,
-                transition: dragging
-                  ? "none"
-                  : "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)",
-                animation: "none",
-              }
-            : undefined
-        }
-      >
-        <div
-          className="sow-modal-grip"
-          aria-hidden="true"
-          onPointerDown={onGripDown}
-          onPointerMove={onGripMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        />
         <div className="sow-modal-head">
           <h3>
             <i className={`fa-solid ${isUit ? "fa-receipt" : "fa-sack-dollar"}`} aria-hidden="true" />{" "}
@@ -240,6 +180,15 @@ export function ExpenseFormModal({ mounted, open, edit, mode, onClose, onSave }:
                 onChange={setCategory}
               />
             </div>
+            <div className="shop-form-field">
+              <CategoryDropdown
+                id="exp-assignee"
+                label="Voor wie?"
+                categories={memberOptions}
+                value={assigneeId}
+                onChange={setAssigneeId}
+              />
+            </div>
           </div>
         </div>
 
@@ -251,8 +200,6 @@ export function ExpenseFormModal({ mounted, open, edit, mode, onClose, onSave }:
             <i className="fa-solid fa-check" /> {edit ? "Wijziging opslaan" : "Toevoegen"}
           </button>
         </div>
-      </div>
-    </div>,
-    document.body
+    </SheetModal>
   );
 }

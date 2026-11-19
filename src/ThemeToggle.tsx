@@ -7,18 +7,22 @@ export function ThemeToggle({
   theme: Theme;
   onToggle: () => void;
 }) {
+  const dark = theme === "dark";
   return (
     <button
-      className="theme-toggle"
+      className={`theme-toggle${dark ? " is-dark" : ""}`}
       onClick={onToggle}
-      title={theme === "dark" ? "Lichte modus" : "Donkere modus"}
-      aria-label={theme === "dark" ? "Schakel naar lichte modus" : "Schakel naar donkere modus"}
+      title={dark ? "Lichte modus" : "Donkere modus"}
+      aria-label={dark ? "Schakel naar lichte modus" : "Schakel naar donkere modus"}
+      aria-pressed={dark}
     >
-      {theme === "dark" ? (
-        <i className="fa-solid fa-sun" aria-hidden />
-      ) : (
-        <i className="fa-solid fa-moon" aria-hidden />
-      )}
+      <span className="theme-toggle-icon theme-toggle-sun" aria-hidden>
+        <i className="fa-solid fa-sun" />
+      </span>
+      <span className="theme-toggle-icon theme-toggle-moon" aria-hidden>
+        <i className="fa-solid fa-moon" />
+      </span>
+      <span className="theme-toggle-knob" aria-hidden />
     </button>
   );
 }

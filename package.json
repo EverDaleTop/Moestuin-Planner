@@ -1,5 +1,5 @@
 {
-  "name": "pluktuintje",
+  "name": "oogstplan",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -13,7 +13,9 @@
     "build:server": "node scripts/build-server.mjs",
     "start": "node --import tsx server/index.ts",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "optimize:icons": "node scripts/optimize-crop-icons.mjs",
+    "gen:fa": "node scripts/gen-fa-subset.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
@@ -37,6 +39,8 @@
     "concurrently": "^10.0.4",
     "esbuild": "^0.28.2",
     "oxlint": "^1.75.0",
+    "sharp": "^0.35.5",
+    "subset-font": "^2.9.0",
     "tsx": "^4.23.11",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"

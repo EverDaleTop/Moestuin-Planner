@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import type { PresenceMember } from "./realtime";
+import { SheetModal } from "./SheetModal";
 
-interface Props {
-  gardenName: string;
+interface ModalProps {
+  mounted: boolean;
+  open: boolean;
   /** live online leden (inclusief jezelf) */
   members: PresenceMember[];
   ownerId: string;
@@ -11,10 +13,8 @@ interface Props {
   currentUserId: string;
   isOwner: boolean;
   onClose: () => void;
-  onKick: (userId: string) => Promise<void>;
+  onKickRequest: (userId: string, username: string) => void;
 }
-
-const CLOSE_MS = 170;
 
 function displayName(userId: string, userNames: Record<string, string>): string {
   return userNames[userId] ?? `Gebruiker ${userId.slice(0, 6)}`;
@@ -31,8 +31,14 @@ function initial(name: string): string {
   return (name.trim().charAt(0) || "?").toUpperCase();
 }
 
+/**
+ * Wie werkt mee: zelfde modaal-systeem als de andere formulieren
+ * (gecentreerde modaal op desktop, bottom-sheet-popup op mobiel).
+ * Alleen presentatie — state en openen/sluiten blijven in GardenEditor.
+ */
 export function PresenceModal({
-  gardenName,
+  mounted,
+  open,
   members,
   ownerId,
   sharedWith,
@@ -40,68 +46,38 @@ export function PresenceModal({
   currentUserId,
   isOwner,
   onClose,
-  onKick,
-}: Props) {
-  const [closing, setClosing] = useState(false);
-  const [confirmKick, setConfirmKick] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const closeTimer = useRef<number | null>(null);
-  // ref zodat de keydown-listener niet opnieuw hoeft te worden geregistreerd
-  const closingRef = useRef(false);
-
-  const close = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    closeTimer.current = window.setTimeout(onClose, CLOSE_MS);
-  }, [onClose]);
-
-  // Alleen eenmalig opruimen bij unmount; de timer zelf mag niet door een
-  // dependency-change worden gewist, anders sluit de modal nooit.
+  onKickRequest,
+}: ModalProps) {
   useEffect(() => {
+    if (!mounted) return;
+    // De navbar ligt boven de modal-overlay; een klik daarop moet de modal
+    // alsnog sluiten. Klikken binnen de sheet negeren we.
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest(".presence-sheet, .ge-presence")) return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", onDown, true);
     return () => {
-      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+      document.removeEventListener("pointerdown", onDown, true);
     };
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [close]);
+  }, [mounted, onClose]);
 
   const onlineIds = new Set(members.map((m) => m.userId));
   const offlineIds = [ownerId, ...sharedWith].filter(
     (uid, i, arr) => !onlineIds.has(uid) && arr.indexOf(uid) === i
   );
 
-  const doKick = async (userId: string) => {
-    setBusyId(userId);
-    setError(null);
-    try {
-      await onKick(userId);
-      setConfirmKick(null);
-    } catch {
-      setError("Verwijderen lukte niet. Probeer het opnieuw.");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   const row = (userId: string, username: string, online: boolean) => {
     const isSelf = userId === currentUserId;
     const isGardenOwner = userId === ownerId;
     const canKick = isOwner && !isSelf;
-    const confirming = confirmKick === userId;
     const hue = avatarHue(userId);
 
     return (
       <li key={userId} className={`presence-member ${online ? "" : "presence-offline"}`}>
         <span
-          className="presence-avatar"
+          className={`presence-avatar ${online ? "is-online" : "is-offline"}`}
           style={{ background: `linear-gradient(140deg, hsl(${hue} 58% 52%), hsl(${hue} 58% 40%))` }}
           aria-hidden="true"
         >
@@ -111,89 +87,64 @@ export function PresenceModal({
         <span className="presence-main">
           <span className="presence-name">
             {username}
-            {isSelf && <span className="presence-tag">jij</span>}
+            {isSelf && <span className="presence-tag presence-tag-self">jij</span>}
             {isGardenOwner && (
               <span className="presence-tag presence-tag-owner">
                 <i className="fa-solid fa-crown" /> eigenaar
               </span>
             )}
           </span>
-          <span className="presence-status">
-            <i className={`fa-solid ${online ? "fa-circle" : "fa-circle-xmark"}`} />
-            {online ? "online" : "offline"}
-          </span>
         </span>
 
-        {canKick && !confirming && (
+        {canKick && (
           <button
+            type="button"
             className="presence-kick"
-            onClick={() => {
-              setConfirmKick(userId);
-              setError(null);
-            }}
+            onClick={() => onKickRequest(userId, username)}
             title={`Toegang intrekken voor ${username}`}
             aria-label={`Toegang intrekken voor ${username}`}
           >
             <i className="fa-solid fa-user-minus" />
           </button>
         )}
-
-        {canKick && confirming && (
-          <span className="presence-confirm">
-            <span className="presence-confirm-text">Verwijder?</span>
-            <button
-              className="presence-yes"
-              disabled={busyId === userId}
-              onClick={() => void doKick(userId)}
-            >
-              {busyId === userId ? <i className="fa-solid fa-spinner fa-spin" /> : "Ja"}
-            </button>
-            <button
-              className="presence-no"
-              disabled={busyId === userId}
-              onClick={() => setConfirmKick(null)}
-            >
-              Nee
-            </button>
-          </span>
-        )}
       </li>
     );
   };
 
+  if (!mounted) return null;
+
   return (
-    <div
-      className={`presence-overlay ${closing ? "presence-closing" : ""}`}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close();
-      }}
+    <SheetModal
+      mounted={mounted}
+      open={open}
+      onClose={onClose}
+      className="presence-sheet"
+      ariaLabel="Wie is er online"
     >
-      <div
-        className="presence-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Wie is er online"
-      >
-        <div className="presence-head">
-          <div className="presence-head-text">
-            <h3>
-              <i className="fa-solid fa-users" /> Wie werkt mee?
-            </h3>
-            <p className="presence-sub">
-              {gardenName} · {members.length} {members.length === 1 ? "persoon" : "personen"} online
-            </p>
-          </div>
-          <button className="presence-close" onClick={close} aria-label="Sluiten" title="Sluiten">
-            <i className="fa-solid fa-xmark" />
+        <div className="sow-modal-head">
+          <h3>
+            <i className="fa-solid fa-users" aria-hidden="true" /> Wie werkt mee?{" "}
+            <span className="cal-n">{members.length}</span>
+          </h3>
+          <button
+            type="button"
+            className="sow-modal-close"
+            onClick={onClose}
+            aria-label="Sluiten"
+          >
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
           </button>
         </div>
-
-        <div className="presence-body">
+        <div className="sow-modal-body">
           <p className="presence-section">
-            <i className="fa-solid fa-signal" /> Online
+            <span className="presence-sec-dot" aria-hidden="true" />
+            Online <span className="cal-n">{members.length}</span>
           </p>
           {members.length === 0 ? (
-            <p className="presence-empty">Iemand anders is nu aan het werk.</p>
+            <p className="presence-empty">
+              <i className="fa-solid fa-users-slash" aria-hidden="true" />
+              Er is nu niemand anders online.
+            </p>
           ) : (
             <ul className="presence-list">{members.map((m) => row(m.userId, m.username, true))}</ul>
           )}
@@ -201,7 +152,8 @@ export function PresenceModal({
           {offlineIds.length > 0 && (
             <>
               <p className="presence-section">
-                <i className="fa-solid fa-user-clock" /> Heeft toegang, niet online
+                <span className="presence-sec-dot is-off" aria-hidden="true" />
+                Niet online <span className="cal-n">{offlineIds.length}</span>
               </p>
               <ul className="presence-list">
                 {offlineIds.map((uid) => row(uid, displayName(uid, userNames), false))}
@@ -209,9 +161,96 @@ export function PresenceModal({
             </>
           )}
         </div>
+    </SheetModal>
+  );
+}
 
-        {error && <p className="presence-error">{error}</p>}
-      </div>
-    </div>
+interface ConfirmProps {
+  mounted: boolean;
+  open: boolean;
+  gardenName: string;
+  username: string;
+  busy: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+/** Losse bevestigings-popup voor het intrekken van toegang. */
+export function PresenceKickConfirm({
+  mounted,
+  open,
+  gardenName,
+  username,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: ConfirmProps) {
+  if (!mounted) return null;
+
+  return (
+    <SheetModal
+      mounted={mounted}
+      open={open}
+      onClose={onCancel}
+      overlayClassName="presence-confirm-overlay"
+      className="presence-confirm-sheet"
+      role="alertdialog"
+      ariaLabel="Toegang intrekken"
+      gripDisabled={busy}
+      escapeDisabled={busy}
+      closeOnBackdrop={!busy}
+    >
+        <div className="sow-modal-head">
+          <h3>
+            Toegang intrekken?
+          </h3>
+          <button
+            type="button"
+            className="sow-modal-close"
+            onClick={onCancel}
+            disabled={busy}
+            aria-label="Sluiten"
+          >
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="sow-modal-body">
+          <p className="presence-confirm-text">
+            Weet je zeker dat je <strong>{username}</strong> de toegang tot{" "}
+            <strong>{gardenName}</strong> wilt intrekken?
+          </p>
+          {error && (
+            <div className="presence-error" role="alert">
+              <i className="fa-solid fa-triangle-exclamation" aria-hidden="true" /> {error}
+            </div>
+          )}
+        </div>
+        <div className="crop-modal-actions">
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Annuleren
+          </button>
+          <button
+            type="button"
+            className="btn-danger"
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {busy ? (
+              <>
+                <i className="fa-solid fa-spinner fa-spin" aria-hidden="true" /> Bezig…
+              </>
+            ) : (
+              "Ja, intrekken"
+            )}
+          </button>
+        </div>
+    </SheetModal>
   );
 }
