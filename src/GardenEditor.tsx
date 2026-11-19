@@ -979,7 +979,7 @@ export function GardenEditor(props: Props) {
 			</aside>
 
 			{editorTab === 'canvas' ? (
-				<div className='ge-body'>
+				<div className='ge-body' key='canvas'>
 					<div className={`ge-canvas${animateIn ? ' is-entering' : ''}`}>
 						<GardenCanvas
 							elements={garden.elements}
@@ -1285,7 +1285,7 @@ export function GardenEditor(props: Props) {
 				/>
 				</div>
 			) : editorTab === 'gewassen' ? (
-				<div className='shop-scroll'>
+				<div className='shop-scroll' key='gewassen'>
 					<div className='shop-page cal-page'>
 						<PlantCatalog
 							catalog={catalog}
@@ -1296,7 +1296,7 @@ export function GardenEditor(props: Props) {
 					</div>
 				</div>
 			) : editorTab === 'kalender' ? (
-				<div className='shop-scroll'>
+				<div className='shop-scroll' key='kalender'>
 					<CalendarView
 						catalog={catalog}
 						sowings={garden.sowings ?? []}
@@ -1308,7 +1308,7 @@ export function GardenEditor(props: Props) {
 					/>
 				</div>
 			) : editorTab === 'oogst' ? (
-				<div className='shop-scroll'>
+				<div className='shop-scroll' key='oogst'>
 					<HarvestView
 						catalog={catalog}
 						harvests={garden.harvests}
@@ -1318,7 +1318,7 @@ export function GardenEditor(props: Props) {
 					/>
 				</div>
 			) : editorTab === 'uitgaven' ? (
-				<div className='shop-scroll'>
+				<div className='shop-scroll' key='uitgaven'>
 					<ExpensesView
 						expenses={garden.expenses}
 						incomes={garden.incomes ?? []}
@@ -1333,7 +1333,7 @@ export function GardenEditor(props: Props) {
 					/>
 				</div>
 			) : editorTab === 'instellingen' ? (
-				<div className='shop-scroll settings-scroll'>
+				<div className='shop-scroll settings-scroll' key='instellingen'>
 					<div className='shop-page'>
 						<GardenSettings
 							garden={garden}
@@ -1354,7 +1354,7 @@ export function GardenEditor(props: Props) {
 					</div>
 				</div>
 			) : (
-				<div className='shop-scroll'>
+				<div className='shop-scroll' key='boodschappen'>
 				<ShoppingListView
 					items={garden.shopping ?? []}
 					members={gardenMembers}
