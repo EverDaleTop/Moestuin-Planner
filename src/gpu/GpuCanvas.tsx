@@ -3388,23 +3388,24 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           }
           tipCurRef.current = {
             id: tipId,
-            x: tipAnchor.x,
-            y: tipAnchor.y,
+            x: curTip?.x ?? tipAnchor.x,
+            y: curTip?.y ?? tipAnchor.y,
             above: tipAbove,
             alpha: 0,
           };
         } else {
-          curTip.x = tipAnchor.x;
-          curTip.y = tipAnchor.y;
+          const ease = 1 - Math.exp(-tipDt / 55);
+          curTip.x += (tipAnchor.x - curTip.x) * ease;
+          curTip.y += (tipAnchor.y - curTip.y) * ease;
           curTip.above = tipAbove;
-          curTip.alpha = Math.min(1, curTip.alpha + tipDt / 110);
+          curTip.alpha = Math.min(1, curTip.alpha + tipDt / 140);
         }
       } else if (curTip) {
-        curTip.alpha = Math.max(0, curTip.alpha - tipDt / 90);
+        curTip.alpha = Math.max(0, curTip.alpha - tipDt / 140);
         if (curTip.alpha <= 0.01) tipCurRef.current = null;
       }
       if (prevTip) {
-        prevTip.alpha = Math.max(0, prevTip.alpha - tipDt / 90);
+        prevTip.alpha = Math.max(0, prevTip.alpha - tipDt / 140);
         if (prevTip.alpha <= 0.01) tipPrevRef.current = null;
       }
 
