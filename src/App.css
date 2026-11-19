@@ -1477,11 +1477,14 @@ select:focus {
 /* ---------- Inspector ---------- */
 .insp {
   position: relative;
-  width: 304px;
+  width: 320px;
   flex-shrink: 0;
+  margin: 84px 12px 12px 0;
   background: var(--panel);
-  border-left: 1px solid var(--border);
-  padding: 16px 14px 28px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 16px 14px 24px;
   overflow-y: auto;
 }
 .insp-grip {
@@ -5348,6 +5351,7 @@ html {
     right: 8px;
     bottom: 8px;
     width: auto;
+    margin: 0;
     max-height: 68dvh;
     z-index: 20;
     overflow-y: auto;
@@ -9767,16 +9771,13 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   .ge-wrap > .ge-body {
     margin-top: -72px;
   }
-  .ge-wrap > .ge-body .insp {
-    padding-top: 88px;
-  }
 }
 @media (min-width: 769px) and (max-width: 1024px) {
   .ge-wrap > .ge-body {
     margin-top: -64px;
   }
   .ge-wrap > .ge-body .insp {
-    padding-top: 80px;
+    margin-top: 76px;
   }
 }
 
