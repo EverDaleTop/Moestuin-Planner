@@ -159,19 +159,6 @@ export function GardenSettings({
     }
   };
 
-  const disableInvite = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await api.disableInvite(garden.id);
-      onGardenUpdated(updated);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Link uitschakelen lukte niet.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const removeMember = async (userId: string) => {
     setKicking(userId);
     setError(null);
@@ -261,70 +248,44 @@ export function GardenSettings({
         {isOwner && (
           <div className="gs-share">
             {link ? (
-              <>
-                <div className="gs-linkbox">
-                  <input
-                    className="gs-linkinput"
-                    value={link}
-                    readOnly
-                    onFocus={(e) => e.currentTarget.select()}
-                    aria-label="Uitnodigingslink"
+              <div className="gs-share-actions">
+                <button
+                  type="button"
+                  className="gs-btn gs-share-main"
+                  onClick={shareLink}
+                  disabled={busy}
+                  title="Deel de uitnodigingslink"
+                >
+                  <i
+                    className={`fa-solid ${
+                      shared === "idle" ? "fa-share-nodes" : "fa-check"
+                    }`}
+                    aria-hidden="true"
                   />
-                  <button
-                    type="button"
-                    className="gs-btn"
-                    onClick={shareLink}
-                    disabled={busy}
-                    title="Deel de uitnodigingslink"
-                  >
-                    <i
-                      className={`fa-solid ${
-                        shared === "copied"
-                          ? "fa-check"
-                          : "fa-share-nodes"
-                      }`}
-                      aria-hidden="true"
-                    />
-                    <span>
-                      {shared === "shared"
-                        ? "Gedeeld"
-                        : shared === "copied"
-                          ? "Gekopieerd"
-                          : "Delen"}
-                    </span>
-                  </button>
-                </div>
-                <div className="gs-link-actions">
-                  <button
-                    type="button"
-                    className="gs-quiet"
-                    onClick={regenerate}
-                    disabled={busy}
-                    title="Maakt een nieuwe link; de oude stopt direct met werken"
-                  >
-                    <i className="fa-solid fa-rotate" aria-hidden="true" />
-                    <span>Nieuwe link</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="gs-quiet gs-quiet-danger"
-                    onClick={disableInvite}
-                    disabled={busy}
-                    title="Schakelt uitnodigen uit; de huidige link stopt met werken"
-                  >
-                    <i className="fa-solid fa-link-slash" aria-hidden="true" />
-                    <span>Uitschakelen</span>
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="gs-linkoff">
-                <p>Uitnodigen staat uit. Er is geen geldige link.</p>
-                <button type="button" className="gs-btn" onClick={regenerate} disabled={busy}>
-                  <i className="fa-solid fa-link" aria-hidden="true" />
-                  <span>Nieuwe uitnodigingslink maken</span>
+                  <span>
+                    {shared === "shared"
+                      ? "Gedeeld"
+                      : shared === "copied"
+                        ? "Gekopieerd"
+                        : "Delen"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="gs-icon-quiet"
+                  onClick={regenerate}
+                  disabled={busy}
+                  title="Nieuwe uitnodigingslink maken"
+                  aria-label="Nieuwe uitnodigingslink maken"
+                >
+                  <i className="fa-solid fa-rotate" aria-hidden="true" />
                 </button>
               </div>
+            ) : (
+              <button type="button" className="gs-btn" onClick={regenerate} disabled={busy}>
+                <i className="fa-solid fa-link" aria-hidden="true" />
+                <span>Uitnodigen inschakelen</span>
+              </button>
             )}
           </div>
         )}

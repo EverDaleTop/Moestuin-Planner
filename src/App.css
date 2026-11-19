@@ -10569,7 +10569,6 @@ button.ge-presence:active:not(:disabled) { transform: none; }
 
 .gs-name-row { display: flex; align-items: center; gap: 10px; }
 .gs-name,
-.gs-linkinput,
 .gs-member-input {
   flex: 1;
   min-width: 0;
@@ -10583,30 +10582,49 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .gs-name:hover:not(:focus),
-.gs-linkinput:hover:not(:focus),
 .gs-member-input:hover:not(:focus) {
   border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
 }
 .gs-name:focus,
-.gs-linkinput:focus,
 .gs-member-input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .gs-name::selection,
-.gs-linkinput::selection {
+.gs-member-input::selection {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .gs-share { margin-bottom: 18px; }
+.gs-share-actions { display: flex; align-items: stretch; gap: 8px; }
+.gs-share-main { flex: 1; }
+.gs-icon-quiet {
+  flex: none;
+  width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+.gs-icon-quiet:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--sow-tint);
+}
+.gs-icon-quiet:disabled { opacity: 0.55; cursor: not-allowed; }
 .gs-add-member {
   display: flex;
   align-items: stretch;
   gap: 8px;
   margin: 0 0 14px;
 }
-.gs-linkbox { display: flex; align-items: stretch; gap: 8px; }
 .gs-btn {
   flex: none;
   display: inline-flex;
@@ -10628,35 +10646,6 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   border-color: color-mix(in srgb, var(--primary) 88%, black);
 }
 .gs-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
-.gs-link-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.gs-quiet {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 11px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: transparent;
-  color: var(--ink-soft);
-  font: 600 12.5px 'DM Sans', sans-serif;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
-}
-.gs-quiet:hover:not(:disabled) {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--sow-tint);
-}
-.gs-quiet:disabled { opacity: 0.55; cursor: not-allowed; }
-.gs-quiet-danger { color: var(--danger); }
-.gs-quiet-danger:hover:not(:disabled) {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-}
-
-.gs-linkoff p { margin: 0 0 10px; color: var(--muted); font-size: 13.5px; }
 
 .gs-members { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .gs-member {
@@ -11148,9 +11137,6 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   .gs-name-row { flex-wrap: wrap; }
   .gs-name { flex-basis: 100%; }
   .gs-name-row .btn-primary { width: 100%; }
-  .gs-linkbox { flex-wrap: wrap; }
-  .gs-linkinput { flex-basis: 100%; }
-  .gs-linkbox .gs-btn { width: 100%; }
   .gs-add-member { flex-wrap: wrap; }
   .gs-member-input { flex-basis: 100%; }
   .gs-add-member .gs-btn { width: 100%; }
