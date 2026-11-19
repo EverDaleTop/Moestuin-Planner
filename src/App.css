@@ -1501,24 +1501,23 @@ select:focus {
   top: 50%;
   transform: translateY(-50%);
   z-index: 7;
-  width: 20px;
-  height: 76px;
+  width: 18px;
+  height: 60px;
   display: none;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line);
-  border-left: 0;
-  border-radius: 0 12px 12px 0;
-  background: var(--surface);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--ink-soft);
   cursor: grab;
   touch-action: none;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s ease;
 }
 .insp-rail:active { cursor: grabbing; }
 .insp-rail:hover:not(:disabled) {
   color: var(--primary);
-  background: var(--sow-tint);
+  background: transparent;
 }
 .insp-rail-gripbar {
   width: 5px;
@@ -9816,7 +9815,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
     transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.25s;
   }
   .ge-wrap > .ge-body .insp.sheet-shut {
-    transform: translateX(calc(100% - 44px));
+    transform: translateX(calc(100% - 18px));
   }
   .ge-wrap > .ge-body .insp.sheet-shut .insp-view {
     opacity: 0;

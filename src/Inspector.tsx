@@ -751,7 +751,7 @@ export function Inspector({
     railDragging || railOffset !== 0
       ? {
           transform: sheetShut
-            ? `translateX(calc(100% - 44px + ${railOffset}px))`
+            ? `translateX(calc(100% - 18px + ${railOffset}px))`
             : `translateX(${railOffset}px)`,
           transition: railDragging ? "none" : undefined,
         }
