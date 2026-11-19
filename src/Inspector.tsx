@@ -670,8 +670,9 @@ export function Inspector({
   const railStartX = useRef(0);
   const railOffsetRef = useRef(0);
   const railDidDrag = useRef(false);
+  const inspRef = useRef<HTMLElement | null>(null);
+  const railTravel = useRef(300);
   const [railDragging, setRailDragging] = useState(false);
-  const [railOffset, setRailOffsetState] = useState(0);
   const [dragOffset, setDragOffsetState] = useState(0);
   const [dragging, setDragging] = useState(false);
   const prevSelection = useRef({
@@ -692,7 +693,6 @@ export function Inspector({
     setDragging(false);
     setRailDragging(false);
     railOffsetRef.current = 0;
-    setRailOffsetState(0);
   }, [element?.id, activeCropId]);
 
   const setDragOffset = (v: number) => {
@@ -746,24 +746,45 @@ export function Inspector({
         }
       : undefined;
 
-  // Horizontaal dragen aan de rail (desktop): naar rechts sluiten, naar links openen.
-  const railStyle =
-    railDragging || railOffset !== 0
-      ? {
-          transform: sheetShut
-            ? `translateX(calc(100% - 18px + ${railOffset}px))`
-            : `translateX(${railOffset}px)`,
-          transition: railDragging ? "none" : undefined,
-        }
-      : undefined;
-  const asideStyle = railStyle ?? sheetStyle;
+  // Horizontaal draggen aan de rail (desktop): naar rechts sluiten, naar links openen.
+  const setDragVisuals = (offset: number) => {
+    const el = inspRef.current;
+    if (!el) return;
+    const open = !sheetShut;
+    el.style.transition = "none";
+    el.style.willChange = "transform";
+    el.style.transform = sheetShut
+      ? `translateX(calc(100% - 18px + ${offset}px))`
+      : `translateX(${offset}px)`;
+    const view = el.querySelector<HTMLElement>(".insp-view");
+    if (view) {
+      const progress = open
+        ? 1 - Math.min(1, Math.max(0, offset / railTravel.current))
+        : Math.min(1, Math.max(0, -offset / railTravel.current));
+      view.style.transition = "none";
+      view.style.opacity = String(progress);
+    }
+  };
+
+  const clearDragVisuals = () => {
+    const el = inspRef.current;
+    if (!el) return;
+    el.style.transform = "";
+    el.style.transition = "";
+    el.style.willChange = "";
+    const view = el.querySelector<HTMLElement>(".insp-view");
+    if (view) {
+      view.style.transition = "";
+      view.style.opacity = "";
+    }
+  };
 
   const onRailDown = (e: React.PointerEvent) => {
     railStartX.current = e.clientX;
     railOffsetRef.current = 0;
     railDidDrag.current = false;
+    railTravel.current = Math.max(80, (inspRef.current?.offsetWidth ?? 320) - 18);
     setRailDragging(true);
-    setRailOffsetState(0);
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
   };
   const onRailMove = (e: React.PointerEvent) => {
@@ -772,19 +793,16 @@ export function Inspector({
     if (Math.abs(delta) > 4) railDidDrag.current = true;
     const next = sheetShut ? Math.min(0, delta) : Math.max(0, delta);
     railOffsetRef.current = next;
-    setRailOffsetState(next);
+    setDragVisuals(next);
   };
   const onRailUp = () => {
     if (!railDragging) return;
     setRailDragging(false);
     const off = railOffsetRef.current;
-    if (!railDidDrag.current) {
-      setRailOffsetState(0);
-      return;
-    }
-    if (!sheetShut && off > 90) setSheetShut(true);
-    else if (sheetShut && off < -60) setSheetShut(false);
-    setRailOffsetState(0);
+    clearDragVisuals();
+    if (!railDidDrag.current) return;
+    if (!sheetShut && off > railTravel.current * 0.28) setSheetShut(true);
+    else if (sheetShut && off < -railTravel.current * 0.2) setSheetShut(false);
   };
 
   const cropById = useMemo(() => {
@@ -800,8 +818,9 @@ export function Inspector({
     });
     return (
       <aside
+        ref={inspRef}
         className={`insp${sheetShut ? " sheet-shut" : ""}`}
-        style={asideStyle}
+        style={sheetStyle}
       >
         <div
           className="insp-grip"
@@ -870,8 +889,9 @@ export function Inspector({
   if (crop) {
     return (
       <aside
+        ref={inspRef}
         className={`insp${sheetShut ? " sheet-shut" : ""}`}
-        style={asideStyle}
+        style={sheetStyle}
       >
         <div
           className="insp-grip"
@@ -976,8 +996,9 @@ export function Inspector({
 
   return (
     <aside
+      ref={inspRef}
       className={`insp${sheetShut ? " sheet-shut" : ""}`}
-      style={asideStyle}
+      style={sheetStyle}
     >
       <div
         className="insp-grip"
