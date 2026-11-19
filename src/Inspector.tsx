@@ -761,7 +761,11 @@ export function Inspector({
           {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
         </div>
         <div className="insp-view" key="lijst">
-        <h4 className="insp-list-title">Elementen ({parents.length})</h4>
+        <h4 className="insp-list-title">
+          <i className="fa-solid fa-layer-group" aria-hidden="true" />
+          <span>Elementen</span>
+          <span className="insp-list-count">{parents.length}</span>
+        </h4>
         <ElementList elements={parents} activeId={null} onSelect={onSelectElement} />
         {parents.length > 0 && (
           <p className="insp-hint insp-list-hint">

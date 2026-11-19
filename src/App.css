@@ -1585,12 +1585,26 @@ select:focus {
 /* Elementenlijst in de sidebar */
 .insp h4.insp-list-title {
   margin: 2px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-display);
   font-size: 18px;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: none;
   color: var(--primary);
+}
+.insp-list-title i { font-size: 13px; }
+.insp-list-count {
+  margin-left: auto;
+  min-width: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--sow-tint);
+  color: var(--primary);
+  font: 700 11px 'DM Sans', sans-serif;
+  text-align: center;
 }
 /* zacht binnenkomen bij wisselen van lijst / element / gewas */
 .insp-view {
@@ -5380,6 +5394,28 @@ html {
     font-weight: 600;
     pointer-events: none;
   }
+  .insp h4.insp-list-title {
+    margin: 4px 0 12px;
+    font-size: 16px;
+  }
+  .insp-list { gap: 6px; }
+  .insp-row {
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--bg);
+  }
+  .insp-row:hover:not(:disabled),
+  .insp-row-active,
+  .insp-row-active:hover:not(:disabled) {
+    background: var(--sow-tint);
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--line));
+  }
+  .insp-row-icon {
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .insp-list-hint { text-align: center; margin-top: 14px; }
   .insp.sheet-shut {
     transform: translateY(calc(100% - 34px));
   }
