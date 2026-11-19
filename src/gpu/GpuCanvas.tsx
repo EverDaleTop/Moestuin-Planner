@@ -85,6 +85,41 @@ function loadIconTexture(src: string): ImageBitmap | null {
  */
 const fsPx = (px: number) => Math.round(px);
 
+/** Kort tekst af met ellipsis zodat labels nooit buiten hun chip lopen. */
+function fitCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let out = text;
+  while (out.length > 1 && ctx.measureText(`${out}…`).width > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out}…`;
+}
+
+/** Plaats een labelkaartje boven een element, met nette fallbacks. */
+function placeCanvasChip(
+  p0x: number,
+  p0y: number,
+  p1y: number,
+  chipW: number,
+  chipH: number,
+  viewW: number,
+  viewH: number
+): { x: number; y: number } {
+  const margin = 2;
+  const gap = 6;
+  const maxX = Math.max(margin, viewW - chipW - margin);
+  const x = Math.max(margin, Math.min(maxX, p0x));
+  let y = p0y - chipH - gap;
+  if (y < margin) y = p1y + gap;
+  if (y + chipH > viewH - margin) y = p0y + gap;
+  if (y < margin) y = margin;
+  return { x, y };
+}
+
 /** Tekent het icoon van een gewas: afbeelding als die geladen is, anders emoji. */
 function drawCropIcon(
   ctx: CanvasRenderingContext2D,
@@ -2421,10 +2456,11 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
 
       // plant rectangles drawn inside each bed (colour-coded per catalog crop)
       const dark = p.theme === "dark";
-      const chipBg = dark ? "rgba(28,32,39,0.9)" : "rgba(255,255,255,0.9)";
-      const chipBorder = dark ? "rgba(255,255,255,0.12)" : "rgba(16,24,40,0.08)";
-      const chipName = dark ? "#e7eaee" : "#171b21";
-      const chipMeta = dark ? "#8a93a1" : "#70788a";
+      const chipBg = dark ? "rgba(22,38,28,0.94)" : "rgba(255,255,255,0.95)";
+      const chipBorder = dark ? "rgba(238,242,230,0.16)" : "rgba(31,77,58,0.14)";
+      const chipName = dark ? "#EEF2E6" : "#16261C";
+      const chipMeta = dark ? "#A9B8AC" : "#4A5C4F";
+      const chipFont = "'DM Sans', system-ui, sans-serif";
       const cropById = new Map(p.catalog.map((cr) => [cr.id, cr]));
       // Welk gewas ligt onder de muis? Over álle bedden, niet alleen de
       // geselecteerde: zo kun je ook in een ander bed zien wat er staat.
@@ -2694,10 +2730,11 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const fsG = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
           const sizeTxtG = `${fmtM(gaasLengthM(el))} m`;
           ctx.textBaseline = "top";
-          ctx.font = `600 ${fsG}px Inter, system-ui, sans-serif`;
-          const nameWG = ctx.measureText(el.label || "Gaas").width;
+          ctx.font = `700 ${fsG}px ${chipFont}`;
+          const nameG = fitCanvasText(ctx, el.label || "Gaas", 160);
+          const nameWG = ctx.measureText(nameG).width;
           const smallFsG = fsPx(Math.max(8, Math.min(10, 9 * c.zoom)));
-          ctx.font = `600 ${smallFsG}px Inter, system-ui, sans-serif`;
+          ctx.font = `600 ${smallFsG}px ${chipFont}`;
           const sizeWG = ctx.measureText(sizeTxtG).width;
           const chipWG = Math.max(nameWG, sizeWG) + 9 * 2;
           const chipHG = fsG + smallFsG + 5 * 2 + 1;
@@ -2713,14 +2750,14 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           ctx.strokeStyle = chipBorder;
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.roundRect(xG, yG, chipWG, chipHG, 7);
+          ctx.roundRect(xG, yG, chipWG, chipHG, 9);
           ctx.fill();
           ctx.stroke();
           ctx.fillStyle = chipName;
-          ctx.font = `600 ${fsG}px Inter, system-ui, sans-serif`;
-          ctx.fillText(el.label || "Gaas", xG + 9, yG + 5 + (fsG - 10) / 2);
+          ctx.font = `700 ${fsG}px ${chipFont}`;
+          ctx.fillText(nameG, xG + 9, yG + 5 + (fsG - 10) / 2);
           ctx.fillStyle = chipMeta;
-          ctx.font = `600 ${smallFsG}px Inter, system-ui, sans-serif`;
+          ctx.font = `600 ${smallFsG}px ${chipFont}`;
           ctx.fillText(sizeTxtG, xG + 9, yG + 5 + fsG + (smallFsG - 8) / 2 + 1);
           continue;
         }
@@ -2735,32 +2772,31 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const fsV = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
           const sizeTxtV = `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
           ctx.textBaseline = "top";
-          ctx.font = `600 ${fsV}px Inter, system-ui, sans-serif`;
-          const nameWV = ctx.measureText(el.label || "Veld").width;
+          ctx.font = `700 ${fsV}px ${chipFont}`;
+          const nameV = fitCanvasText(ctx, el.label || "Veld", 170);
+          const nameWV = ctx.measureText(nameV).width;
           const smallFsV = fsPx(Math.max(8, Math.min(10, 9 * c.zoom)));
-          ctx.font = `600 ${smallFsV}px Inter, system-ui, sans-serif`;
+          ctx.font = `600 ${smallFsV}px ${chipFont}`;
           const sizeWV = ctx.measureText(sizeTxtV).width;
           const chipWV = Math.max(nameWV, sizeWV) + 9 * 2;
           const chipHV = fsV + smallFsV + 5 * 2 + 1;
-          // boven de rand; past het daar niet, dan eronder; anders binnenin
-          let yV = p0.y - chipHV - 6;
-          if (yV < 2) yV = p1.y + 6;
-          if (yV + chipHV > h - 2) yV = p0.y + 4;
-          const xV = Math.max(2, Math.min(w - chipWV - 2, p0.x));
+          const { x: xV, y: yV } = placeCanvasChip(
+            p0.x, p0.y, p1.y, chipWV, chipHV, w, h
+          );
           ctx.fillStyle = chipBg;
           // onthouden voor de klik: een tik op dit kaartje selecteert het hele veld
           veldChipsRef.current.push({ id: el.id, x: xV, y: yV, w: Math.min(chipWV, w - xV - 2), h: chipHV });
           ctx.strokeStyle = chipBorder;
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.roundRect(xV, yV, Math.min(chipWV, w - xV - 2), chipHV, 7);
+          ctx.roundRect(xV, yV, Math.min(chipWV, w - xV - 2), chipHV, 9);
           ctx.fill();
           ctx.stroke();
           ctx.fillStyle = chipName;
-          ctx.font = `600 ${fsV}px Inter, system-ui, sans-serif`;
-          ctx.fillText(el.label || "Veld", xV + 9, yV + 5 + (fsV - 10) / 2);
+          ctx.font = `700 ${fsV}px ${chipFont}`;
+          ctx.fillText(nameV, xV + 9, yV + 5 + (fsV - 10) / 2);
           ctx.fillStyle = chipMeta;
-          ctx.font = `600 ${smallFsV}px Inter, system-ui, sans-serif`;
+          ctx.font = `600 ${smallFsV}px ${chipFont}`;
           ctx.fillText(sizeTxtV, xV + 9, yV + 5 + fsV + (smallFsV - 8) / 2 + 1);
           continue;
         }
@@ -2781,30 +2817,34 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
               ? `${fmtM(gaasLengthM(el))} m`
               : `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
         ctx.textBaseline = "top";
-        ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
-        const nameW = ctx.measureText(el.label).width;
+        ctx.font = `700 ${fs}px ${chipFont}`;
+        const labelText = fitCanvasText(ctx, el.label || "Element", 170);
+        const nameW = ctx.measureText(labelText).width;
         const smallFs = fsPx(Math.max(8, Math.min(10, 9 * c.zoom)));
-        ctx.font = `600 ${smallFs}px Inter, system-ui, sans-serif`;
+        ctx.font = `600 ${smallFs}px ${chipFont}`;
         const sizeW = ctx.measureText(sizeTxt).width;
         const padX = 9;
         const padY = 5;
         const hasSizeLine = bh >= 44;
         const chipW = Math.max(nameW, sizeW) + padX * 2;
         const chipH = hasSizeLine ? fs + smallFs + padY * 2 + 1 : fs + padY * 2;
+        const { x: chipX, y: chipY } = placeCanvasChip(
+          p0.x, p0.y, p1.y, chipW, chipH, w, h
+        );
         ctx.fillStyle = chipBg;
         ctx.strokeStyle = chipBorder;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.roundRect(p0.x + 3, p0.y + 3, Math.min(chipW, bw - 6), chipH, 7);
+        ctx.roundRect(chipX, chipY, Math.min(chipW, Math.max(40, bw)), chipH, 9);
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = chipName;
-        ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
-        ctx.fillText(el.label, p0.x + 3 + padX, p0.y + 3 + padY + (fs - 10) / 2);
+        ctx.font = `700 ${fs}px ${chipFont}`;
+        ctx.fillText(labelText, chipX + padX, chipY + padY + (fs - 10) / 2);
         if (hasSizeLine) {
           ctx.fillStyle = chipMeta;
-          ctx.font = `600 ${smallFs}px Inter, system-ui, sans-serif`;
-          ctx.fillText(sizeTxt, p0.x + 3 + padX, p0.y + 3 + padY + fs + (smallFs - 8) / 2 + 1);
+          ctx.font = `600 ${smallFs}px ${chipFont}`;
+          ctx.fillText(sizeTxt, chipX + padX, chipY + padY + fs + (smallFs - 8) / 2 + 1);
         }
       }
 
@@ -2828,7 +2868,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const n = segNormal(sA.x, sA.y, sB.x, sB.y);
           const txt = `${fmtM(gaasLengthM(singleGaas))} m`;
           const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
-          ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+          ctx.font = `600 ${fs}px ${chipFont}`;
           ctx.textBaseline = "top";
           const tw = ctx.measureText(txt).width + 16;
           const th = fs + 7;
@@ -2858,7 +2898,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
             const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
             const txt = `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
             const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
-            ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+            ctx.font = `600 ${fs}px ${chipFont}`;
             ctx.textBaseline = "top";
             const tw = ctx.measureText(txt).width + 16;
             const th = fs + 7;
@@ -2902,7 +2942,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
               // naamkaartje bij het eerste geselecteerde element
               if (si === 0) {
                 const fsN = fsPx(Math.max(10, Math.min(12, 11 * c.zoom)));
-                ctx.font = `600 ${fsN}px Inter, system-ui, sans-serif`;
+                ctx.font = `600 ${fsN}px ${chipFont}`;
                 ctx.textBaseline = "top";
                 const nw = ctx.measureText(lc.username).width + 16;
                 const nh = fsN + 7;
@@ -2940,7 +2980,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
               ctx.stroke();
               ctx.restore();
               const fsC = 11;
-              ctx.font = `600 ${fsC}px Inter, system-ui, sans-serif`;
+              ctx.font = `600 ${fsC}px ${chipFont}`;
               ctx.textBaseline = "top";
               const cw = ctx.measureText(lc.username).width + 14;
               const chh = fsC + 7;
@@ -3086,7 +3126,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
             const hM = Math.max(0.05, Math.round((rh / PX_PER_M) * 20) / 20);
             const txt = `${fmtM(wM)} × ${fmtM(hM)}${crop ? ` · ${crop.name}` : ""}`;
             const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
-            ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+            ctx.font = `600 ${fs}px ${chipFont}`;
             const tw = ctx.measureText(txt).width + 16;
             const th = fs + 7;
             // Label direct onder het getekende vlakje, binnen de canvas
@@ -3133,7 +3173,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const hM = Math.max(0.05, Math.round((h / PX_PER_M) * 20) / 20);
           const txt = `${fmtM(wM)} × ${fmtM(hM)}`;
           const fs = fsPx(Math.max(10, Math.min(13, 11 * c.zoom)));
-          ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+          ctx.font = `600 ${fs}px ${chipFont}`;
           const tw = ctx.measureText(txt).width + 16;
           const th = fs + 7;
           const lx = x;
@@ -3287,7 +3327,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
                 })()
               : `${fmtM(r.w / PX_PER_M)} × ${fmtM(r.h / PX_PER_M)}`;
               const fs = Math.max(9, Math.min(13, 11 * c.zoom));
-              ctx.font = `600 ${fs}px Inter, system-ui, sans-serif`;
+              ctx.font = `600 ${fs}px ${chipFont}`;
               const tw = ctx.measureText(txt).width + 16;
               const th = fs + 7;
               const cy = p1.y + 8;
@@ -3401,7 +3441,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         const padY = 6;
         const iconSize = 16;
         const gap = 6;
-        ctx.font = `600 ${tipFs}px Inter, system-ui, sans-serif`;
+        ctx.font = `600 ${tipFs}px ${chipFont}`;
         const maxTextW = Math.max(40, w - 8 - (padX * 2 + iconSize + gap));
         if (ctx.measureText(label).width > maxTextW) {
           while (label.length > 1 && ctx.measureText(`${label}…`).width > maxTextW) {
@@ -3429,7 +3469,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         ctx.font = `${iconSize}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
         drawCropIcon(ctx, crop?.icon, name, tx + padX + iconSize / 2, ty + th / 2, iconSize);
         ctx.textAlign = "left";
-        ctx.font = `600 ${tipFs}px Inter, system-ui, sans-serif`;
+        ctx.font = `600 ${tipFs}px ${chipFont}`;
         ctx.fillStyle = chipName;
         ctx.fillText(label, tx + padX + iconSize + gap, ty + th / 2 + 1);
         ctx.textBaseline = "top";
