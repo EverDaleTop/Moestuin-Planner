@@ -420,27 +420,24 @@ export function GardenSettings({
             <strong>Zaaien herinneren</strong>
             <p>Ontvang een melding als het zaaivenster van een gewas begint.</p>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={prefs.enabled}
-            className={`gs-toggle${prefs.enabled ? " is-on" : ""}`}
-            onClick={() => void toggleReminders()}
-            aria-label="Zaaien herinneringen"
-          >
-            <span className="gs-toggle-knob" aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="gs-reminder-days">
-          <span className="gs-reminder-days-label">Waarschuwen</span>
-          <CategoryDropdown
-            id="gs-reminder-days"
-            noIcons
-            categories={REMINDER_DAY_OPTIONS}
-            value={String(prefs.daysBefore)}
-            onChange={(key) => savePrefs({ ...prefs, daysBefore: Number(key) })}
-          />
+          <div className="gs-reminder-controls">
+            <CategoryDropdown
+              id="gs-reminder-days"
+              categories={REMINDER_DAY_OPTIONS}
+              value={String(prefs.daysBefore)}
+              onChange={(key) => savePrefs({ ...prefs, daysBefore: Number(key) })}
+            />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={prefs.enabled}
+              className={`gs-toggle${prefs.enabled ? " is-on" : ""}`}
+              onClick={() => void toggleReminders()}
+              aria-label="Zaaien herinneringen"
+            >
+              <span className="gs-toggle-knob" aria-hidden="true" />
+            </button>
+          </div>
         </div>
 
         {permission === "denied" && (

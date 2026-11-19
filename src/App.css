@@ -10763,8 +10763,6 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--line);
 }
 .gs-reminder-row strong { display: block; margin-bottom: 3px; color: var(--ink); font-size: 14px; }
 .gs-reminder-row p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
@@ -10808,20 +10806,14 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   transform: translateX(18px);
 }
 
-.gs-reminder-days {
+.gs-reminder-controls {
+  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 10px;
 }
-.gs-reminder-days-label {
-  color: var(--ink-soft);
-  font-size: 13px;
-  font-weight: 600;
-}
-.gs-reminder-days .catdd { flex: none; }
-.gs-reminder-days .catdd-trigger {
+.gs-reminder-controls .catdd { flex: none; }
+.gs-reminder-controls .catdd-trigger {
   min-height: 40px;
   padding: 0 12px;
   font-size: 13px;
@@ -11162,8 +11154,8 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   .gs-add-member { flex-wrap: wrap; }
   .gs-member-input { flex-basis: 100%; }
   .gs-add-member .gs-btn { width: 100%; }
-  .gs-reminder-row { align-items: flex-start; }
-  .gs-reminder-days { flex-wrap: wrap; align-items: flex-start; }
+  .gs-reminder-row { flex-wrap: wrap; align-items: flex-start; }
+  .gs-reminder-controls { width: 100%; justify-content: flex-end; }
   .gs-danger-row .gs-danger-btn { width: 100%; justify-content: center; }
 }
 
