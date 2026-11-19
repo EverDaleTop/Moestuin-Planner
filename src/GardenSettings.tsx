@@ -3,6 +3,7 @@ import type { Garden, Crop } from "./types";
 import type { PresenceMember } from "./realtime";
 import { api, inviteUrl } from "./api";
 import { ConfirmModal } from "./ConfirmModal";
+import { CategoryDropdown } from "./CategoryDropdown";
 import {
   checkSowReminders,
   getNotifyPrefs,
@@ -24,6 +25,13 @@ interface Props {
   onUnshareMember: (userId: string) => Promise<void>;
   onDeleteGarden: () => void;
 }
+
+const REMINDER_DAY_OPTIONS = [
+  { key: "0", label: "Op de dag zelf", icon: "fa-calendar-day", tone: "green" },
+  { key: "3", label: "3 dagen vooraf", icon: "fa-calendar-day", tone: "green" },
+  { key: "7", label: "7 dagen vooraf", icon: "fa-calendar-day", tone: "green" },
+  { key: "14", label: "14 dagen vooraf", icon: "fa-calendar-day", tone: "green" },
+];
 
 /**
  * Tuininstellingen: naam, delen/toegang en leden beheren op één plek.
@@ -424,20 +432,16 @@ export function GardenSettings({
           </button>
         </div>
 
-        <label className="gs-reminder-days">
-          <span>Waarschuwen</span>
-          <select
-            value={prefs.daysBefore}
-            onChange={(e) =>
-              savePrefs({ ...prefs, daysBefore: Number(e.target.value) })
-            }
-          >
-            <option value={0}>op de dag zelf</option>
-            <option value={3}>3 dagen vooraf</option>
-            <option value={7}>7 dagen vooraf</option>
-            <option value={14}>14 dagen vooraf</option>
-          </select>
-        </label>
+        <div className="gs-reminder-days">
+          <span className="gs-reminder-days-label">Waarschuwen</span>
+          <CategoryDropdown
+            id="gs-reminder-days"
+            noIcons
+            categories={REMINDER_DAY_OPTIONS}
+            value={String(prefs.daysBefore)}
+            onChange={(key) => savePrefs({ ...prefs, daysBefore: Number(key) })}
+          />
+        </div>
 
         {permission === "denied" && (
           <p className="gs-hint">

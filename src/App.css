@@ -10814,21 +10814,20 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   justify-content: space-between;
   gap: 12px;
   margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--bg);
+}
+.gs-reminder-days-label {
   color: var(--ink-soft);
   font-size: 13px;
   font-weight: 600;
 }
-.gs-reminder-days select {
-  min-height: 38px;
+.gs-reminder-days .catdd { flex: none; }
+.gs-reminder-days .catdd-trigger {
+  min-height: 40px;
   padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
   background: var(--surface);
-  color: var(--ink);
-  font: 600 13px 'DM Sans', sans-serif;
 }
 
 .gs-reminders {
