@@ -267,7 +267,7 @@ export function GardenSettings({
                         ? "Gedeeld"
                         : shared === "copied"
                           ? "Gekopieerd"
-                          : "Delen"}
+                          : "Tuin delen"}
                     </span>
                   </button>
                   <button
