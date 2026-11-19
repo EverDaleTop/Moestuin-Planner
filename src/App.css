@@ -5729,6 +5729,44 @@ html {
   font-size: 12px;
 }
 
+.exp-person-head {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.exp-person-list { margin-top: 2px; gap: 0; }
+.exp-person-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  gap: 10px;
+  font-size: 13px;
+}
+.exp-person-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.exp-person-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ink);
+}
+.exp-person-total {
+  flex: none;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Grafiekkaarten even hoog: de bars vullen de resterende ruimte. */
+.exp-page .oogst-chart { display: flex; flex-direction: column; }
+.exp-page .exp-bars { flex: 1; height: auto; min-height: 170px; }
+
 .exp-dot {
   width: 9px;
   height: 9px;
