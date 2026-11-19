@@ -1495,6 +1495,39 @@ select:focus {
 .insp-grip {
   display: none;
 }
+.insp-rail {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 7;
+  width: 20px;
+  height: 76px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.insp-rail:hover:not(:disabled) {
+  color: var(--primary);
+  background: var(--sow-tint);
+}
+.insp-rail-dots { display: flex; flex-direction: column; gap: 4px; }
+.insp-rail-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+@media (max-width: 768px) {
+  .insp-rail { display: none !important; }
+}
 
 .insp-empty {
   display: flex;
@@ -1617,6 +1650,7 @@ select:focus {
 /* zacht binnenkomen bij wisselen van lijst / element / gewas */
 .insp-view {
   animation: shop-fade-in 0.3s ease-out;
+  transition: opacity 0.2s ease;
 }
 
 .insp-list {
@@ -9777,6 +9811,17 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   .ge-wrap > .ge-body {
     margin-top: -72px;
   }
+  .ge-wrap > .ge-body .insp {
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.25s;
+  }
+  .ge-wrap > .ge-body .insp.sheet-shut {
+    transform: translateX(calc(100% - 44px));
+  }
+  .ge-wrap > .ge-body .insp.sheet-shut .insp-view {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .insp-rail { display: flex; }
 }
 @media (min-width: 769px) and (max-width: 1024px) {
   .ge-wrap > .ge-body {

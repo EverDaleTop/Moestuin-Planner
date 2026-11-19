@@ -659,7 +659,11 @@ export function Inspector({
   onDeselectCrop,
   activeCropId,
 }: Props) {
-  const [sheetShut, setSheetShut] = useState(true);
+  const [sheetShut, setSheetShut] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(max-width: 768px)").matches
+      : false,
+  );
   const [confirmDelete, setConfirmDelete] = useState<null | "element" | "crop">(null);
   const dragStartY = useRef(0);
   const dragOffsetRef = useRef(0);
@@ -760,6 +764,18 @@ export function Inspector({
         >
           {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
         </div>
+        <button
+          type="button"
+          className={`insp-rail${sheetShut ? " is-shut" : ""}`}
+          onClick={() => setSheetShut((v) => !v)}
+          aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
+          aria-expanded={!sheetShut}
+          title={sheetShut ? "Openen" : "Inklappen"}
+        >
+          <span className="insp-rail-dots" aria-hidden="true">
+            <i /><i /><i />
+          </span>
+        </button>
         <div className="insp-view" key="lijst">
         <h4 className="insp-list-title">
           <i className="fa-solid fa-layer-group" aria-hidden="true" />
@@ -805,6 +821,18 @@ export function Inspector({
         >
           {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
         </div>
+        <button
+          type="button"
+          className={`insp-rail${sheetShut ? " is-shut" : ""}`}
+          onClick={() => setSheetShut((v) => !v)}
+          aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
+          aria-expanded={!sheetShut}
+          title={sheetShut ? "Openen" : "Inklappen"}
+        >
+          <span className="insp-rail-dots" aria-hidden="true">
+            <i /><i /><i />
+          </span>
+        </button>
         <div className="insp-view" key={crop.instanceId}>
         <header className="insp-head">
           <button
@@ -886,6 +914,18 @@ export function Inspector({
       >
         {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
       </div>
+      <button
+        type="button"
+        className={`insp-rail${sheetShut ? " is-shut" : ""}`}
+        onClick={() => setSheetShut((v) => !v)}
+        aria-label={sheetShut ? "Elementenpaneel openen" : "Elementenpaneel inklappen"}
+        aria-expanded={!sheetShut}
+        title={sheetShut ? "Openen" : "Inklappen"}
+      >
+        <span className="insp-rail-dots" aria-hidden="true">
+          <i /><i /><i />
+        </span>
+      </button>
       <div className="insp-view" key={element.id}>
       <header className="insp-head">
         {onBack && (
