@@ -3131,6 +3131,8 @@ select:focus {
 }
 .catdd-caret {
   display: inline-block;
+  font-size: 10px;
+  line-height: 1;
   transform-origin: center;
   will-change: transform;
   transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
@@ -10462,6 +10464,19 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--sow-tint);
   background: var(--surface);
+}
+
+/* Open dropdown houdt dezelfde highlight als hover, ook na focus. */
+.catdd-trigger[aria-expanded="true"],
+.catdd-trigger[aria-expanded="true"]:focus,
+.catdd-trigger[aria-expanded="true"]:focus-visible,
+.cal-scope-trigger[aria-expanded="true"],
+.cal-scope-trigger[aria-expanded="true"]:focus,
+.cal-scope-trigger[aria-expanded="true"]:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--sow-tint);
+  background: var(--surface);
+  outline: none;
 }
 
 /* ---------- Editor: opgeslagen-indicator en toast ---------- */
