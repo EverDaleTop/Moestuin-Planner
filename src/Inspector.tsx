@@ -757,7 +757,9 @@ export function Inspector({
           onPointerMove={onGripMove}
           onPointerUp={endGripDrag}
           onPointerCancel={endGripDrag}
-        />
+        >
+          {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
+        </div>
         <div className="insp-view" key="lijst">
         <h4 className="insp-list-title">Elementen ({parents.length})</h4>
         <ElementList elements={parents} activeId={null} onSelect={onSelectElement} />
@@ -796,7 +798,9 @@ export function Inspector({
           onPointerMove={onGripMove}
           onPointerUp={endGripDrag}
           onPointerCancel={endGripDrag}
-        />
+        >
+          {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
+        </div>
         <div className="insp-view" key={crop.instanceId}>
         <header className="insp-head">
           <button
@@ -875,7 +879,9 @@ export function Inspector({
         onPointerMove={onGripMove}
         onPointerUp={endGripDrag}
         onPointerCancel={endGripDrag}
-      />
+      >
+        {sheetShut && <span className="insp-grip-hint">Tik om te openen</span>}
+      </div>
       <div className="insp-view" key={element.id}>
       <header className="insp-head">
         {onBack && (

@@ -121,8 +121,11 @@ export const api = {
   },
 
   /** Account definitief verwijderen. */
-  deleteAccount(): Promise<{ ok: true }> {
-    return req("/me", { method: "DELETE" });
+  deleteAccount(password?: string): Promise<{ ok: true }> {
+    return req("/me", {
+      method: "DELETE",
+      body: password ? JSON.stringify({ password }) : undefined,
+    });
   },
 
   putCatalog(cropCatalog: Crop[], deletedCropIds?: Record<string, number>): Promise<{ cropCatalog: Crop[] }> {
@@ -164,6 +167,14 @@ export const api = {
   unshare(gardenId: string, userId: string): Promise<Garden> {
     return req(`/gardens/${encodeURIComponent(gardenId)}/share/${encodeURIComponent(userId)}`, {
       method: "DELETE",
+    });
+  },
+
+  /** Draag het eigenaarschap van een tuin over aan een lid. */
+  transferGarden(gardenId: string, userId: string): Promise<Garden> {
+    return req(`/gardens/${encodeURIComponent(gardenId)}/transfer`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
     });
   },
 

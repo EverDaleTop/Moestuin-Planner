@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Garden } from "./types";
+import type { Garden, Crop } from "./types";
 import type { PresenceMember } from "./realtime";
 import { api, inviteUrl } from "./api";
 import { ConfirmModal } from "./ConfirmModal";
+import {
+  checkSowReminders,
+  getNotifyPrefs,
+  permissionState,
+  requestNotifyPermission,
+  saveNotifyPrefs,
+} from "./notifications";
 
 interface Props {
   garden: Garden;
+  catalog: Crop[];
   name: string;
   currentUserId: string;
   userNames: Record<string, string>;
@@ -22,6 +30,7 @@ interface Props {
  */
 export function GardenSettings({
   garden,
+  catalog,
   name,
   currentUserId,
   userNames,
@@ -37,7 +46,41 @@ export function GardenSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [kicking, setKicking] = useState<string | null>(null);
+  const [newMember, setNewMember] = useState("");
+  const [addingMember, setAddingMember] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<string | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [prefs, setPrefs] = useState(() => getNotifyPrefs(garden.id));
+  const [permission, setPermission] = useState(() => permissionState());
+
+  useEffect(() => {
+    setPrefs(getNotifyPrefs(garden.id));
+    setPermission(permissionState());
+  }, [garden.id]);
+
+  const savePrefs = (next: typeof prefs) => {
+    setPrefs(next);
+    saveNotifyPrefs(garden.id, next);
+  };
+
+  const toggleReminders = async () => {
+    if (prefs.enabled) {
+      savePrefs({ ...prefs, enabled: false });
+      return;
+    }
+    const ok = await requestNotifyPermission();
+    setPermission(permissionState());
+    if (ok) savePrefs({ ...prefs, enabled: true });
+  };
+
+  const [reminders, setReminders] = useState<
+    ReturnType<typeof checkSowReminders>
+  >([]);
+
+  useEffect(() => {
+    setReminders(checkSowReminders(garden.id, catalog));
+  }, [garden.id, catalog, prefs]);
   useEffect(() => {
     setDraftName(name);
   }, [garden.id, name]);
@@ -134,6 +177,37 @@ export function GardenSettings({
       setError("Toegang intrekken lukte niet.");
     } finally {
       setKicking(null);
+    }
+  };
+
+  const addMember = async () => {
+    const username = newMember.trim();
+    if (!username || addingMember) return;
+    setAddingMember(true);
+    setError(null);
+    try {
+      const updated = await api.share(garden.id, username);
+      onGardenUpdated(updated);
+      setNewMember("");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Lid toevoegen lukte niet.");
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  const transferGarden = async () => {
+    if (!transferTarget || transferBusy) return;
+    setTransferBusy(true);
+    setError(null);
+    try {
+      const updated = await api.transferGarden(garden.id, transferTarget);
+      onGardenUpdated(updated);
+      setTransferTarget(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Eigenaar overdragen lukte niet.");
+    } finally {
+      setTransferBusy(false);
     }
   };
 
@@ -251,6 +325,28 @@ export function GardenSettings({
           </div>
         )}
 
+        {isOwner && (
+          <div className="gs-add-member">
+            <input
+              className="gs-member-input"
+              value={newMember}
+              onChange={(e) => setNewMember(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void addMember()}
+              placeholder="Gebruikersnaam toevoegen"
+              aria-label="Gebruikersnaam toevoegen"
+            />
+            <button
+              type="button"
+              className="gs-btn"
+              onClick={() => void addMember()}
+              disabled={addingMember || !newMember.trim()}
+            >
+              <i className="fa-solid fa-user-plus" aria-hidden="true" />
+              <span>{addingMember ? "Toevoegen…" : "Toevoegen"}</span>
+            </button>
+          </div>
+        )}
+
         <ul className="gs-members">
           {memberIds.map((userId) => (
             <li key={userId} className="gs-member">
@@ -268,6 +364,17 @@ export function GardenSettings({
               {userId === garden.ownerId && <span className="gs-tag">Eigenaar</span>}
               {userId === currentUserId && userId !== garden.ownerId && (
                 <span className="gs-tag">Jij</span>
+              )}
+              {isOwner && userId !== garden.ownerId && (
+                <button
+                  type="button"
+                  className="gs-member-transfer"
+                  onClick={() => setTransferTarget(userId)}
+                  title="Maak eigenaar"
+                  aria-label={`Maak ${displayName(userId)} eigenaar`}
+                >
+                  <i className="fa-solid fa-crown" aria-hidden="true" />
+                </button>
               )}
               {isOwner && userId !== garden.ownerId && (
                 <button
@@ -293,6 +400,65 @@ export function GardenSettings({
           <p className="gs-hint">
             Nog niemand toegevoegd. Deel de link hierboven om iemand toegang te geven.
           </p>
+        )}
+      </section>
+
+      <section className="gs-card">
+        <h3>
+          <i className="fa-solid fa-bell" aria-hidden="true" /> Herinneringen
+        </h3>
+        <div className="gs-reminder-row">
+          <div>
+            <strong>Zaaien herinneren</strong>
+            <p>Ontvang een melding als het zaaivenster van een gewas begint.</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={prefs.enabled}
+            className="gs-switch"
+            onClick={() => void toggleReminders()}
+            aria-label="Zaaien herinneringen"
+          >
+            <span className="theme-switch-track" aria-hidden="true">
+              <span className="theme-switch-knob" />
+            </span>
+          </button>
+        </div>
+
+        <label className="gs-reminder-days">
+          <span>Waarschuwen</span>
+          <select
+            value={prefs.daysBefore}
+            onChange={(e) =>
+              savePrefs({ ...prefs, daysBefore: Number(e.target.value) })
+            }
+          >
+            <option value={0}>op de dag zelf</option>
+            <option value={3}>3 dagen vooraf</option>
+            <option value={7}>7 dagen vooraf</option>
+            <option value={14}>14 dagen vooraf</option>
+          </select>
+        </label>
+
+        {permission === "denied" && (
+          <p className="gs-hint">
+            Browsermeldingen zijn geblokkeerd. Sta ze toe in je browserinstellingen.
+          </p>
+        )}
+
+        {reminders.length > 0 && (
+          <ul className="gs-reminders">
+            {reminders.slice(0, 4).map((r) => (
+              <li key={r.key}>
+                <i className="fa-solid fa-seedling" aria-hidden="true" />
+                <span>{r.crop.name}</span>
+                <time dateTime={r.date.toISOString().slice(0, 10)}>
+                  {r.date.toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+                </time>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 
@@ -334,6 +500,22 @@ export function GardenSettings({
           setConfirmDelete(false);
           onDeleteGarden();
         }}
+      />
+
+      <ConfirmModal
+        open={transferTarget !== null}
+        title="Eigenaar overdragen?"
+        message={
+          <>
+            Weet je zeker dat je <strong>{transferTarget ? displayName(transferTarget) : ""}</strong>{" "}
+            eigenaar wilt maken van <strong>{garden.name}</strong>? Jij blijft lid van de
+            tuin, maar kunt daarna geen leden meer beheren.
+          </>
+        }
+        confirmLabel="Ja, overdragen"
+        busy={transferBusy}
+        onCancel={() => !transferBusy && setTransferTarget(null)}
+        onConfirm={() => void transferGarden()}
       />
     </div>
   );

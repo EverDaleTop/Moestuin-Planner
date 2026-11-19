@@ -401,6 +401,11 @@ export function GardenEditor(props: Props) {
 	})
 
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+	const [toast, setToast] = useState<string | null>(null)
+	const toastTimer = useRef<number | null>(null)
+	const [saveFlash, setSaveFlash] = useState(false)
+	const saveTimer = useRef<number | null>(null)
+	const prevUpdatedAt = useRef(garden.updatedAt)
 	const titleRef = useRef<HTMLInputElement | null>(null)
 	const [selectedIds, setSelectedIds] = useState<string[]>([])
 	const [selectedCropId, setSelectedCropId] = useState<string | null>(null)
@@ -462,6 +467,44 @@ export function GardenEditor(props: Props) {
 			document.body.style.overflow = prev
 		}
 	}, [mobileMenuOpen])
+
+	useEffect(() => {
+		if (garden.updatedAt === prevUpdatedAt.current) return
+		prevUpdatedAt.current = garden.updatedAt
+		setSaveFlash(true)
+		if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+		saveTimer.current = window.setTimeout(() => {
+			setSaveFlash(false)
+			saveTimer.current = null
+		}, 1600)
+	}, [garden.updatedAt])
+
+	useEffect(
+		() => () => {
+			if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+			if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+		},
+		[],
+	)
+
+	const showToast = useCallback((message: string) => {
+		setToast(message)
+		if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+		toastTimer.current = window.setTimeout(() => {
+			setToast(null)
+			toastTimer.current = null
+		}, 1800)
+	}, [])
+
+	const handleUndo = useCallback(() => {
+		onUndo()
+		showToast('Ongedaan gemaakt')
+	}, [onUndo, showToast])
+
+	const handleRedo = useCallback(() => {
+		onRedo()
+		showToast('Opnieuw uitgevoerd')
+	}, [onRedo, showToast])
 
 	// Delete / Backspace vraagt eerst om bevestiging via een modaal.
 	useEffect(() => {
@@ -596,16 +639,16 @@ export function GardenEditor(props: Props) {
 			const k = e.key.toLowerCase()
 			if (k === 'z') {
 				e.preventDefault()
-				if (e.shiftKey) onRedo()
-				else onUndo()
+				if (e.shiftKey) handleRedo()
+				else handleUndo()
 			} else if (k === 'y') {
 				e.preventDefault()
-				onRedo()
+				handleRedo()
 			}
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
-	}, [onUndo, onRedo])
+	}, [handleUndo, handleRedo])
 
 	const handleAddFrame = (
 		type: 'bed' | 'path' | 'veld',
@@ -828,6 +871,11 @@ export function GardenEditor(props: Props) {
 				</div>
 				</div>
 				<div className='ge-actions'>
+					{saveFlash && (
+						<span className='ge-save-state' role='status'>
+							<i className='fa-solid fa-check' aria-hidden='true' /> Opgeslagen
+						</span>
+					)}
 					<UserMenu username={username} onLogout={onLogout} onOpenProfile={onOpenProfile} />
 					<ThemeToggle theme={theme} onToggle={onToggleTheme} />
 					<button
@@ -1125,13 +1173,13 @@ export function GardenEditor(props: Props) {
 								role='group'
 								aria-label='Ongedaan maken'>
 								<button
-									onClick={onUndo}
+									onClick={handleUndo}
 									aria-label='Ongedaan maken'
 									data-tooltip='Ongedaan maken (Ctrl+Z)'>
 									<IconUndo />
 								</button>
 								<button
-									onClick={onRedo}
+									onClick={handleRedo}
 									aria-label='Opnieuw'
 									data-tooltip='Opnieuw (Ctrl+Y)'>
 									<IconRedo />
@@ -1289,6 +1337,7 @@ export function GardenEditor(props: Props) {
 					<div className='shop-page'>
 						<GardenSettings
 							garden={garden}
+							catalog={catalog}
 							name={name}
 							currentUserId={currentUserId}
 							userNames={userNames}
@@ -1315,6 +1364,11 @@ export function GardenEditor(props: Props) {
 					onRemove={onRemoveShopping}
 					onToggleDone={onToggleShoppingDone}
 				/>
+				</div>
+			)}
+			{toast && (
+				<div className='ge-toast' role='status' aria-live='polite'>
+					{toast}
 				</div>
 			)}
 			<ConfirmModal

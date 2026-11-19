@@ -62,6 +62,7 @@ export function SheetModal({
   const dragStartY = useRef(0);
   const dragOffsetRef = useRef(0);
   const overlayDownRef = useRef(false);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [grabbed, setGrabbed] = useState(false);
@@ -83,6 +84,51 @@ export function SheetModal({
     setGrabbed(false);
     setTouched(false);
   }, [mounted, open, resetKey]);
+
+  // Focus netjes in de modal zetten en bij sluiten teruggeven aan de trigger.
+  useEffect(() => {
+    if (!mounted || !open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const timer = window.setTimeout(() => {
+      const root = sheetRef.current;
+      if (!root) return;
+      const first = root.querySelector<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      );
+      (first ?? root).focus();
+    }, 30);
+    return () => {
+      window.clearTimeout(timer);
+      previous?.focus?.();
+    };
+  }, [mounted, open]);
+
+  // Houd Tab binnen de popup.
+  useEffect(() => {
+    if (!mounted || !open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const root = sheetRef.current;
+      if (!root) return;
+      const items = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [mounted, open]);
 
   const onGripDown = (e: React.PointerEvent) => {
     if (gripDisabled) return;
@@ -176,8 +222,10 @@ export function SheetModal({
       }}
     >
       <div
+        ref={sheetRef}
         className={sheetClass}
         role={role}
+        tabIndex={-1}
         aria-modal="true"
         aria-label={ariaLabel}
         style={

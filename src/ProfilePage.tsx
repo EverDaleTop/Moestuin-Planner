@@ -43,6 +43,7 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
 
   const initial = (user.username.trim()[0] ?? "?").toUpperCase();
   const memberSince = new Date(user.createdAt).toLocaleDateString("nl-NL", {
@@ -95,7 +96,7 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      await api.deleteAccount();
+      await api.deleteAccount(user.hasPassword === false ? undefined : deletePassword);
       onLogout();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Account verwijderen mislukt.");
@@ -168,7 +169,11 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
           </div>
           <p className="pf-hint">Alleen letters, cijfers, _ - . Minimaal 2 tekens.</p>
           {nameError && <div className="auth-error">{nameError}</div>}
-          {nameOk && <div className="pf-ok">Naam opgeslagen.</div>}
+          {nameOk && (
+            <div className="pf-ok" role="status" aria-live="polite">
+              Naam opgeslagen.
+            </div>
+          )}
         </section>
 
         <section className="pf-card">
@@ -270,7 +275,11 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
                 </button>
               </div>
               {passError && <div className="auth-error">{passError}</div>}
-              {passOk && <div className="pf-ok">Wachtwoord gewijzigd.</div>}
+              {passOk && (
+                <div className="pf-ok" role="status" aria-live="polite">
+                  Wachtwoord gewijzigd.
+                </div>
+              )}
             </>
           )}
         </section>
@@ -302,11 +311,24 @@ export function ProfilePage({ user, theme, onToggleTheme, onBack, onLogout, onOp
               type="button"
               className="pf-danger-btn"
               onClick={() => setDeleteOpen(true)}
+              disabled={user.hasPassword !== false && !deletePassword}
             >
               <i className="fa-solid fa-trash" aria-hidden="true" />
               Account verwijderen
             </button>
           </div>
+          {user.hasPassword !== false && (
+            <label className="pf-reauth">
+              <span>Bevestig met je wachtwoord</span>
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                autoComplete="current-password"
+                placeholder="Je huidige wachtwoord"
+              />
+            </label>
+          )}
           {deleteError && (
             <div className="auth-error" role="alert">
               {deleteError}

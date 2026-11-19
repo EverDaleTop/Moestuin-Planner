@@ -238,6 +238,14 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
   router.delete("/api/me", auth.requireAuth, async (req, res) => {
     try {
       const me = reqUser(req);
+      if (me.passwordHash) {
+        const password = String(req.body?.password ?? "");
+        if (!password) {
+          res.status(400).json({ error: "Voer je wachtwoord in om je account te verwijderen." });
+          return;
+        }
+        await auth.verifyPassword(me.id, password);
+      }
       const gardens = await store.listGardensForUser(me.id);
       for (const garden of gardens) {
         if (garden.ownerId === me.id) {
@@ -435,6 +443,26 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
       return;
     }
     garden.inviteToken = randomToken();
+    await store.putGarden(garden);
+    ws.broadcastGarden(garden);
+    res.json(garden);
+  });
+
+  /** Tuineigenaar overdragen aan een bestaand lid. */
+  router.post("/api/gardens/:gardenId/transfer", auth.requireAuth, async (req, res) => {
+    const me = reqUser(req);
+    const garden = await store.getGarden(String(req.params.gardenId));
+    if (!garden || garden.ownerId !== me.id) {
+      res.status(404).json({ error: "Tuin niet gevonden of geen toegang." });
+      return;
+    }
+    const targetId = String(req.body?.userId ?? "");
+    if (!targetId || !garden.sharedWith.includes(targetId)) {
+      res.status(400).json({ error: "Kies een lid van deze tuin." });
+      return;
+    }
+    garden.ownerId = targetId;
+    garden.sharedWith = [...new Set([...garden.sharedWith.filter((id) => id !== targetId), me.id])];
     await store.putGarden(garden);
     ws.broadcastGarden(garden);
     res.json(garden);

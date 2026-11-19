@@ -173,6 +173,15 @@ export class AuthService {
     return updated;
   }
 
+  /** Controleer het wachtwoord vóór gevoelige acties (bv. account verwijderen). */
+  async verifyPassword(userId: string, password: string): Promise<void> {
+    const user = await this.store.getUserById(userId);
+    if (!user) throw new Error("Gebruiker niet gevonden.");
+    if (!user.passwordHash) return;
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) throw new Error("Wachtwoord klopt niet.");
+  }
+
   async resolveUser(tokenToResolve: string): Promise<StoredUser | undefined> {
     const session = await this.store.getSession(tokenToResolve);
     if (!session) return undefined;

@@ -1,0 +1,19 @@
+{
+  "name": "Oogstplan",
+  "short_name": "Oogstplan",
+  "description": "Plan je moestuin, houd gewassen, oogst en boodschappen bij.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef2e6",
+  "theme_color": "#1f4d3a",
+  "lang": "nl",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
