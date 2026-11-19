@@ -1502,7 +1502,7 @@ select:focus {
   transform: translateY(-50%);
   z-index: 7;
   width: 18px;
-  height: 60px;
+  height: 76px;
   display: none;
   align-items: center;
   justify-content: center;
@@ -1514,15 +1514,22 @@ select:focus {
   color: var(--ink-soft);
   cursor: grab;
   touch-action: none;
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, height 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .insp-rail.sow-modal-grip:active { cursor: grabbing; }
 .insp-rail.sow-modal-grip::before {
   content: "";
   width: 5px;
-  height: 44px;
+  height: 56px;
   border-radius: 99px;
   background: color-mix(in srgb, var(--ink) 20%, transparent);
+  transition: height 0.25s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s ease;
+}
+.insp-rail.sow-modal-grip.is-shut {
+  height: 54px;
+}
+.insp-rail.sow-modal-grip.is-shut::before {
+  height: 36px;
 }
 .insp-rail.sow-modal-grip:hover::before {
   background: var(--primary);
@@ -7831,10 +7838,14 @@ textarea:not(.pd-bare textarea):not(.pd-bare):not(.inp-num textarea):not(.pd-ran
 }
 .sow-modal-grip::before {
   content: "";
-  width: 44px;
+  width: 52px;
   height: 5px;
   border-radius: 99px;
   background: color-mix(in srgb, var(--ink) 20%, transparent);
+  transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sow-modal-overlay.closing .sow-modal-grip::before {
+  width: 34px;
 }
 .sow-modal-grip:active {
   cursor: grabbing;
