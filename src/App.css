@@ -10566,6 +10566,14 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   color: var(--primary);
 }
 .gs-card h3 i { font-size: 15px; }
+.gs-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.gs-card-head h3 { margin: 0; }
 
 .gs-name-row { display: flex; align-items: center; gap: 10px; }
 .gs-name,
@@ -10596,9 +10604,7 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-.gs-share { margin-bottom: 18px; }
 .gs-share-actions { display: flex; align-items: stretch; gap: 8px; }
-.gs-share-main { flex: 1; }
 .gs-icon-quiet {
   flex: none;
   width: 44px;
@@ -11140,6 +11146,9 @@ button.ge-presence:active:not(:disabled) { transform: none; }
   .gs-add-member { flex-wrap: wrap; }
   .gs-member-input { flex-basis: 100%; }
   .gs-add-member .gs-btn { width: 100%; }
+  .gs-card-head { flex-wrap: wrap; }
+  .gs-card-head .gs-share-actions { width: 100%; }
+  .gs-card-head .gs-share-actions .gs-btn { flex: 1; }
   .gs-reminder-row { flex-wrap: wrap; align-items: flex-start; }
   .gs-reminder-controls { width: 100%; justify-content: flex-end; }
   .gs-danger-row .gs-danger-btn { width: 100%; justify-content: center; }

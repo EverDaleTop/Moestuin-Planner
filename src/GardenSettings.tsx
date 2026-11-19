@@ -241,54 +241,55 @@ export function GardenSettings({
       </section>
 
       <section className="gs-card">
-        <h3>
-          <i className="fa-solid fa-user-group" aria-hidden="true" /> Delen en leden
-        </h3>
-
-        {isOwner && (
-          <div className="gs-share">
-            {link ? (
-              <div className="gs-share-actions">
-                <button
-                  type="button"
-                  className="gs-btn gs-share-main"
-                  onClick={shareLink}
-                  disabled={busy}
-                  title="Deel de uitnodigingslink"
-                >
-                  <i
-                    className={`fa-solid ${
-                      shared === "idle" ? "fa-share-nodes" : "fa-check"
-                    }`}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    {shared === "shared"
-                      ? "Gedeeld"
-                      : shared === "copied"
-                        ? "Gekopieerd"
-                        : "Delen"}
-                  </span>
+        <div className="gs-card-head">
+          <h3>
+            <i className="fa-solid fa-user-group" aria-hidden="true" /> Delen en leden
+          </h3>
+          {isOwner && (
+            <div className="gs-share-actions">
+              {link ? (
+                <>
+                  <button
+                    type="button"
+                    className="gs-btn"
+                    onClick={shareLink}
+                    disabled={busy}
+                    title="Deel de uitnodigingslink"
+                  >
+                    <i
+                      className={`fa-solid ${
+                        shared === "idle" ? "fa-share-nodes" : "fa-check"
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {shared === "shared"
+                        ? "Gedeeld"
+                        : shared === "copied"
+                          ? "Gekopieerd"
+                          : "Delen"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="gs-icon-quiet"
+                    onClick={regenerate}
+                    disabled={busy}
+                    title="Nieuwe uitnodigingslink maken"
+                    aria-label="Nieuwe uitnodigingslink maken"
+                  >
+                    <i className="fa-solid fa-rotate" aria-hidden="true" />
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="gs-btn" onClick={regenerate} disabled={busy}>
+                  <i className="fa-solid fa-link" aria-hidden="true" />
+                  <span>Uitnodigen inschakelen</span>
                 </button>
-                <button
-                  type="button"
-                  className="gs-icon-quiet"
-                  onClick={regenerate}
-                  disabled={busy}
-                  title="Nieuwe uitnodigingslink maken"
-                  aria-label="Nieuwe uitnodigingslink maken"
-                >
-                  <i className="fa-solid fa-rotate" aria-hidden="true" />
-                </button>
-              </div>
-            ) : (
-              <button type="button" className="gs-btn" onClick={regenerate} disabled={busy}>
-                <i className="fa-solid fa-link" aria-hidden="true" />
-                <span>Uitnodigen inschakelen</span>
-              </button>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
+        </div>
 
         {isOwner && (
           <div className="gs-add-member">
