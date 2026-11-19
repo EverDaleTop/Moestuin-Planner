@@ -99,27 +99,6 @@ function fitCanvasText(
   return `${out}…`;
 }
 
-/** Plaats een labelkaartje boven een element, met nette fallbacks. */
-function placeCanvasChip(
-  p0x: number,
-  p0y: number,
-  p1y: number,
-  chipW: number,
-  chipH: number,
-  viewW: number,
-  viewH: number
-): { x: number; y: number } {
-  const margin = 2;
-  const gap = 6;
-  const maxX = Math.max(margin, viewW - chipW - margin);
-  const x = Math.max(margin, Math.min(maxX, p0x));
-  let y = p0y - chipH - gap;
-  if (y < margin) y = p1y + gap;
-  if (y + chipH > viewH - margin) y = p0y + gap;
-  if (y < margin) y = margin;
-  return { x, y };
-}
-
 /** Tekent het icoon van een gewas: afbeelding als die geladen is, anders emoji. */
 function drawCropIcon(
   ctx: CanvasRenderingContext2D,
@@ -2458,7 +2437,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
       const dark = p.theme === "dark";
       const chipBg = dark ? "rgba(22,38,28,0.94)" : "rgba(255,255,255,0.95)";
       const chipBorder = dark ? "rgba(238,242,230,0.16)" : "rgba(31,77,58,0.14)";
-      const chipName = dark ? "#EEF2E6" : "#16261C";
+      const chipName = dark ? "#8FD79E" : "#1F4D3A";
       const chipMeta = dark ? "#A9B8AC" : "#4A5C4F";
       const chipFont = "'DM Sans', system-ui, sans-serif";
       const cropById = new Map(p.catalog.map((cr) => [cr.id, cr]));
@@ -2723,6 +2702,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         // onder de lijn), maar zwevend naast het midden van de lijn — altijd
         // met de lengte erbij, ook bij een horizontale lijn.
         if (el.object === "gaas" && el.gaas) {
+          if (!p.selectedIds.includes(el.id)) continue;
           const { a, b } = gaasEndsOf(el);
           const sA = worldToScreen(a, c);
           const sB = worldToScreen(b, c);
@@ -2780,9 +2760,10 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const sizeWV = ctx.measureText(sizeTxtV).width;
           const chipWV = Math.max(nameWV, sizeWV) + 9 * 2;
           const chipHV = fsV + smallFsV + 5 * 2 + 1;
-          const { x: xV, y: yV } = placeCanvasChip(
-            p0.x, p0.y, p1.y, chipWV, chipHV, w, h
-          );
+          let yV = p0.y - chipHV - 6;
+          if (yV < 2) yV = p1.y + 6;
+          if (yV + chipHV > h - 2) yV = p0.y + 4;
+          const xV = Math.max(2, Math.min(w - chipWV - 2, p0.x));
           ctx.fillStyle = chipBg;
           // onthouden voor de klik: een tik op dit kaartje selecteert het hele veld
           veldChipsRef.current.push({ id: el.id, x: xV, y: yV, w: Math.min(chipWV, w - xV - 2), h: chipHV });
@@ -2828,9 +2809,8 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         const hasSizeLine = bh >= 44;
         const chipW = Math.max(nameW, sizeW) + padX * 2;
         const chipH = hasSizeLine ? fs + smallFs + padY * 2 + 1 : fs + padY * 2;
-        const { x: chipX, y: chipY } = placeCanvasChip(
-          p0.x, p0.y, p1.y, chipW, chipH, w, h
-        );
+        const chipX = p0.x + 3;
+        const chipY = p0.y + 3;
         ctx.fillStyle = chipBg;
         ctx.strokeStyle = chipBorder;
         ctx.lineWidth = 1;
