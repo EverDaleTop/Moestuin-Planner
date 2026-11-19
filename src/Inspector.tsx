@@ -791,7 +791,9 @@ export function Inspector({
     if (!railDragging) return;
     const delta = e.clientX - railStartX.current;
     if (Math.abs(delta) > 4) railDidDrag.current = true;
-    const next = sheetShut ? Math.min(0, delta) : Math.max(0, delta);
+    const next = sheetShut
+      ? Math.max(-railTravel.current, Math.min(0, delta))
+      : Math.min(railTravel.current, Math.max(0, delta));
     railOffsetRef.current = next;
     setDragVisuals(next);
   };
