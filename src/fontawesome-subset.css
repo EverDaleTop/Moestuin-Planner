@@ -8,9 +8,11 @@
 .fa-spin{animation-name:fa-spin;animation-duration:var(--fa-animation-duration,2s);animation-iteration-count:var(--fa-animation-iteration-count,infinite);animation-timing-function:var(--fa-animation-timing,linear)}
 @keyframes fa-spin{0%{transform:rotate(0)}to{transform:rotate(360deg)}}
 .fa-apple-whole{--fa:"\f5d1"}
+.fa-arrow-down{--fa:"\f063"}
 .fa-arrow-left{--fa:"\f060"}
 .fa-arrow-pointer{--fa:"\f245"}
 .fa-arrow-right{--fa:"\f061"}
+.fa-arrow-up{--fa:"\f062"}
 .fa-arrows-left-right{--fa:"\f07e"}
 .fa-arrows-rotate{--fa:"\f021"}
 .fa-arrows-up-down-left-right{--fa:"\f047"}
@@ -56,7 +58,9 @@
 .fa-leaf{--fa:"\f06c"}
 .fa-link{--fa:"\f0c1"}
 .fa-link-slash{--fa:"\f127"}
+.fa-list-check{--fa:"\f0ae"}
 .fa-location-crosshairs{--fa:"\f601"}
+.fa-location-dot{--fa:"\f3c5"}
 .fa-lock{--fa:"\f023"}
 .fa-lock-open{--fa:"\f3c1"}
 .fa-magnet{--fa:"\f076"}

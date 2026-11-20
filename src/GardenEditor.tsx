@@ -788,6 +788,28 @@ export function GardenEditor(props: Props) {
 		[garden.elements, catalog],
 	)
 
+	/**
+	 * Vanuit een taak naar de gekoppelde plek in de tuin: precies zoals
+	 * "toon in tuin" bij de kalender, maar dan op één bed of veld.
+	 */
+	const handleLocateElement = useCallback(
+		(elementId: string) => {
+			const el = garden.elements.find((e) => e.id === elementId)
+			if (!el) return
+			focusN.current += 1
+			setFocusSignal({
+				x: el.x + (el.widthM * PX_PER_M) / 2,
+				y: el.y + (el.heightM * PX_PER_M) / 2,
+				n: focusN.current,
+			})
+			setTool('select')
+			setSelectedIds([el.id])
+			setSelectedCropId(null)
+			setEditorTab('canvas')
+		},
+		[garden.elements],
+	)
+
 	return (
 		<div className='ge-wrap'>
 			<header className='ge-header'>
@@ -1355,6 +1377,7 @@ export function GardenEditor(props: Props) {
 						onAdd={onAddTodo}
 						onUpdate={onUpdateTodo}
 						onRemove={onRemoveTodo}
+						onLocateElement={handleLocateElement}
 					/>
 				</div>
 			) : editorTab === 'uitgaven' ? (

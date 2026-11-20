@@ -8173,29 +8173,134 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
 .oogst-row-total { font-weight: 700; color: var(--ink); }
 .oogst-empty { margin-top: 20px; padding: 40px 28px; text-align: center; color: var(--ink-soft); }
 /* ---------- Taken ---------- */
-.todo-page .shop-grid { margin-top: 20px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-.todo-card { animation: shop-fade-in 0.3s ease-out both; }
-.todo-prio-badge {
-  background: var(--surface-2);
-  color: var(--ink-soft);
+.todo-page .shop-grid { margin-top: 20px; }
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
 }
-.todo-prio-high {
-  background: color-mix(in srgb, var(--danger) 11%, transparent);
-  color: var(--danger);
+.todo-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 15px 16px 15px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  animation: shop-fade-in 0.3s ease-out both;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease,
+    opacity 0.2s ease;
 }
-.todo-prio-normal {
-  background: var(--sow-tint);
-  color: var(--primary);
+.todo-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 32%, var(--line));
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-1px);
 }
-.todo-prio-low {
-  background: var(--bg);
+.todo-card.is-done {
+  opacity: 0.58;
+}
+.todo-card.is-done .todo-card-title {
+  text-decoration: line-through;
   color: var(--muted);
 }
-.todo-meta {
+.todo-check {
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: transparent;
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.todo-check i {
+  opacity: 0;
+  transform: scale(0.55);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.todo-check:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+.todo-check.is-done {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.todo-check.is-done i {
+  opacity: 1;
+  transform: scale(1);
+}
+.todo-card-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.todo-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.todo-card-title {
+  margin: 0;
+  font: 700 15px/1.4 'DM Sans', sans-serif;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.todo-card-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+.todo-card-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  margin-top: 2px;
+}
+.todo-prio {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.todo-prio i { font-size: 9px; }
+.todo-prio-high {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 26%, transparent);
+  color: var(--danger);
+}
+.todo-prio-normal {
+  background: var(--sow-tint);
+  border-color: color-mix(in srgb, var(--primary) 20%, transparent);
+  color: var(--primary);
+}
+.todo-prio-low {
+  background: var(--bg);
+  border-color: var(--line);
+  color: var(--ink-soft);
 }
 .todo-chip {
   display: inline-flex;
@@ -8213,9 +8318,59 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   font-size: 10px;
   opacity: 0.85;
 }
+.todo-chip-link {
+  font: 600 12px 'DM Sans', sans-serif;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.todo-chip-link:hover {
+  border-color: var(--primary);
+  background: var(--sow-tint);
+  color: var(--primary);
+}
+.todo-chip-link .todo-chip-go {
+  font-size: 8px;
+  opacity: 0.55;
+}
 .todo-author {
   font-size: 11px;
   color: var(--muted);
+}
+.todo-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.todo-card:hover .todo-card-actions,
+.todo-card:focus-within .todo-card-actions {
+  opacity: 1;
+}
+.todo-card-action {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.todo-card-action:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--primary);
+}
+.todo-card-action-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
 }
 .todo-fields {
   display: flex;
@@ -8266,6 +8421,18 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   .todo-fields .todo-field {
     flex: 1 1 auto;
     justify-content: center;
+  }
+}
+@media (max-width: 600px) {
+  .todo-card {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 14px;
+    gap: 10px 12px;
+  }
+  .todo-card-actions {
+    grid-column: 2;
+    justify-self: end;
+    opacity: 1;
   }
 }
 .bood-toolbar { display: flex; gap: 12px; margin: 20px 0; align-items: stretch; }

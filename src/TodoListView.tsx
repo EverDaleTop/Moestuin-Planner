@@ -11,6 +11,7 @@ interface Props {
   onAdd: (entry: Omit<TodoItem, "id" | "createdAt" | "done" | "createdBy">) => void;
   onUpdate: (id: string, patch: Partial<TodoItem>) => void;
   onRemove: (id: string) => void;
+  onLocateElement: (elementId: string) => void;
 }
 
 const PRIORITIES = [
@@ -36,6 +37,7 @@ export function TodoListView({
   onAdd,
   onUpdate,
   onRemove,
+  onLocateElement,
 }: Props) {
   const sheet = useCollapseForm();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -287,58 +289,77 @@ export function TodoListView({
         </div>
       )}
 
-      <div className="shop-grid" key={filter}>
+      <div className="todo-list" key={filter}>
         {filtered.map((item, i) => {
           const linked = (item.elementIds ?? []).filter((id) => fieldName.has(id));
           const prio = PRIORITIES.find((p) => p.key === (item.priority ?? "normal")) ?? PRIORITIES[1];
           const author = item.createdBy ? userNames[item.createdBy] : undefined;
           return (
-            <div
+            <article
               key={item.id}
-              style={{ animationDelay: `${Math.min(i, 11) * 35}ms` }}
-              className={`shop-card todo-card${item.done ? " shop-card-done" : ""}`}
+              style={{ animationDelay: `${Math.min(i, 11) * 30}ms` }}
+              className={`todo-card todo-card-${prio.key}${item.done ? " is-done" : ""}`}
             >
-              <div className="shop-card-body">
-                <span className={`shop-card-eyebrow todo-prio-badge todo-prio-${prio.key}`}>
-                  <i className={`fa-solid ${prio.icon}`} /> {prio.label}
-                </span>
-                <div className="shop-card-title">{item.title}</div>
-                {item.note && <div className="shop-card-note">{item.note}</div>}
+              <button
+                type="button"
+                className={`todo-check${item.done ? " is-done" : ""}`}
+                onClick={() => onUpdate(item.id, { done: !item.done })}
+                title={item.done ? "Terugzetten naar open" : "Afvinken"}
+                aria-label={item.done ? "Terugzetten naar open" : "Afvinken"}
+                aria-pressed={item.done}
+              >
+                <i className="fa-solid fa-check" aria-hidden="true" />
+              </button>
+
+              <div className="todo-card-main">
+                <div className="todo-card-top">
+                  <h3 className="todo-card-title">{item.title}</h3>
+                  <span className={`todo-prio todo-prio-${prio.key}`}>
+                    <i className={`fa-solid ${prio.icon}`} aria-hidden="true" /> {prio.label}
+                  </span>
+                </div>
+                {item.note && <p className="todo-card-note">{item.note}</p>}
                 {(linked.length > 0 || author) && (
-                  <div className="todo-meta">
+                  <div className="todo-card-meta">
                     {linked.map((id) => (
-                      <span key={id} className="todo-chip">
-                        <i className="fa-solid fa-location-dot" /> {fieldName.get(id)}
-                      </span>
+                      <button
+                        key={id}
+                        type="button"
+                        className="todo-chip todo-chip-link"
+                        onClick={() => onLocateElement(id)}
+                        title={`Ga naar ${fieldName.get(id)} in de tuin`}
+                      >
+                        <i className="fa-solid fa-location-dot" aria-hidden="true" />
+                        {fieldName.get(id)}
+                        <i className="fa-solid fa-chevron-right todo-chip-go" aria-hidden="true" />
+                      </button>
                     ))}
                     {author && <span className="todo-author">van {author}</span>}
                   </div>
                 )}
-                <div className="shop-card-foot">
-                  <div className="shop-card-minitools">
-                    <button className="shop-card-minitool" onClick={() => startEdit(item)} title="Bewerken">
-                      <i className="fa-solid fa-pen" />
-                    </button>
-                    <button
-                      className="shop-card-minitool shop-card-minitool-danger"
-                      onClick={() => onRemove(item.id)}
-                      title="Verwijderen"
-                    >
-                      <i className="fa-solid fa-trash" />
-                    </button>
-                  </div>
-                  <button
-                    className={`shop-card-check${item.done ? " shop-card-check-done" : ""}`}
-                    onClick={() => onUpdate(item.id, { done: !item.done })}
-                    title={item.done ? "Terugzetten naar open" : "Afvinken"}
-                    aria-label={item.done ? "Terugzetten naar open" : "Afvinken"}
-                    aria-pressed={item.done}
-                  >
-                    <i className="fa-solid fa-check" />
-                  </button>
-                </div>
               </div>
-            </div>
+
+              <div className="todo-card-actions">
+                <button
+                  type="button"
+                  className="todo-card-action"
+                  onClick={() => startEdit(item)}
+                  title="Bewerken"
+                  aria-label="Taak bewerken"
+                >
+                  <i className="fa-solid fa-pen" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="todo-card-action todo-card-action-danger"
+                  onClick={() => onRemove(item.id)}
+                  title="Verwijderen"
+                  aria-label="Taak verwijderen"
+                >
+                  <i className="fa-solid fa-trash" aria-hidden="true" />
+                </button>
+              </div>
+            </article>
           );
         })}
       </div>
