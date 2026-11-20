@@ -10197,67 +10197,125 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
 .gl-wrap .legal-footer { border-top: 1px solid var(--line); }
 
 /* Auth: meldingen als zwevende popups i.p.v. inline blokken */
-.auth-toast {
+.auth-toast-stack {
   position: fixed;
-  top: calc(76px + env(safe-area-inset-top));
+  top: calc(84px + env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
   z-index: 600;
+  width: min(430px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.auth-toast {
+  pointer-events: auto;
   display: flex;
   align-items: flex-start;
-  gap: 9px;
-  width: min(430px, calc(100vw - 28px));
-  padding: 12px 13px;
-  border-radius: 14px;
+  gap: 11px;
+  width: 100%;
+  padding: 12px 13px 12px 14px;
   border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 16px;
   background: var(--surface);
-  box-shadow: 0 12px 34px rgba(22, 38, 28, 0.18);
-  font: 600 13px/1.45 'DM Sans', sans-serif;
+  box-shadow: var(--shadow-lg);
+  font: 500 13px/1.45 'DM Sans', sans-serif;
   animation: auth-toast-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.auth-toast > i { flex: none; margin-top: 2px; font-size: 13px; }
-.auth-toast > span { flex: 1; min-width: 0; }
+.auth-toast.is-leaving {
+  animation: auth-toast-out 0.2s ease-in forwards;
+}
+.auth-toast-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: 13px;
+}
 .auth-toast-error {
-  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
-  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+  border-left-color: var(--danger);
+}
+.auth-toast-error .auth-toast-icon {
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
   color: var(--danger);
 }
 .auth-toast-notice {
-  border-color: color-mix(in srgb, var(--primary) 32%, var(--line));
-  background: color-mix(in srgb, var(--sow-tint) 70%, var(--surface));
+  border-left-color: var(--primary);
+}
+.auth-toast-notice .auth-toast-icon {
+  background: var(--sow-tint);
   color: var(--primary);
+}
+.auth-toast-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 1px;
+}
+.auth-toast-text strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.auth-toast-text > span {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-soft);
 }
 .auth-toast-close {
   flex: none;
-  width: 24px;
-  height: 24px;
-  margin: -2px -2px 0 0;
+  width: 28px;
+  height: 28px;
+  margin: 1px -2px 0 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
-  color: inherit;
-  opacity: 0.65;
+  color: var(--ink-soft);
   font-size: 11px;
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-.auth-toast-close:hover:not(:disabled) { opacity: 1; background: transparent; }
+.auth-toast-close:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--ink);
+}
 @keyframes auth-toast-in {
-  from { opacity: 0; transform: translate(-50%, -8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes auth-toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-8px) scale(0.98); }
 }
 @media (max-width: 600px) {
-  .auth-toast {
+  .auth-toast-stack {
     top: auto;
     bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+  .auth-toast {
     animation-name: auth-toast-in-mobile;
   }
+  .auth-toast.is-leaving {
+    animation-name: auth-toast-out-mobile;
+  }
   @keyframes auth-toast-in-mobile {
-    from { opacity: 0; transform: translate(-50%, 10px); }
-    to { opacity: 1; transform: translate(-50%, 0); }
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes auth-toast-out-mobile {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(12px); }
   }
 }
 

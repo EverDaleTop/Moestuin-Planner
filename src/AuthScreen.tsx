@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { User } from "./types";
 import { api } from "./api";
 import { getSupabase, isSupabaseConfigured } from "./lib/supabaseClient";
@@ -7,6 +8,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { LegalFooter } from "./LegalPage";
 import { LogoMark } from "./Logo";
 import { Navbar } from "./Navbar";
+import { AuthToast } from "./AuthToast";
 
 interface Props {
   theme: Theme;
@@ -329,33 +331,12 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
                 </div>
               )}
 
-              {error && (
-                <div className="auth-toast auth-toast-error" role="alert" aria-live="assertive">
-                  <i className="fa-solid fa-triangle-exclamation" aria-hidden />
-                  <span>{error}</span>
-                  <button
-                    type="button"
-                    className="auth-toast-close"
-                    onClick={() => setError(null)}
-                    aria-label="Melding sluiten"
-                  >
-                    <i className="fa-solid fa-xmark" aria-hidden />
-                  </button>
-                </div>
-              )}
-              {notice && (
-                <div className="auth-toast auth-toast-notice" role="status" aria-live="polite">
-                  <i className="fa-solid fa-circle-info" aria-hidden />
-                  <span>{notice}</span>
-                  <button
-                    type="button"
-                    className="auth-toast-close"
-                    onClick={() => setNotice(null)}
-                    aria-label="Melding sluiten"
-                  >
-                    <i className="fa-solid fa-xmark" aria-hidden />
-                  </button>
-                </div>
+              {createPortal(
+                <div className="auth-toast-stack">
+                  <AuthToast kind="error" message={error} onClose={() => setError(null)} />
+                  <AuthToast kind="notice" message={notice} onClose={() => setNotice(null)} />
+                </div>,
+                document.body
               )}
 
               <button type="submit" className="btn-primary btn-block auth-submit" disabled={!canSubmit}>
