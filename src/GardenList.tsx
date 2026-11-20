@@ -183,7 +183,7 @@ export function GardenList({
   const confirmGarden = confirmId ? (gardens.find((g) => g.id === confirmId) ?? null) : null;
 
   return (
-    <>
+    <div className="gl-shell">
       <Navbar
         className="navbar-list"
         brand={
@@ -397,7 +397,7 @@ export function GardenList({
           if (uid) void removeMember(uid);
         }}
       />
-    </>
+    </div>
   );
 }
 

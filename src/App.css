@@ -212,6 +212,17 @@ select:focus {
 }
 
 /* ---------- Garden list / homepage ---------- */
+.gl-shell {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.gl-shell > .gl-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 .gl-wrap {
   max-width: 1180px;
   margin: 0 auto;
