@@ -16,6 +16,7 @@ import type {
 	Expense,
 	Income,
 	ShoppingItem,
+	TodoItem,
 } from './types'
 import { GardenCanvas } from './GardenCanvas'
 import { LogoMark } from './Logo'
@@ -26,6 +27,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { HarvestView } from './HarvestExpenseView'
 import { ExpensesView } from './ExpensesView'
 import { ShoppingListView } from './ShoppingListView'
+import { TodoListView } from './TodoListView'
 import { PlantCatalog } from './PlantDatabase'
 import { CalendarView } from './CalendarView'
 import { GardenSettings } from './GardenSettings'
@@ -289,6 +291,9 @@ interface Props {
 	onUpdateShopping: (itemId: string, patch: Partial<ShoppingItem>) => void
 	onRemoveShopping: (itemId: string) => void
 	onToggleShoppingDone: (item: ShoppingItem, done: boolean) => void
+	onAddTodo: (entry: Omit<TodoItem, 'id' | 'createdAt' | 'done' | 'createdBy'>) => void
+	onUpdateTodo: (todoId: string, patch: Partial<TodoItem>) => void
+	onRemoveTodo: (todoId: string) => void
 	onUndo: () => void
 	onRedo: () => void
 	onLiveMove?: (updates: { id: string; x?: number; y?: number; widthM?: number; heightM?: number; crops?: { instanceId: string; cropId: string; rows: number; rowSpacing?: number; plantSpacing?: number; cols?: number; padding?: number; area?: { x: number; y: number; w: number; h: number } }[] }[]) => void
@@ -348,7 +353,10 @@ export function GardenEditor(props: Props) {
 		onAddShopping,
 		onUpdateShopping,
 		onRemoveShopping,
-	onToggleShoppingDone,
+		onToggleShoppingDone,
+		onAddTodo,
+		onUpdateTodo,
+		onRemoveTodo,
 		onUndo,
 		onRedo,
 		onLiveMove,
@@ -381,7 +389,7 @@ export function GardenEditor(props: Props) {
 	}, [presenceMembers, presence, currentUserId, userNames])
 
 	const [editorTab, setEditorTab] = useState<
-		'canvas' | 'gewassen' | 'kalender' | 'oogst' | 'uitgaven' | 'boodschappen' | 'instellingen'
+		'canvas' | 'gewassen' | 'kalender' | 'oogst' | 'taken' | 'uitgaven' | 'boodschappen' | 'instellingen'
 	>(() => {
 		try {
 			const saved = localStorage.getItem('mp_editor_tab')
@@ -390,6 +398,7 @@ export function GardenEditor(props: Props) {
 				saved === 'gewassen' ||
 				saved === 'kalender' ||
 				saved === 'oogst' ||
+				saved === 'taken' ||
 				saved === 'uitgaven' ||
 				saved === 'boodschappen' ||
 				saved === 'instellingen'
@@ -678,6 +687,11 @@ export function GardenEditor(props: Props) {
 		[garden.shopping],
 	)
 
+	const openTodos = useMemo(
+		() => (garden.todos ?? []).filter((t) => !t.done).length,
+		[garden.todos],
+	)
+
 	/** deelnemers van de tuin (eigenaar eerst), o.a. voor "voor wie" bij boodschappen en uitgaven */
 	const gardenMembers = useMemo(
 		() =>
@@ -841,6 +855,13 @@ export function GardenEditor(props: Props) {
 						<i className='fa-solid fa-basket-shopping' aria-hidden='true' />
 						Oogst
 					</button>
+					<button
+						className={`nav-tab ${editorTab === 'taken' ? 'nav-active' : ''}`}
+						onClick={() => { setEditorTab('taken'); setMobileMenuOpen(false) }}>
+						<i className='fa-solid fa-list-check' aria-hidden='true' />
+						Taken
+						{openTodos > 0 && <span className='nav-tab-count'>{openTodos}</span>}
+					</button>
 					<NavMenu
 						label='Meer'
 						icon='fa-ellipsis'
@@ -941,6 +962,14 @@ export function GardenEditor(props: Props) {
 						aria-current={editorTab === 'oogst' ? 'page' : undefined}>
 						<i className='fa-solid fa-basket-shopping' aria-hidden='true' />
 						<span className='ge-side-label'>Oogst</span>
+					</button>
+					<button
+						className={`ge-side-item${editorTab === 'taken' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('taken'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'taken' ? 'page' : undefined}>
+						<i className='fa-solid fa-list-check' aria-hidden='true' />
+						<span className='ge-side-label'>Taken</span>
+						{openTodos > 0 && <span className='ge-side-count'>{openTodos}</span>}
 					</button>
 					<div className='ge-side-sep' aria-hidden='true' />
 					<button
@@ -1315,6 +1344,17 @@ export function GardenEditor(props: Props) {
 						onAdd={onAddHarvest}
 						onUpdate={onUpdateHarvest}
 						onRemove={onRemoveHarvest}
+					/>
+				</div>
+			) : editorTab === 'taken' ? (
+				<div className='shop-scroll' key='taken'>
+					<TodoListView
+						items={garden.todos ?? []}
+						elements={garden.elements}
+						userNames={userNames}
+						onAdd={onAddTodo}
+						onUpdate={onUpdateTodo}
+						onRemove={onRemoveTodo}
 					/>
 				</div>
 			) : editorTab === 'uitgaven' ? (

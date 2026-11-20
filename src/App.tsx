@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, SowingEntry, Expense, Income, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
+import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, SowingEntry, Expense, Income, ShoppingItem, TodoItem, GardenObjectKey, GaasData, User } from "./types";
 import { id, findFreeCropArea, roundM, PX_PER_M, dedupeCatalog, DEFAULT_CROP_CATALOG, seedCatalog } from "./storage";
 import {
   mergeCropAssignments,
@@ -1259,6 +1259,38 @@ const removeShopping = useCallback(
     [updateGarden],
   );
 
+  const addTodo = useCallback(
+    (gId: string, entry: Omit<TodoItem, "id" | "createdAt" | "done" | "createdBy">) => {
+      const at = syncNow();
+      const full: TodoItem = { ...entry, id: id(), createdAt: at, done: false, createdBy: user?.id, updatedAt: at };
+      updateGarden(gId, (g) => ({ ...g, todos: [...(g.todos ?? []), full] }));
+    },
+    [updateGarden, user]
+  );
+
+  const updateTodo = useCallback(
+    (gId: string, todoId: string, patch: Partial<TodoItem>) => {
+      const at = syncNow();
+      updateGarden(gId, (g) => ({
+        ...g,
+        todos: (g.todos ?? []).map((t) => (t.id === todoId ? { ...t, ...patch, updatedAt: at } : t)),
+      }));
+    },
+    [updateGarden]
+  );
+
+  const removeTodo = useCallback(
+    (gId: string, todoId: string) => {
+      const at = syncNow();
+      updateGarden(gId, (g) => ({
+        ...g,
+        todos: (g.todos ?? []).filter((t) => t.id !== todoId),
+        deleted: { ...normalizeTombstones(g.deleted), todos: { ...g.deleted?.todos, [todoId]: at } },
+      }));
+    },
+    [updateGarden]
+  );
+
   /**
    * Afvinken op de boodschappenlijst boekt het product meteen als uitgave.
    * terugzetten haalt die uitgave er weer uit, zodat er geen dubbelingen
@@ -1405,6 +1437,9 @@ const removeShopping = useCallback(
       onUpdateShopping={(itemId, patch) => updateShopping(garden.id, itemId, patch)}
       onRemoveShopping={(itemId) => removeShopping(garden.id, itemId)}
       onToggleShoppingDone={(item, done) => toggleShoppingDone(garden.id, item, done)}
+      onAddTodo={(entry) => addTodo(garden.id, entry)}
+      onUpdateTodo={(todoId, patch) => updateTodo(garden.id, todoId, patch)}
+      onRemoveTodo={(todoId) => removeTodo(garden.id, todoId)}
       onUndo={undo}
       onRedo={redo}
       onLiveMove={(updates) => sendLiveMove(garden.id, updates)}

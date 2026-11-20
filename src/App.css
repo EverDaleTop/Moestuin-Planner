@@ -8172,6 +8172,102 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
 .oogst-row-link { font-size: 12px; color: var(--primary); margin-top: 6px; display: inline-block; }
 .oogst-row-total { font-weight: 700; color: var(--ink); }
 .oogst-empty { margin-top: 20px; padding: 40px 28px; text-align: center; color: var(--ink-soft); }
+/* ---------- Taken ---------- */
+.todo-page .shop-grid { margin-top: 20px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.todo-card { animation: shop-fade-in 0.3s ease-out both; }
+.todo-prio-badge {
+  background: var(--surface-2);
+  color: var(--ink-soft);
+}
+.todo-prio-high {
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+  color: var(--danger);
+}
+.todo-prio-normal {
+  background: var(--sow-tint);
+  color: var(--primary);
+}
+.todo-prio-low {
+  background: var(--bg);
+  color: var(--muted);
+}
+.todo-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.todo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.todo-chip i {
+  font-size: 10px;
+  opacity: 0.85;
+}
+.todo-author {
+  font-size: 11px;
+  color: var(--muted);
+}
+.todo-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.todo-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 8px 13px;
+  font: 600 12.5px 'DM Sans', sans-serif;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.todo-field:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+.todo-field i {
+  font-size: 11px;
+}
+.todo-field-active,
+.todo-field-active:hover:not(:disabled) {
+  background: var(--sow-tint);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.nav-tab-count {
+  margin-left: 4px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 768px) {
+  .todo-fields .todo-field {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
 .bood-toolbar { display: flex; gap: 12px; margin: 20px 0; align-items: stretch; }
 .bood-toolbar .oogst-search-label { margin-top: 0; flex: 1; min-width: 0; }
 .bood-filters { display: flex; gap: 12px; flex: none; align-items: stretch; }
