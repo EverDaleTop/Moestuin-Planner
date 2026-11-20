@@ -868,22 +868,37 @@ export function GardenEditor(props: Props) {
 										? `${harvestableThisMonth} te oogsten`
 										: 'nu te zaaien',
 							},
+							{
+								key: 'oogst',
+								label: 'Oogst',
+								icon: 'fa-basket-shopping',
+								hint: 'Wat je hebt geoogst',
+							},
 						]}
 						onSelect={(key) => { setEditorTab(key as typeof editorTab); setMobileMenuOpen(false) }}
 					/>
-					<button
-						className={`nav-tab ${editorTab === 'oogst' ? 'nav-active' : ''}`}
-						onClick={() => { setEditorTab('oogst'); setMobileMenuOpen(false) }}>
-						<i className='fa-solid fa-basket-shopping' aria-hidden='true' />
-						Oogst
-					</button>
-					<button
-						className={`nav-tab ${editorTab === 'taken' ? 'nav-active' : ''}`}
-						onClick={() => { setEditorTab('taken'); setMobileMenuOpen(false) }}>
-						<i className='fa-solid fa-list-check' aria-hidden='true' />
-						Taken
-						{openTodos > 0 && <span className='nav-tab-count'>{openTodos}</span>}
-					</button>
+					<NavMenu
+						label='Lijsten'
+						icon='fa-list-check'
+						activeKey={editorTab}
+						items={[
+							{
+								key: 'boodschappen',
+								label: 'Boodschappen',
+								icon: 'fa-cart-shopping',
+								count: openShopping,
+								hint: 'Wat je nog moet halen',
+							},
+							{
+								key: 'taken',
+								label: 'Taken',
+								icon: 'fa-list-check',
+								count: openTodos,
+								hint: 'Wat er nog moet gebeuren',
+							},
+						]}
+						onSelect={(key) => { setEditorTab(key as typeof editorTab); setMobileMenuOpen(false) }}
+					/>
 					<NavMenu
 						label='Meer'
 						icon='fa-ellipsis'
@@ -894,13 +909,6 @@ export function GardenEditor(props: Props) {
 								label: 'Uitgaven',
 								icon: 'fa-receipt',
 								hint: 'Kosten en inkomsten',
-							},
-							{
-								key: 'boodschappen',
-								label: 'Boodschappen',
-								icon: 'fa-cart-shopping',
-								count: openShopping,
-								hint: 'Wat je nog moet halen',
 							},
 							{
 								key: 'instellingen',
@@ -985,6 +993,15 @@ export function GardenEditor(props: Props) {
 						<i className='fa-solid fa-basket-shopping' aria-hidden='true' />
 						<span className='ge-side-label'>Oogst</span>
 					</button>
+					<div className='ge-side-sep' aria-hidden='true' />
+					<button
+						className={`ge-side-item${editorTab === 'boodschappen' ? ' is-active' : ''}`}
+						onClick={() => { setEditorTab('boodschappen'); setMobileMenuOpen(false) }}
+						aria-current={editorTab === 'boodschappen' ? 'page' : undefined}>
+						<i className='fa-solid fa-cart-shopping' />
+						<span className='ge-side-label'>Boodschappen</span>
+						{openShopping > 0 && <span className='ge-side-count'>{openShopping}</span>}
+					</button>
 					<button
 						className={`ge-side-item${editorTab === 'taken' ? ' is-active' : ''}`}
 						onClick={() => { setEditorTab('taken'); setMobileMenuOpen(false) }}
@@ -1001,15 +1018,6 @@ export function GardenEditor(props: Props) {
 						<i className='fa-solid fa-receipt' />
 						<span className='ge-side-label'>Uitgaven</span>
 					</button>
-					<button
-						className={`ge-side-item${editorTab === 'boodschappen' ? ' is-active' : ''}`}
-						onClick={() => { setEditorTab('boodschappen'); setMobileMenuOpen(false) }}
-						aria-current={editorTab === 'boodschappen' ? 'page' : undefined}>
-						<i className='fa-solid fa-cart-shopping' />
-						<span className='ge-side-label'>Boodschappen</span>
-						{openShopping > 0 && <span className='ge-side-count'>{openShopping}</span>}
-					</button>
-					<div className='ge-side-sep' aria-hidden='true' />
 					<button
 						className={`ge-side-item${editorTab === 'instellingen' ? ' is-active' : ''}`}
 						onClick={() => { setEditorTab('instellingen'); setMobileMenuOpen(false) }}
