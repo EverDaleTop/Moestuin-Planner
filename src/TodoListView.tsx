@@ -350,35 +350,37 @@ export function TodoListView({
                         <button
                           key={id}
                           type="button"
-                          className="todo-chip todo-chip-link"
+                          className="todo-place"
                           onClick={() => onLocateElement(id)}
                           title={`Ga naar ${kind.toLowerCase()} ${label}${
                             parentVeld ? ` in ${parentVeld.label}` : ""
                           }${cropNames.length > 0 ? ` (${cropNames.join(", ")})` : ""} in de tuin`}
                         >
-                          <span className="todo-chip-place">
+                          <span className="todo-place-icon" aria-hidden="true">
                             <i
                               className={`fa-solid ${
                                 el?.type === "veld" ? "fa-border-all" : "fa-table-cells-large"
                               }`}
-                              aria-hidden="true"
                             />
-                            <span className="todo-chip-kind">{kind}</span>
-                            <span className="todo-chip-name">{label}</span>
                           </span>
-                          {parentVeld && (
-                            <span className="todo-chip-context">
-                              <i className="fa-solid fa-border-all" aria-hidden="true" />
-                              in {parentVeld.label}
+                          <span className="todo-place-body">
+                            <span className="todo-place-line">
+                              <span className="todo-place-kind">{kind}</span>
+                              <span className="todo-place-name">{label}</span>
                             </span>
-                          )}
-                          {shownCrops.length > 0 && (
-                            <span className="todo-chip-crops">
-                              <i className="fa-solid fa-seedling" aria-hidden="true" />
-                              {shownCrops.join(", ")}
-                            </span>
-                          )}
-                          <i className="fa-solid fa-chevron-right todo-chip-go" aria-hidden="true" />
+                            {parentVeld && (
+                              <span className="todo-place-veld">
+                                in veld {parentVeld.label}
+                              </span>
+                            )}
+                            {shownCrops.length > 0 && (
+                              <span className="todo-place-crops">
+                                <i className="fa-solid fa-seedling" aria-hidden="true" />
+                                {shownCrops.join(", ")}
+                              </span>
+                            )}
+                          </span>
+                          <i className="fa-solid fa-arrow-right todo-place-go" aria-hidden="true" />
                         </button>
                       );
                     })}
