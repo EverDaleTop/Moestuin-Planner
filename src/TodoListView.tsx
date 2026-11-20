@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { GardenElement, TodoItem } from "./types";
+import type { Crop, GardenElement, TodoItem } from "./types";
 import { useCollapseForm } from "./useCollapseForm";
 import { SheetModal } from "./SheetModal";
 import { CategoryDropdown } from "./CategoryDropdown";
@@ -7,7 +7,9 @@ import { CategoryDropdown } from "./CategoryDropdown";
 interface Props {
   items: TodoItem[];
   elements: GardenElement[];
+  catalog: Crop[];
   userNames: Record<string, string>;
+  currentUserId?: string;
   onAdd: (entry: Omit<TodoItem, "id" | "createdAt" | "done" | "createdBy">) => void;
   onUpdate: (id: string, patch: Partial<TodoItem>) => void;
   onRemove: (id: string) => void;
@@ -33,7 +35,9 @@ const STATUS_OPTIONS = [
 export function TodoListView({
   items,
   elements,
+  catalog,
   userNames,
+  currentUserId,
   onAdd,
   onUpdate,
   onRemove,
@@ -57,6 +61,8 @@ export function TodoListView({
     [elements]
   );
   const fieldName = useMemo(() => new Map(fields.map((f) => [f.id, f.label])), [fields]);
+  const elementById = useMemo(() => new Map(elements.map((e) => [e.id, e])), [elements]);
+  const cropNameById = useMemo(() => new Map(catalog.map((c) => [c.id, c.name])), [catalog]);
 
   const openCount = items.filter((i) => !i.done).length;
   const doneCount = items.filter((i) => i.done).length;
@@ -321,20 +327,70 @@ export function TodoListView({
                 {item.note && <p className="todo-card-note">{item.note}</p>}
                 {(linked.length > 0 || author) && (
                   <div className="todo-card-meta">
-                    {linked.map((id) => (
-                      <button
-                        key={id}
-                        type="button"
-                        className="todo-chip todo-chip-link"
-                        onClick={() => onLocateElement(id)}
-                        title={`Ga naar ${fieldName.get(id)} in de tuin`}
+                    {linked.map((id) => {
+                      const el = elementById.get(id);
+                      const label = fieldName.get(id) ?? "";
+                      const kind = el?.type === "veld" ? "Veld" : "Bed";
+                      const cropNames = Array.from(
+                        new Set(
+                          (el?.crops ?? [])
+                            .map((c) => cropNameById.get(c.cropId))
+                            .filter((name): name is string => !!name)
+                        )
+                      );
+                      const shownCrops = cropNames.filter(
+                        (name) => name.toLowerCase() !== label.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          className="todo-chip todo-chip-link"
+                          onClick={() => onLocateElement(id)}
+                          title={`Ga naar ${kind.toLowerCase()} ${label}${
+                            cropNames.length > 0 ? ` (${cropNames.join(", ")})` : ""
+                          } in de tuin`}
+                        >
+                          <i
+                            className={`fa-solid ${
+                              el?.type === "veld" ? "fa-border-all" : "fa-table-cells-large"
+                            }`}
+                            aria-hidden="true"
+                          />
+                          <span className="todo-chip-kind">{kind}</span>
+                          <span className="todo-chip-name">{label}</span>
+                          {shownCrops.length > 0 && (
+                            <span className="todo-chip-crops">
+                              <i className="fa-solid fa-seedling" aria-hidden="true" />
+                              {shownCrops.join(", ")}
+                            </span>
+                          )}
+                          <i className="fa-solid fa-chevron-right todo-chip-go" aria-hidden="true" />
+                        </button>
+                      );
+                    })}
+                    {author && (
+                      <span
+                        className={`shop-card-assignee${
+                          item.createdBy === currentUserId ? " is-self" : ""
+                        }`}
+                        title={
+                          item.createdBy === currentUserId
+                            ? `Door jou (${author})`
+                            : `Aangemaakt door ${author}`
+                        }
                       >
-                        <i className="fa-solid fa-location-dot" aria-hidden="true" />
-                        {fieldName.get(id)}
-                        <i className="fa-solid fa-chevron-right todo-chip-go" aria-hidden="true" />
-                      </button>
-                    ))}
-                    {author && <span className="todo-author">van {author}</span>}
+                        <span className="shop-card-assignee-avatar" aria-hidden="true">
+                          {(author.trim()[0] ?? "?").toUpperCase()}
+                        </span>
+                        <span className="shop-card-assignee-name">
+                          <span className="shop-card-assignee-label">van</span>
+                          <strong>
+                            {item.createdBy === currentUserId ? "jou" : author}
+                          </strong>
+                        </span>
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

@@ -1373,7 +1373,9 @@ export function GardenEditor(props: Props) {
 					<TodoListView
 						items={garden.todos ?? []}
 						elements={garden.elements}
+						catalog={catalog}
 						userNames={userNames}
+						currentUserId={currentUserId}
 						onAdd={onAddTodo}
 						onUpdate={onUpdateTodo}
 						onRemove={onRemoveTodo}
