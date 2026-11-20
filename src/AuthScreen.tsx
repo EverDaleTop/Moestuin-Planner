@@ -330,13 +330,31 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
               )}
 
               {error && (
-                <div className="auth-error" role="alert">
-                  <i className="fa-solid fa-triangle-exclamation" aria-hidden /> {error}
+                <div className="auth-toast auth-toast-error" role="alert" aria-live="assertive">
+                  <i className="fa-solid fa-triangle-exclamation" aria-hidden />
+                  <span>{error}</span>
+                  <button
+                    type="button"
+                    className="auth-toast-close"
+                    onClick={() => setError(null)}
+                    aria-label="Melding sluiten"
+                  >
+                    <i className="fa-solid fa-xmark" aria-hidden />
+                  </button>
                 </div>
               )}
               {notice && (
-                <div className="auth-notice" role="status">
-                  <i className="fa-solid fa-circle-info" aria-hidden /> {notice}
+                <div className="auth-toast auth-toast-notice" role="status" aria-live="polite">
+                  <i className="fa-solid fa-circle-info" aria-hidden />
+                  <span>{notice}</span>
+                  <button
+                    type="button"
+                    className="auth-toast-close"
+                    onClick={() => setNotice(null)}
+                    aria-label="Melding sluiten"
+                  >
+                    <i className="fa-solid fa-xmark" aria-hidden />
+                  </button>
                 </div>
               )}
 

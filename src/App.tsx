@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { AppData, Crop, Garden, GardenElement, CropAssignment, HarvestEntry, SowingEntry, Expense, Income, ShoppingItem, GardenObjectKey, GaasData, User } from "./types";
 import { id, findFreeCropArea, roundM, PX_PER_M, dedupeCatalog, DEFAULT_CROP_CATALOG, seedCatalog } from "./storage";
 import {
@@ -17,10 +17,7 @@ import { GardenList } from "./GardenList";
 import { InviteScreen } from "./InviteScreen";
 import { GardenEditor } from "./GardenEditor";
 import { ProfilePage } from "./ProfilePage";
-// Auth pas laden als het nodig is (kleinere eerste lading).
-const AuthScreen = lazy(() =>
-  import("./AuthScreen").then((m) => ({ default: m.AuthScreen }))
-);
+import { AuthScreen } from "./AuthScreen";
 import { useTheme } from "./useTheme";
 import { getSupabase } from "./lib/supabaseClient";
 import { objectDef } from "./gardenObjects";
@@ -1314,9 +1311,7 @@ const removeShopping = useCallback(
 
   if (!user) {
     return (
-      <Suspense fallback={<div className="gl-boot" aria-label="Bezig met laden" />}>
-        <AuthScreen theme={theme} onToggleTheme={toggleTheme} onAuthed={handleAuthed} />
-      </Suspense>
+      <AuthScreen theme={theme} onToggleTheme={toggleTheme} onAuthed={handleAuthed} />
     );
   }
 
