@@ -1279,34 +1279,7 @@ const removeShopping = useCallback(
     [addExpense, data.gardens, removeExpense],
   );
 
-  if (!booted) {
-    if (user) {
-      return (
-        <GardenList
-          gardens={data.gardens}
-          user={user}
-          userNames={userNames}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          onOpen={openGarden}
-          onAdd={addGarden}
-          onDelete={deleteGarden}
-          onUnshare={unshareGarden}
-          onGardenUpdated={onGardenUpdated}
-          onLogout={logout}
-          onOpenProfile={() => setProfileOpen(true)}
-          loading
-        />
-      );
-    }
-    return (
-      <div className="gl-boot" aria-label="Bezig met laden">
-        <span className="gl-boot-blob" aria-hidden="true">
-          <i className="fa-solid fa-seedling" />
-        </span>
-      </div>
-    );
-  }
+  if (!booted && !user) return null;
 
   if (!user) {
     return (
