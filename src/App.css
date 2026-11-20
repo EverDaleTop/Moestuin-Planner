@@ -10222,9 +10222,12 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   box-shadow: var(--shadow);
   font: 500 13px/1.45 'DM Sans', sans-serif;
   animation: auth-toast-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .auth-toast.is-leaving {
-  animation: auth-toast-out 0.2s ease-in forwards;
+  animation: none;
+  opacity: 0;
+  transform: translateY(-8px) scale(0.98);
 }
 .auth-toast-icon {
   width: 32px;
@@ -10306,7 +10309,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
     animation-name: auth-toast-in-mobile;
   }
   .auth-toast.is-leaving {
-    animation-name: auth-toast-out-mobile;
+    animation: none;
+    transform: translateY(12px);
   }
   @keyframes auth-toast-in-mobile {
     from { opacity: 0; transform: translateY(12px); }
