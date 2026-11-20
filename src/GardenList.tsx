@@ -77,6 +77,21 @@ export function GardenList({
   const firstName = user.username.split(" ")[0] || user.username;
   const initial = (user.username.trim()[0] ?? "?").toUpperCase();
 
+  // De tuinenlijst heeft een eigen scrollcontainer; de pagina zelf mag nooit
+  // scrollen (ook niet door navbar-marges of een uitstekende footer).
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, []);
+
   const submit = () => {
     const trimmed = name.trim();
     if (!trimmed) return;
