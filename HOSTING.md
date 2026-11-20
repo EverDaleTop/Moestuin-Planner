@@ -31,7 +31,7 @@ De tabellen hoef je niet handmatig aan te maken. De server doet dat bij de eerst
 ```env
 NODE_ENV=production
 APP_URL=https://oogstplan.nl
-DATA_STORE=mysql
+DATA_STORE=auto
 DB_HOST=localhost
 DB_PORT=3306
 DB_NAME=GEBRUIKER_oogstplan
@@ -129,21 +129,16 @@ De migratie vult dezelfde MySQL-database die in `.env` staat. Maak eerst een bac
 
 ## 6. Lokaal ontwikkelen
 
-Lokaal blijft de app standaard Supabase als data-opslag gebruiken. Dat staat in `.env`:
+Er is één `.env` voor lokaal en productie.
 
-```env
-DATA_STORE=supabase
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-```
+Lokaal:
 
-In `.env.local` staat alleen de Google Client ID voor de frontend:
+- `DATA_STORE=auto`
+- `NODE_ENV` leeg laten
+- Supabase-keys blijven ingevuld
 
-```env
-VITE_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-```
-
-Dan:
+De server kiest lokaal dan automatisch Supabase. In productie zet je
+`NODE_ENV=production` in DirectAdmin; dan kiest dezelfde `.env` automatisch MySQL.
 
 ```bash
 npm install
@@ -152,7 +147,7 @@ npm run dev
 
 De frontend draait via Vite en de server automatisch op poort 3001.
 
-Wil je lokaal toch MySQL testen, zet dan in `.env`:
+Wil je lokaal toch MySQL testen, zet dan in `.env` tijdelijk:
 
 ```env
 DATA_STORE=mysql
@@ -162,6 +157,8 @@ DB_NAME=oogstplan_lokaal
 DB_USER=root
 DB_PASSWORD=
 ```
+
+En zet daarna `DATA_STORE` weer terug op `auto`.
 
 ### Lokaal tegen de productiedatabase
 

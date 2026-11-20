@@ -20,14 +20,33 @@ async function openStore(): Promise<{ store: DataStore; label: string }> {
   const mode = (process.env.DATA_STORE ?? "").trim().toLowerCase();
   const mysqlInfo = (await import("./mysqlStore.ts")).MysqlStore;
 
-  if (mode === "mysql" || (!mode && mysqlInfo.isConfigured())) {
+  const openMysql = async () => {
     const store = await mysqlInfo.openFromEnv();
     if (!store) {
       throw new Error(
-        "DATA_STORE=mysql is gezet, maar DB_NAME en DB_USER ontbreken."
+        "MySQL is gekozen, maar DB_NAME en DB_USER ontbreken."
       );
     }
-    return { store, label: `MySQL (${process.env.DB_NAME})` };
+    return store;
+  };
+
+  const openSupabase = async () => {
+    const { SupabaseStore } = await import("./supabaseStore.ts");
+    return SupabaseStore.fromEnv();
+  };
+
+  // auto: lokaal Supabase, productie MySQL (NODE_ENV=production).
+  if (mode === "auto") {
+    if (process.env.NODE_ENV === "production") {
+      return { store: await openMysql(), label: `MySQL (${process.env.DB_NAME})` };
+    }
+    const supabaseStore = await openSupabase();
+    if (supabaseStore) return { store: supabaseStore, label: "Supabase" };
+    return { store: await JsonStore.open(DATA_FILE), label: DATA_FILE };
+  }
+
+  if (mode === "mysql" || (!mode && mysqlInfo.isConfigured())) {
+    return { store: await openMysql(), label: `MySQL (${process.env.DB_NAME})` };
   }
 
   if (mode === "json") {
@@ -35,8 +54,7 @@ async function openStore(): Promise<{ store: DataStore; label: string }> {
   }
 
   if (mode === "supabase" || !mode) {
-    const { SupabaseStore } = await import("./supabaseStore.ts");
-    const supabaseStore = SupabaseStore.fromEnv();
+    const supabaseStore = await openSupabase();
     if (supabaseStore) return { store: supabaseStore, label: "Supabase" };
     if (mode === "supabase") {
       throw new Error(
@@ -46,7 +64,7 @@ async function openStore(): Promise<{ store: DataStore; label: string }> {
   }
 
   if (mode && mode !== "supabase") {
-    throw new Error(`Onbekende DATA_STORE: ${mode}. Gebruik mysql, json of supabase.`);
+    throw new Error(`Onbekende DATA_STORE: ${mode}. Gebruik auto, mysql, json of supabase.`);
   }
 
   return { store: await JsonStore.open(DATA_FILE), label: DATA_FILE };
