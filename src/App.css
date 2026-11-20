@@ -9079,8 +9079,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   margin: 0 auto;
   padding: 32px 32px 0;
   background: var(--bg);
-  min-height: calc(100vh - 70px);
-  min-height: calc(100dvh - 70px);
+  min-height: calc(100dvh - 72px);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -9097,7 +9096,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
 .ge-canvas.is-entering { animation: shop-fade-in 0.4s ease-out; }
 
 @media (max-width: 768px) {
-  .gl-wrap { padding: 24px 16px 0; min-height: calc(100vh - 62px); min-height: calc(100dvh - 62px); }
+  .gl-wrap { padding: 24px 16px 0; min-height: calc(100dvh - 64px); }
   .gl-content { padding-bottom: 32px; }
   .auth-shell .legal-footer { padding: 0 16px 28px; }
 }
