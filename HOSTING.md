@@ -52,7 +52,12 @@ Zet in Google Cloud Console bij je OAuth Client ID (type Web):
 - **Authorized JavaScript origins:** `https://oogstplan.nl`
 - voor lokaal testen ook: `http://localhost:5173`
 
-Een redirect-URI is hiervoor niet nodig.
+Een redirect-URI is hiervoor niet nodig. De **client secret** is voor deze
+ID-token-login ook niet nodig; bewaar die veilig en zet hem nooit in een
+`VITE_`-variabele of in de frontend.
+
+Staat de OAuth-consent screen nog op **Testing**? Voeg dan je testaccounts toe
+als test user, of publiceer de app. Anders kunnen alleen test users inloggen.
 
 Laat `PORT` leeg; DirectAdmin/Passenger geeft die meestal zelf door. Werkt de app niet, zet dan `PORT=3001`.
 
