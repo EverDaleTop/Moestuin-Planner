@@ -10217,10 +10217,9 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   width: 100%;
   padding: 12px 13px 12px 14px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--line);
   border-radius: 16px;
   background: var(--surface);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow);
   font: 500 13px/1.45 'DM Sans', sans-serif;
   animation: auth-toast-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -10238,14 +10237,14 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   font-size: 13px;
 }
 .auth-toast-error {
-  border-left-color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--line));
 }
 .auth-toast-error .auth-toast-icon {
   background: color-mix(in srgb, var(--danger) 11%, transparent);
   color: var(--danger);
 }
 .auth-toast-notice {
-  border-left-color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 26%, var(--line));
 }
 .auth-toast-notice .auth-toast-icon {
   background: var(--sow-tint);
@@ -10279,15 +10278,15 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   color: var(--ink-soft);
   font-size: 11px;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: color 0.15s ease;
 }
 .auth-toast-close:hover:not(:disabled) {
-  background: var(--bg);
+  background: transparent;
   color: var(--ink);
 }
 @keyframes auth-toast-in {
