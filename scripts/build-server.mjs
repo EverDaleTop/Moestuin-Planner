@@ -9,4 +9,7 @@ await build({
   outfile: "build/server.cjs",
   sourcemap: true,
   logLevel: "info",
+  // Laat npm-packages uit node_modules: die worden op de host gewoon
+  // geïnstalleerd. Alleen onze eigen servercode wordt gebundeld.
+  packages: "external",
 });

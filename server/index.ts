@@ -3,7 +3,7 @@ import express from "express";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { JsonStore } from "./db.ts";
+import { JsonStore, type DataStore } from "./db.ts";
 import { AuthService } from "./auth.ts";
 import { createRouter } from "./routes.ts";
 import { WsHub } from "./ws.ts";
@@ -15,13 +15,47 @@ const currentDir =
 const PORT = Number(process.env.PORT ?? 3001);
 const DATA_FILE = process.env.DATA_FILE ?? path.join(currentDir, "..", "data", "db.json");
 
+async function openStore(): Promise<{ store: DataStore; label: string }> {
+  const mode = (process.env.DATA_STORE ?? "").trim().toLowerCase();
+  const mysqlInfo = (await import("./mysqlStore.ts")).MysqlStore;
+
+  if (mode === "mysql" || (!mode && mysqlInfo.isConfigured())) {
+    const store = await mysqlInfo.openFromEnv();
+    if (!store) {
+      throw new Error(
+        "DATA_STORE=mysql is gezet, maar DB_NAME en DB_USER ontbreken."
+      );
+    }
+    return { store, label: `MySQL (${process.env.DB_NAME})` };
+  }
+
+  if (mode === "json") {
+    return { store: await JsonStore.open(DATA_FILE), label: DATA_FILE };
+  }
+
+  if (mode === "supabase" || !mode) {
+    const { SupabaseStore } = await import("./supabaseStore.ts");
+    const supabaseStore = SupabaseStore.fromEnv();
+    if (supabaseStore) return { store: supabaseStore, label: "Supabase" };
+    if (mode === "supabase") {
+      throw new Error(
+        "DATA_STORE=supabase is gezet, maar SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY ontbreken."
+      );
+    }
+  }
+
+  if (mode && mode !== "supabase") {
+    throw new Error(`Onbekende DATA_STORE: ${mode}. Gebruik mysql, json of supabase.`);
+  }
+
+  return { store: await JsonStore.open(DATA_FILE), label: DATA_FILE };
+}
+
 async function main(): Promise<void> {
-  // Data-opslag: Supabase als SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY gezet zijn,
-  // anders de lokale JSON-file (data/db.json).
-  const { SupabaseStore } = await import("./supabaseStore.ts");
-  const supabaseStore = SupabaseStore.fromEnv();
-  const store = supabaseStore ?? (await JsonStore.open(DATA_FILE));
-  console.log(supabaseStore ? "Data: Supabase" : `Data: ${DATA_FILE}`);
+  // Data-opslag: expliciet via DATA_STORE, anders automatisch MySQL (als
+  // DB-vars bestaan), Supabase, of de lokale JSON-file.
+  const { store, label } = await openStore();
+  console.log(`Data: ${label}`);
   const auth = new AuthService(store);
 
   const app = express();
