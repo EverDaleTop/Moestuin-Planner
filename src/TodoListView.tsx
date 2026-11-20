@@ -3,6 +3,7 @@ import type { Crop, GardenElement, TodoItem } from "./types";
 import { useCollapseForm } from "./useCollapseForm";
 import { SheetModal } from "./SheetModal";
 import { CategoryDropdown } from "./CategoryDropdown";
+import { inspectorElementInVeld } from "./Inspector";
 
 interface Props {
   items: TodoItem[];
@@ -318,12 +319,7 @@ export function TodoListView({
               </button>
 
               <div className="todo-card-main">
-                <div className="todo-card-top">
-                  <h3 className="todo-card-title">{item.title}</h3>
-                  <span className={`todo-prio todo-prio-${prio.key}`}>
-                    <i className={`fa-solid ${prio.icon}`} aria-hidden="true" /> {prio.label}
-                  </span>
-                </div>
+                <h3 className="todo-card-title">{item.title}</h3>
                 {item.note && <p className="todo-card-note">{item.note}</p>}
                 {(linked.length > 0 || author) && (
                   <div className="todo-card-meta">
@@ -331,6 +327,15 @@ export function TodoListView({
                       const el = elementById.get(id);
                       const label = fieldName.get(id) ?? "";
                       const kind = el?.type === "veld" ? "Veld" : "Bed";
+                      const parentVeld =
+                        el && el.type === "bed"
+                          ? elements.find(
+                              (v) =>
+                                v.type === "veld" &&
+                                v.id !== el.id &&
+                                inspectorElementInVeld(el, v)
+                            )
+                          : undefined;
                       const cropNames = Array.from(
                         new Set(
                           (el?.crops ?? [])
@@ -348,17 +353,25 @@ export function TodoListView({
                           className="todo-chip todo-chip-link"
                           onClick={() => onLocateElement(id)}
                           title={`Ga naar ${kind.toLowerCase()} ${label}${
-                            cropNames.length > 0 ? ` (${cropNames.join(", ")})` : ""
-                          } in de tuin`}
+                            parentVeld ? ` in ${parentVeld.label}` : ""
+                          }${cropNames.length > 0 ? ` (${cropNames.join(", ")})` : ""} in de tuin`}
                         >
-                          <i
-                            className={`fa-solid ${
-                              el?.type === "veld" ? "fa-border-all" : "fa-table-cells-large"
-                            }`}
-                            aria-hidden="true"
-                          />
-                          <span className="todo-chip-kind">{kind}</span>
-                          <span className="todo-chip-name">{label}</span>
+                          <span className="todo-chip-place">
+                            <i
+                              className={`fa-solid ${
+                                el?.type === "veld" ? "fa-border-all" : "fa-table-cells-large"
+                              }`}
+                              aria-hidden="true"
+                            />
+                            <span className="todo-chip-kind">{kind}</span>
+                            <span className="todo-chip-name">{label}</span>
+                          </span>
+                          {parentVeld && (
+                            <span className="todo-chip-context">
+                              <i className="fa-solid fa-border-all" aria-hidden="true" />
+                              in {parentVeld.label}
+                            </span>
+                          )}
                           {shownCrops.length > 0 && (
                             <span className="todo-chip-crops">
                               <i className="fa-solid fa-seedling" aria-hidden="true" />
@@ -395,25 +408,30 @@ export function TodoListView({
                 )}
               </div>
 
-              <div className="todo-card-actions">
-                <button
-                  type="button"
-                  className="todo-card-action"
-                  onClick={() => startEdit(item)}
-                  title="Bewerken"
-                  aria-label="Taak bewerken"
-                >
-                  <i className="fa-solid fa-pen" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="todo-card-action todo-card-action-danger"
-                  onClick={() => onRemove(item.id)}
-                  title="Verwijderen"
-                  aria-label="Taak verwijderen"
-                >
-                  <i className="fa-solid fa-trash" aria-hidden="true" />
-                </button>
+              <div className="todo-card-side">
+                <span className={`todo-prio todo-prio-${prio.key}`}>
+                  <i className={`fa-solid ${prio.icon}`} aria-hidden="true" /> {prio.label}
+                </span>
+                <div className="todo-card-actions">
+                  <button
+                    type="button"
+                    className="todo-card-action"
+                    onClick={() => startEdit(item)}
+                    title="Bewerken"
+                    aria-label="Taak bewerken"
+                  >
+                    <i className="fa-solid fa-pen" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="todo-card-action todo-card-action-danger"
+                    onClick={() => onRemove(item.id)}
+                    title="Verwijderen"
+                    aria-label="Taak verwijderen"
+                  >
+                    <i className="fa-solid fa-trash" aria-hidden="true" />
+                  </button>
+                </div>
               </div>
             </article>
           );
