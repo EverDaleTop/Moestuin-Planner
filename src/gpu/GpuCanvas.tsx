@@ -748,6 +748,41 @@ export function GpuCanvas({
     return true;
   };
 
+  const camAnimRef = useRef<number | null>(null);
+  /** Zoom/centreer smooth op een element na een klik op het naamlabel. */
+  const animateToElement = (el: GardenElement) => {
+    const { w, h } = hostSize.current;
+    if (w === 0 || h === 0) return;
+    const r = rOf(el);
+    const pad = 90;
+    const fit = Math.min((w - pad * 2) / Math.max(1, r.w), (h - pad * 2) / Math.max(1, r.h));
+    const cam = camRef.current;
+    const targetZoom = Math.max(0.5, Math.min(2.4, Math.max(cam.zoom, fit)));
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    const target = {
+      zoom: targetZoom,
+      x: w / 2 - cx * targetZoom,
+      y: h / 2 - cy * targetZoom,
+    };
+    if (camAnimRef.current !== null) cancelAnimationFrame(camAnimRef.current);
+    const from = { ...camRef.current };
+    const start = performance.now();
+    const duration = 340;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const e = 1 - Math.pow(1 - t, 3);
+      camRef.current = {
+        zoom: from.zoom + (target.zoom - from.zoom) * e,
+        x: from.x + (target.x - from.x) * e,
+        y: from.y + (target.y - from.y) * e,
+      };
+      if (t < 1) camAnimRef.current = requestAnimationFrame(tick);
+      else camAnimRef.current = null;
+    };
+    camAnimRef.current = requestAnimationFrame(tick);
+  };
+
   // "Toon in tuin": centreer op het gevraagde punt. Werkt ook als het
   // signaal binnenkomt terwijl de canvas nog geen maat heeft (tab net
   // geopend): dan blijft het hangen tot de eerste ResizeObserver-meting.
@@ -1314,6 +1349,10 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (camAnimRef.current !== null) {
+      cancelAnimationFrame(camAnimRef.current);
+      camAnimRef.current = null;
+    }
     coarseRef.current = e.pointerType !== "mouse";
     tapTipRef.current = null;
     const sp = screenToLocal(e);
@@ -1626,9 +1665,19 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
       // clicked on bed area but outside any plant -> drop plant selection
       handlersRef.current.onSelectCrop(null);
     }
-    // Een klik op een veld-naamkaartje selecteert het hele veld, net als een
-    // klik op het kader zelf (het kaartje ligt erbuiten en raakt anders niets).
-    const hit = hitVeldChip(sp) ?? hitItem(screenToWorld(sp, c));
+    // Klik op een naamlabel: dat wint altijd van gewassen eronder en zoomt
+    // smooth naar het hele element.
+    const chipHit = hitVeldChip(sp);
+    if (chipHit) {
+      const ok = arm(() => {
+        handlersRef.current.onSelect([chipHit.id]);
+        handlersRef.current.onSelectCrop(null);
+      }, false);
+      if (ok) e.currentTarget.setPointerCapture(e.pointerId);
+      animateToElement(chipHit);
+      return;
+    }
+    const hit = hitItem(screenToWorld(sp, c));
     if (hit) {
       // Gewas direct selecteren: ook als het bed (of veld) al geselecteerd is,
       // pakt een klik op een planting het gewas zelf in één keer. Drukken op
@@ -2859,6 +2908,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           ctx.font = `600 ${smallFs}px ${chipFont}`;
           ctx.fillText(sizeTxtFit, chipX + padX, chipY + padY + fs + (smallFs - 8) / 2 + 1);
         }
+        veldChipsRef.current.push({ id: el.id, x: chipX, y: chipY, w: chipW, h: chipH });
         ctx.globalAlpha = 1;
       }
 
@@ -3533,6 +3583,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
 
     return () => {
       cancelAnimationFrame(raf);
+      if (camAnimRef.current !== null) cancelAnimationFrame(camAnimRef.current);
       ro.disconnect();
       host_.removeEventListener("wheel", wheelNative);
       window.removeEventListener("keydown", keyDown);
