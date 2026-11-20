@@ -223,6 +223,7 @@ select:focus {
 }
 .gl-shell > .gl-wrap {
   flex: 1;
+  width: 100%;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
