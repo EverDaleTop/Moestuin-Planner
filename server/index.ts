@@ -13,6 +13,7 @@ const currentDir =
     ? __dirname
     : path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
+const APP_URL = (process.env.APP_URL ?? "").replace(/\/$/, "");
 const DATA_FILE = process.env.DATA_FILE ?? path.join(currentDir, "..", "data", "db.json");
 
 async function openStore(): Promise<{ store: DataStore; label: string }> {
@@ -97,7 +98,11 @@ async function main(): Promise<void> {
   });
 
   server.listen(PORT, () => {
-    console.log(`Oogstplan server draait op http://localhost:${PORT}`);
+    console.log(
+      APP_URL
+        ? `Oogstplan server draait op ${APP_URL}`
+        : `Oogstplan server draait op http://localhost:${PORT}`
+    );
   });
 
   const shutdown = () => {

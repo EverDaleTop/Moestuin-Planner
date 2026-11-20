@@ -10384,6 +10384,40 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   font-weight: 600;
 }
 .btn-google:hover:not(:disabled) { border-color: var(--primary); background: var(--surface); }
+.btn-google-slot {
+  position: relative;
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-google-render {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.btn-google-render > div,
+.btn-google-render iframe {
+  max-width: 100%;
+}
+.btn-google-slot.is-busy .btn-google-render {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.btn-google-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
 .auth-hint { font-size: 11.5px; margin: 10px 0 0; }
 .auth-hint code { padding: 1px 5px; border-radius: 6px; background: var(--sow-tint); }
 

@@ -88,7 +88,11 @@ export function createRouter(store: DataStore, auth: AuthService, ws: WsHub): Ro
         aud?: string;
       };
       const expectedAud = process.env.GOOGLE_CLIENT_ID;
-      if (expectedAud && info.aud !== expectedAud) {
+      if (!expectedAud) {
+        res.status(500).json({ error: "GOOGLE_CLIENT_ID is niet geconfigureerd." });
+        return;
+      }
+      if (info.aud !== expectedAud) {
         res.status(401).json({ error: "Google-token is voor een andere app." });
         return;
       }

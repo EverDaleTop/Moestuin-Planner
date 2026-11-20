@@ -19,7 +19,6 @@ import { GardenEditor } from "./GardenEditor";
 import { ProfilePage } from "./ProfilePage";
 import { AuthScreen } from "./AuthScreen";
 import { useTheme } from "./useTheme";
-import { getSupabase } from "./lib/supabaseClient";
 import { objectDef } from "./gardenObjects";
 import { lineTotal } from "./shopping";
 import { guessCategory } from "./expenseCategories";
@@ -322,11 +321,6 @@ export default function App() {
       await api.logout();
     } catch {
       // Sessie kan al verlopen/verwijderd zijn (bv. na account verwijderen).
-    }
-    try {
-      const sb = await getSupabase();
-      await sb?.auth.signOut();
-    } catch {
     }
     realtime.disconnect();
     setUser(null);

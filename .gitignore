@@ -16,6 +16,7 @@ dist-ssr
 # Geheime keys (Supabase service_role, Google secrets) — nooit committen.
 # .env.example is wel bedoeld voor git; .env nooit.
 .env
+.env.*
 !.env.example
 
 # Server data (accounts & gardens stay local to this machine)

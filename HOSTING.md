@@ -30,13 +30,29 @@ De tabellen hoef je niet handmatig aan te maken. De server doet dat bij de eerst
 
 ```env
 NODE_ENV=production
+APP_URL=https://oogstplan.nl
 DATA_STORE=mysql
 DB_HOST=localhost
 DB_PORT=3306
 DB_NAME=GEBRUIKER_oogstplan
 DB_USER=GEBRUIKER_oogstplan
 DB_PASSWORD=je-sterke-wachtwoord
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+VITE_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 ```
+
+`VITE_GOOGLE_CLIENT_ID` is nodig tijdens `npm run build`; de frontend neemt hem mee de build in.
+
+### Google-login
+
+De app gebruikt directe Google-login via Google Identity Services, zonder Supabase Auth.
+
+Zet in Google Cloud Console bij je OAuth Client ID (type Web):
+
+- **Authorized JavaScript origins:** `https://oogstplan.nl`
+- voor lokaal testen ook: `http://localhost:5173`
+
+Een redirect-URI is hiervoor niet nodig.
 
 Laat `PORT` leeg; DirectAdmin/Passenger geeft die meestal zelf door. Werkt de app niet, zet dan `PORT=3001`.
 
@@ -108,15 +124,18 @@ De migratie vult dezelfde MySQL-database die in `.env` staat. Maak eerst een bac
 
 ## 6. Lokaal ontwikkelen
 
-Kopieer `.env.example` naar `.env` en zet je lokale databasegegevens erin:
+Lokaal blijft de app standaard Supabase als data-opslag gebruiken. Dat staat in `.env`:
 
 ```env
-DATA_STORE=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_NAME=oogstplan_lokaal
-DB_USER=root
-DB_PASSWORD=
+DATA_STORE=supabase
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+In `.env.local` staat alleen de Google Client ID voor de frontend:
+
+```env
+VITE_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 ```
 
 Dan:
@@ -127,6 +146,17 @@ npm run dev
 ```
 
 De frontend draait via Vite en de server automatisch op poort 3001.
+
+Wil je lokaal toch MySQL testen, zet dan in `.env`:
+
+```env
+DATA_STORE=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=oogstplan_lokaal
+DB_USER=root
+DB_PASSWORD=
+```
 
 ### Lokaal tegen de productiedatabase
 

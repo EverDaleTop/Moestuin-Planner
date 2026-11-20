@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { User } from "./types";
 import { api } from "./api";
-import { getSupabase, isSupabaseConfigured } from "./lib/supabaseClient";
 import type { Theme } from "./useTheme";
 import { ThemeToggle } from "./ThemeToggle";
 import { LegalFooter } from "./LegalPage";
@@ -16,15 +15,30 @@ interface Props {
   onAuthed: (user: User, token: string) => void;
 }
 
-function GoogleGLogo() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
-      <path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.1.1 3.5 2.7.2.1c2.2-2 3.8-5 3.8-8.9z" />
-      <path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.8-2.9c-1 .7-2.4 1.2-4.1 1.2-3.2 0-5.9-2.1-6.8-5l-.1.1-3.7 2.9v.1C3.3 21.3 7.3 24 12 24z" />
-      <path fill="#FBBC05" d="M5.2 14.4c-.2-.7-.4-1.5-.4-2.4s.1-1.7.4-2.4l-.1-.1-3.6-2.8-.1.1C.5 8.6 0 10.2 0 12s.5 3.4 1.4 4.9l3.8-2.5z" />
-      <path fill="#EA4335" d="M12 4.6c1.8 0 3 .8 3.7 1.4l3.3-3.2C17.9 1.1 15.2 0 12 0 7.3 0 3.3 2.7 1.4 6.7l3.8 2.9c.9-2.9 3.6-5 6.8-5z" />
-    </svg>
-  );
+const GOOGLE_SCRIPT_ID = "google-identity-services";
+
+function loadGoogleIdentity(): Promise<void> {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  const existing = document.getElementById(GOOGLE_SCRIPT_ID) as HTMLScriptElement | null;
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      if (window.google?.accounts?.id) return resolve();
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Google-script laden mislukt.")), {
+        once: true,
+      });
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = GOOGLE_SCRIPT_ID;
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Google-script laden mislukt."));
+    document.head.appendChild(script);
+  });
 }
 
 const FEATURES = [
@@ -72,49 +86,62 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const googleBtnRef = useRef<HTMLDivElement | null>(null);
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim();
 
-  // Supabase OAuth-callback: na redirect zit er een sessie in de URL.
-  // Wissel die meteen in voor een lokale app-sessie.
+  // Directe Google-login via Google Identity Services. Geen Supabase Auth meer:
+  // de browser krijgt een Google ID-token en de backend verifieert die.
   useEffect(() => {
+    if (!googleClientId) return;
     let cancelled = false;
-    let unsubscribe: (() => void) | null = null;
+
     void (async () => {
-      const sb = await getSupabase();
-      if (!sb || cancelled) return;
-      const { data } = await sb.auth.getSession();
-      if (cancelled) return;
-      if (data.session?.access_token) {
-        try {
-          setGoogleBusy(true);
-          const res = await api.loginWithSupabase(data.session.access_token);
-          onAuthed(res.user, res.token);
-        } catch (err: any) {
-          if (!cancelled) setError(err.message ?? "Supabase-login mislukt.");
-        } finally {
-          if (!cancelled) setGoogleBusy(false);
+      try {
+        await loadGoogleIdentity();
+        if (cancelled || !window.google?.accounts?.id || !googleBtnRef.current) return;
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+          callback: async (response) => {
+            if (!response.credential) return;
+            setError(null);
+            setGoogleBusy(true);
+            try {
+              const res = await api.loginWithGoogle(response.credential);
+              onAuthed(res.user, res.token);
+            } catch (err: any) {
+              setError(err.message ?? "Inloggen met Google mislukt.");
+            } finally {
+              setGoogleBusy(false);
+            }
+          },
+        });
+        googleBtnRef.current.innerHTML = "";
+        window.google.accounts.id.renderButton(googleBtnRef.current, {
+          type: "standard",
+          theme: "outline",
+          size: "large",
+          text: "continue_with",
+          shape: "pill",
+          logo_alignment: "left",
+          locale: "nl",
+          width: 320,
+        });
+        if (!cancelled) setGoogleReady(true);
+      } catch (err: any) {
+        if (!cancelled) {
+          setGoogleError(err?.message ?? "Google-login kon niet geladen worden.");
         }
       }
-      const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
-        if (cancelled || !session?.access_token) return;
-        try {
-          setGoogleBusy(true);
-          const res = await api.loginWithSupabase(session.access_token);
-          onAuthed(res.user, res.token);
-        } catch (err: any) {
-          if (!cancelled) setError(err.message ?? "Supabase-login mislukt.");
-        } finally {
-          if (!cancelled) setGoogleBusy(false);
-        }
-      });
-      unsubscribe = () => sub.subscription.unsubscribe();
-      if (cancelled) unsubscribe();
     })();
+
     return () => {
       cancelled = true;
-      unsubscribe?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [googleClientId, onAuthed]);
 
   const submit = async () => {
     if (busy) return;
@@ -138,29 +165,6 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
     setMode(next);
     setError(null);
     setNotice(null);
-  };
-
-  const loginWithSupabaseGoogle = async () => {
-    const sb = await getSupabase();
-    if (!sb) {
-      setNotice(
-        "Google-login via Supabase is nog niet ingesteld. Zet VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY en schakel de Google-provider in (zie supabase/schema.sql)."
-      );
-      return;
-    }
-    setError(null);
-    setGoogleBusy(true);
-    try {
-      const { error } = await sb.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: window.location.origin },
-      });
-      if (error) throw error;
-      // Redirect volgt; de callback hierboven handelt de rest af.
-    } catch (err: any) {
-      setError(err.message ?? "Inloggen met Google mislukt.");
-      setGoogleBusy(false);
-    }
   };
 
   const canSubmit = !busy && username.trim().length > 0 && password.length > 0;
@@ -242,19 +246,26 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
               </button>
             </div>
 
-            <button
-              type="button"
-              className="btn-google"
-              onClick={() => void loginWithSupabaseGoogle()}
-              disabled={googleBusy}
+            <div
+              className={`btn-google-slot${googleReady ? " is-ready" : ""}${
+                googleBusy ? " is-busy" : ""
+              }`}
             >
-              <GoogleGLogo />
-              {googleBusy ? "Bezig met Google…" : "Verder met Google"}
-            </button>
-            {!isSupabaseConfigured && (
+              <div ref={googleBtnRef} className="btn-google-render" />
+              {googleClientId && !googleReady && !googleError && (
+                <span className="btn-google-loading">Google laden…</span>
+              )}
+              {googleBusy && <span className="btn-google-loading">Bezig met Google…</span>}
+            </div>
+            {!googleClientId && (
               <p className="insp-hint auth-hint">
-                <i className="fa-solid fa-circle-info" aria-hidden /> Google-login is nog niet
-                ingesteld. Voeg Supabase-keys toe — zie <code>.env.example</code>.
+                <i className="fa-solid fa-circle-info" aria-hidden /> Google-login is niet
+                ingesteld. Zet <code>VITE_GOOGLE_CLIENT_ID</code> in je frontend-env.
+              </p>
+            )}
+            {googleError && (
+              <p className="insp-hint auth-hint">
+                <i className="fa-solid fa-triangle-exclamation" aria-hidden /> {googleError}
               </p>
             )}
 
