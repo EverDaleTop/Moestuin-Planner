@@ -31,7 +31,7 @@ export function AuthToast({ kind, message, onClose }: Props) {
     const timer = window.setTimeout(() => {
       setMounted(false);
       setLeaving(false);
-    }, 340);
+    }, 280);
     return () => window.clearTimeout(timer);
   }, [open, mounted]);
 
