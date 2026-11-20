@@ -887,6 +887,7 @@ select:focus {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
 .ge-header {
@@ -1286,6 +1287,7 @@ select:focus {
   flex: 1;
   min-height: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .ge-canvas {
@@ -9837,6 +9839,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
     top: 76px;
   }
 }
+
+.gpu-host { overscroll-behavior: none; }
 
 /* ---------- Auth screen: volledige restyle ---------- */
 .auth-shell {
