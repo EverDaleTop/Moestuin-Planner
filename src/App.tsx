@@ -1304,7 +1304,6 @@ const removeShopping = useCallback(
         <span className="gl-boot-blob" aria-hidden="true">
           <i className="fa-solid fa-seedling" />
         </span>
-        <p>Even geduld, je tuintjes komen eraan…</p>
       </div>
     );
   }
