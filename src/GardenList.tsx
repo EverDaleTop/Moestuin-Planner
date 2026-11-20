@@ -288,7 +288,28 @@ export function GardenList({
           </form>
         </section>
 
-        {gardens.length === 0 && (
+        {loading && gardens.length === 0 && (
+          <section aria-label="Tuinen laden">
+            <div className="gl-section">
+              <h2>Mijn tuinen</h2>
+              <span className="gl-count">laden…</span>
+            </div>
+            <div className="gl-grid" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <div className="gl-card gl-card-skeleton" key={i}>
+                  <div className="gl-card-top">
+                    <span className="gl-skeleton gl-skeleton-blob" />
+                  </div>
+                  <span className="gl-skeleton gl-skeleton-title" />
+                  <span className="gl-skeleton gl-skeleton-meta" />
+                  <span className="gl-skeleton gl-skeleton-foot" />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {!loading && gardens.length === 0 && (
           <div className="gl-empty">
             <span className="gl-empty-blob" aria-hidden="true">
               <i className="fa-solid fa-sprout" />

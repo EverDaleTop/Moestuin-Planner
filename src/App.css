@@ -841,6 +841,53 @@ select:focus {
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
 }
+.gl-card-skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+.gl-card.gl-card-skeleton:hover {
+  transform: none;
+  box-shadow: var(--shadow);
+  border-color: var(--line);
+}
+.gl-skeleton {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--surface) 0%,
+    color-mix(in srgb, var(--line) 55%, var(--surface)) 50%,
+    var(--surface) 100%
+  );
+  background-size: 220% 100%;
+  animation: gl-skeleton-shimmer 1.3s ease-in-out infinite;
+}
+.gl-skeleton-blob {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+}
+.gl-skeleton-title {
+  width: 62%;
+  height: 20px;
+  margin-bottom: 10px;
+}
+.gl-skeleton-meta {
+  width: 42%;
+  height: 12px;
+  margin-bottom: 18px;
+}
+.gl-skeleton-foot {
+  width: 30%;
+  height: 14px;
+}
+@keyframes gl-skeleton-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gl-skeleton { animation: none; }
+}
 
 .gl-section i {
   color: var(--primary);

@@ -141,7 +141,14 @@ function parseInvite(): InviteTarget | null {
 }
 
 export default function App() {
-  const [initialCache] = useState<GardensCache | null>(() => readGardensCache());
+  const [initialCache] = useState<GardensCache | null>(() => {
+    try {
+      // Zonder sessie nooit de cache als ingelogde staat tonen.
+      return getToken() ? readGardensCache() : null;
+    } catch {
+      return null;
+    }
+  });
   const [booted, setBooted] = useState(() => initialCache !== null);
   const [listLoading, setListLoading] = useState(() => {
     try {
@@ -327,7 +334,8 @@ export default function App() {
     setProfileOpen(false);
     setData({ gardens: [] });
     setUserNames({});
-    clearGardensCache();
+    // Cache bewaren: bij opnieuw inloggen met dezelfde gebruiker staat de
+    // tuinenlijst er meteen, terwijl de server op de achtergrond ververst.
   }, []);
 
   const handleProfileUpdated = useCallback((u: User) => {
