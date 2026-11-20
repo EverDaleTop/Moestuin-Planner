@@ -2723,6 +2723,15 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           // beeld, dan verdwijnt het kaartje dus mee.
           const cxG = (sA.x + sB.x) / 2 + n.x * 26;
           const cyG = (sA.y + sB.y) / 2 + n.y * 26;
+          // Volledig buiten beeld: geen plakkend label aan de rand.
+          if (
+            cxG + chipWG / 2 < 0 ||
+            cxG - chipWG / 2 > w ||
+            cyG + chipHG / 2 < 0 ||
+            cyG - chipHG / 2 > h
+          ) {
+            continue;
+          }
           const xG = Math.max(2, Math.min(w - chipWG - 2, cxG - chipWG / 2));
           const yG = Math.max(2, Math.min(h - chipHG - 2, cyG - chipHG / 2));
           if (xG > w || yG > h || xG + chipWG < 0 || yG + chipHG < 0) continue;
@@ -2749,6 +2758,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
           const bw = p1.x - p0.x;
           if (bw < 46) continue;
+          if (p1.x < 0 || p0.x > w || p1.y < 0 || p0.y > h) continue;
           const fsV = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
           const sizeTxtV = `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
           ctx.textBaseline = "top";
@@ -2790,6 +2800,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         const bw = p1.x - p0.x;
         const bh = p1.y - p0.y;
         if (bw < 46 || bh < 22) continue;
+        if (p1.x < 0 || p0.x > w || p1.y < 0 || p0.y > h) continue;
         const fs = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
         const sizeTxt =
           el.shape === "circle"
