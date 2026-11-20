@@ -213,15 +213,19 @@ select:focus {
 
 /* ---------- Garden list / homepage ---------- */
 .gl-shell {
-  height: 100dvh;
+  position: fixed;
+  inset: 0;
+  height: auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg);
 }
 .gl-shell > .gl-wrap {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .gl-wrap {
   max-width: 1180px;
