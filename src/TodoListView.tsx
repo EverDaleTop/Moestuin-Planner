@@ -406,9 +406,15 @@ export function TodoListView({
               </div>
 
               <div className="todo-card-side">
-                <span className={`todo-prio todo-prio-${prio.key}`}>
-                  <i className={`fa-solid ${prio.icon}`} aria-hidden="true" /> {prio.label}
-                </span>
+                {item.done ? (
+                  <span className="todo-done-tag">
+                    <i className="fa-solid fa-check" aria-hidden="true" /> Afgevinkt
+                  </span>
+                ) : (
+                  <span className={`todo-prio todo-prio-${prio.key}`}>
+                    <i className={`fa-solid ${prio.icon}`} aria-hidden="true" /> {prio.label}
+                  </span>
+                )}
                 <div className="todo-card-actions">
                   <button
                     type="button"

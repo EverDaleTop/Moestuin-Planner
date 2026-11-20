@@ -8200,8 +8200,23 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   text-decoration: line-through;
   color: var(--muted);
 }
-.todo-card.is-done .todo-prio {
-  display: none;
+.todo-card.is-done .todo-card-note,
+.todo-card.is-done .todo-card-meta {
+  opacity: 0.62;
+}
+.todo-done-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--primary);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.todo-done-tag i {
+  font-size: 9px;
 }
 .todo-check {
   width: 22px;
@@ -8223,7 +8238,11 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   opacity: 0;
 }
 .todo-check:hover:not(:disabled) {
+  background: var(--surface);
   border-color: var(--primary);
+}
+.todo-check:active:not(:disabled) {
+  transform: none;
 }
 .todo-check.is-done {
   border-color: var(--primary);
@@ -8309,6 +8328,12 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   cursor: pointer;
   text-align: left;
 }
+.todo-place:hover:not(:disabled),
+.todo-place:active:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  transform: none;
+}
 .todo-place-pin {
   font-size: 10px;
   color: var(--muted);
@@ -8339,6 +8364,11 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
 .todo-card-meta .shop-card-assignee {
   padding-left: 2px;
 }
+.todo-place + .shop-card-assignee {
+  margin-left: auto;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
 .todo-card-actions {
   display: flex;
   align-items: center;
@@ -8358,6 +8388,16 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
+}
+.todo-card-action:hover:not(:disabled),
+.todo-card-action:active:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  transform: none;
+}
+.todo-card-action-danger:hover:not(:disabled) {
+  color: var(--danger);
 }
 .todo-fields {
   display: flex;
@@ -8419,6 +8459,11 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   .todo-card-side {
     grid-column: 2;
     justify-self: end;
+  }
+  .todo-card-meta .shop-card-assignee {
+    margin-left: 0;
+    padding-left: 2px;
+    border-left: 0;
   }
 }
 .bood-toolbar { display: flex; gap: 12px; margin: 20px 0; align-items: stretch; }
