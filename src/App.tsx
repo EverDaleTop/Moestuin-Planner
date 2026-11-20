@@ -278,7 +278,8 @@ export default function App() {
       realtime.disconnect();
       setData({ gardens: [] });
       setUserNames({});
-      clearGardensCache();
+      // Cache bewaren: bij opnieuw inloggen kan de lijst direct getoond
+      // worden terwijl de server op de achtergrond ververst.
     });
     if (!getToken()) {
       setBooted(true);
@@ -295,8 +296,20 @@ export default function App() {
 
   const handleAuthed = useCallback((u: User, token: string) => {
     setToken(token);
+    // Matching cache van dezelfde gebruiker: meteen tuinen tonen, daarna
+    // pas op de achtergrond verversen.
+    const cached = readGardensCache();
+    if (cached && cached.user.id === u.id) {
+      setData({ gardens: cached.gardens });
+      setUserNames(cached.userNames);
+      for (const g of cached.gardens) baseRef.current.set(g.id, g);
+    } else {
+      clearGardensCache();
+      setData({ gardens: [] });
+      setUserNames({});
+    }
     setUser(u);
-    setData({ gardens: [] });
+    setBooted(true);
     void reloadList();
   }, [reloadList]);
 
