@@ -360,9 +360,7 @@ export function AuthScreen({ theme, onToggleTheme, onAuthed }: Props) {
 
               <button type="submit" className="btn-primary btn-block auth-submit" disabled={!canSubmit}>
                 {busy ? (
-                  <>
-                    <i className="fa-solid fa-circle-notch fa-spin" aria-hidden /> Even geduld…
-                  </>
+                  <i className="fa-solid fa-circle-notch fa-spin" aria-label="Bezig" />
                 ) : mode === "login" ? (
                   <>
                     <i className="fa-solid fa-right-to-bracket" aria-hidden /> Inloggen

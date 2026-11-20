@@ -10261,8 +10261,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   }
 }
 
-/* Auth-pagina komt net als de andere pagina's smooth binnen */
-.auth-shell {
+/* Auth-inhoud komt smooth binnen; de navbar zelf blijft stil. */
+.auth-shell .auth-wrap {
   animation: auth-page-in 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes auth-page-in {
