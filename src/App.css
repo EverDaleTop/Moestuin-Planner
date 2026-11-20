@@ -8191,42 +8191,36 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   border-radius: 16px;
   box-shadow: var(--shadow);
   animation: shop-fade-in 0.3s ease-out both;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease,
-    opacity 0.2s ease;
-}
-.todo-card:hover {
-  border-color: color-mix(in srgb, var(--primary) 32%, var(--line));
-  box-shadow: var(--shadow-lg);
-  transform: translateY(-1px);
 }
 .todo-card.is-done {
-  opacity: 0.58;
+  background: var(--bg);
+  box-shadow: none;
 }
 .todo-card.is-done .todo-card-title {
   text-decoration: line-through;
   color: var(--muted);
 }
+.todo-card.is-done .todo-prio {
+  display: none;
+}
 .todo-check {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   margin-top: 1px;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 2px solid var(--line);
-  border-radius: 50%;
-  background: transparent;
+  border: 1.5px solid color-mix(in srgb, var(--ink) 22%, var(--line));
+  border-radius: 6px;
+  background: var(--surface);
   color: transparent;
-  font-size: 10px;
+  font-size: 9px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .todo-check i {
   opacity: 0;
-  transform: scale(0.55);
-  transition: opacity 0.16s ease, transform 0.16s ease;
 }
 .todo-check:hover:not(:disabled) {
   border-color: var(--primary);
@@ -8238,7 +8232,6 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
 }
 .todo-check.is-done i {
   opacity: 1;
-  transform: scale(1);
 }
 .todo-card-main {
   min-width: 0;
@@ -8304,84 +8297,44 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
 }
 .todo-place {
   display: inline-flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   max-width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--ink-soft);
-  font: 500 12.5px/1.4 'DM Sans', sans-serif;
+  font: 500 12px/1.4 'DM Sans', sans-serif;
   cursor: pointer;
   text-align: left;
 }
-.todo-place-icon {
-  width: 22px;
-  height: 22px;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 7px;
-  background: var(--sow-tint);
-  color: var(--primary);
+.todo-place-pin {
   font-size: 10px;
-}
-.todo-place-body {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0 9px;
-  min-width: 0;
-  padding-top: 2px;
-}
-.todo-place-line {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  white-space: nowrap;
-}
-.todo-place-kind {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 .todo-place-name {
   font-weight: 700;
   color: var(--ink);
-  transition: color 0.15s ease;
 }
-.todo-place-veld {
+.todo-place-field {
   color: var(--muted);
-  white-space: nowrap;
 }
-.todo-place-crops {
+.todo-place-crop {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--primary);
   font-weight: 700;
-  white-space: nowrap;
 }
-.todo-place-crops i {
+.todo-place-crop > i {
   font-size: 9px;
+  color: var(--primary);
 }
 .todo-place-go {
-  margin-top: 5px;
-  font-size: 9px;
+  font-size: 8px;
   color: var(--muted);
   opacity: 0.45;
-  transition: transform 0.15s ease, color 0.15s ease, opacity 0.15s ease;
-}
-.todo-place:hover .todo-place-name {
-  color: var(--primary);
-}
-.todo-place:hover .todo-place-go {
-  color: var(--primary);
-  opacity: 1;
-  transform: translateX(2px);
 }
 .todo-card-meta .shop-card-assignee {
   padding-left: 2px;
@@ -8405,15 +8358,6 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--sow-tint); outl
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-.todo-card-action:hover:not(:disabled) {
-  background: var(--bg);
-  color: var(--primary);
-}
-.todo-card-action-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 9%, transparent);
-  color: var(--danger);
 }
 .todo-fields {
   display: flex;
