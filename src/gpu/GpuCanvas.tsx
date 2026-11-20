@@ -85,8 +85,7 @@ function loadIconTexture(src: string): ImageBitmap | null {
  */
 const fsPx = (px: number) => Math.round(px);
 
-/** Kort tekst af met ellipsis zodat labels nooit buiten hun chip lopen. */
-function fitCanvasText(
+/** Kort tekst af met ellipsis zodat labels nooit buiten hun chip lopen. */function fitCanvasText(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number
@@ -97,6 +96,21 @@ function fitCanvasText(
     out = out.slice(0, -1);
   }
   return `${out}…`;
+}
+
+/** Fadefactor voor labels die (bijna) buiten de viewport vallen. */
+function edgeFade(
+  p0x: number,
+  p0y: number,
+  p1x: number,
+  p1y: number,
+  viewW: number,
+  viewH: number,
+  fade = 48
+): number {
+  const outX = Math.max(0, -p1x, p0x - viewW);
+  const outY = Math.max(0, -p1y, p0y - viewH);
+  return Math.max(0, 1 - Math.max(outX, outY) / fade);
 }
 
 /** Tekent het icoon van een gewas: afbeelding als die geladen is, anders emoji. */
@@ -837,7 +851,6 @@ export function GpuCanvas({
   const tapTipRef = useRef<{ cropId: string; x: number; y: number; until: number } | null>(null);
   /** animatie van de gewas-tooltip: de zichtbare laag en de uitfadende vorige */
   const tipCurRef = useRef<TipLayer | null>(null);
-  const tipPrevRef = useRef<TipLayer | null>(null);
   const tipFrameRef = useRef(0);
   /** hover-highlight per gewas (0..1), zodat de vulling/rand zacht fadet */
   const hoverAnimRef = useRef(new Map<string, number>());
@@ -2723,18 +2736,19 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           // beeld, dan verdwijnt het kaartje dus mee.
           const cxG = (sA.x + sB.x) / 2 + n.x * 26;
           const cyG = (sA.y + sB.y) / 2 + n.y * 26;
-          // Volledig buiten beeld: geen plakkend label aan de rand.
-          if (
-            cxG + chipWG / 2 < 0 ||
-            cxG - chipWG / 2 > w ||
-            cyG + chipHG / 2 < 0 ||
-            cyG - chipHG / 2 > h
-          ) {
-            continue;
-          }
+          // Vloeiend uitfaden zodra de lijn bijna buiten beeld verdwijnt.
+          const fadeG = edgeFade(
+            cxG - chipWG / 2,
+            cyG - chipHG / 2,
+            cxG + chipWG / 2,
+            cyG + chipHG / 2,
+            w,
+            h
+          );
+          if (fadeG <= 0.01) continue;
           const xG = Math.max(2, Math.min(w - chipWG - 2, cxG - chipWG / 2));
           const yG = Math.max(2, Math.min(h - chipHG - 2, cyG - chipHG / 2));
-          if (xG > w || yG > h || xG + chipWG < 0 || yG + chipHG < 0) continue;
+          ctx.globalAlpha = fadeG;
           ctx.fillStyle = chipBg;
           ctx.strokeStyle = chipBorder;
           ctx.lineWidth = 1;
@@ -2748,6 +2762,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           ctx.fillStyle = chipMeta;
           ctx.font = `600 ${smallFsG}px ${chipFont}`;
           ctx.fillText(sizeTxtG, xG + 9, yG + 5 + fsG + (smallFsG - 8) / 2 + 1);
+          ctx.globalAlpha = 1;
           continue;
         }
         // Veld: naam + maten staan BUITEN het kader (bovenaan), zodat de
@@ -2758,7 +2773,8 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           const p1 = worldToScreen({ x: r.x + r.w, y: r.y + r.h }, c);
           const bw = p1.x - p0.x;
           if (bw < 46) continue;
-          if (p1.x < 0 || p0.x > w || p1.y < 0 || p0.y > h) continue;
+          const fadeV = edgeFade(p0.x, p0.y, p1.x, p1.y, w, h);
+          if (fadeV <= 0.01) continue;
           const fsV = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
           const sizeTxtV = `${fmtM(el.widthM)} × ${fmtM(el.heightM)}`;
           ctx.textBaseline = "top";
@@ -2775,6 +2791,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           if (yV + chipHV > h - 2) yV = p0.y + 4;
           const xV = Math.max(2, Math.min(w - chipWV - 2, p0.x));
           ctx.fillStyle = chipBg;
+          ctx.globalAlpha = fadeV;
           // onthouden voor de klik: een tik op dit kaartje selecteert het hele veld
           veldChipsRef.current.push({ id: el.id, x: xV, y: yV, w: chipWV, h: chipHV });
           ctx.strokeStyle = chipBorder;
@@ -2789,6 +2806,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           ctx.fillStyle = chipMeta;
           ctx.font = `600 ${smallFsV}px ${chipFont}`;
           ctx.fillText(sizeTxtV, xV + 9, yV + 5 + fsV + (smallFsV - 8) / 2 + 1);
+          ctx.globalAlpha = 1;
           continue;
         }
         // Paden tonen geen naam en geen maten op het canvas: alleen tijdens
@@ -2800,7 +2818,8 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         const bw = p1.x - p0.x;
         const bh = p1.y - p0.y;
         if (bw < 46 || bh < 22) continue;
-        if (p1.x < 0 || p0.x > w || p1.y < 0 || p0.y > h) continue;
+        const fadeEl = edgeFade(p0.x, p0.y, p1.x, p1.y, w, h);
+        if (fadeEl <= 0.01) continue;
         const fs = fsPx(Math.max(9, Math.min(13, 12 * c.zoom)));
         const sizeTxt =
           el.shape === "circle"
@@ -2825,6 +2844,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         const chipX = Math.max(2, Math.min(w - chipW - 2, p0.x + 3));
         const chipY = p0.y + 3;
         ctx.fillStyle = chipBg;
+        ctx.globalAlpha = fadeEl;
         ctx.strokeStyle = chipBorder;
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -2839,6 +2859,7 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           ctx.font = `600 ${smallFs}px ${chipFont}`;
           ctx.fillText(sizeTxtFit, chipX + padX, chipY + padY + fs + (smallFs - 8) / 2 + 1);
         }
+        ctx.globalAlpha = 1;
       }
 
       // selected size label (Figma-style, below the selection's bounding box).
@@ -3390,34 +3411,27 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
       const tipDt = Math.min(64, Math.max(0, nowMs - tipFrameRef.current));
       tipFrameRef.current = nowMs;
       const curTip = tipCurRef.current;
-      const prevTip = tipPrevRef.current;
       if (tipId) {
         if (!curTip || curTip.id !== tipId) {
-          if (curTip) {
-            // Huidige label bewaren als uitfadende laag onder de nieuwe.
-            tipPrevRef.current = { ...curTip, alpha: Math.max(0.25, curTip.alpha) };
-          }
+          // Bij wisselen van gewas: direct het nieuwe label tonen, zonder
+          // crossfade of zwevende tussenpositie.
+          const switching = curTip !== null;
           tipCurRef.current = {
             id: tipId,
-            x: curTip?.x ?? tipAnchor.x,
-            y: curTip?.y ?? tipAnchor.y,
+            x: tipAnchor.x,
+            y: tipAnchor.y,
             above: tipAbove,
-            alpha: 0,
+            alpha: switching ? 1 : 0,
           };
         } else {
-          const ease = 1 - Math.exp(-tipDt / 55);
-          curTip.x += (tipAnchor.x - curTip.x) * ease;
-          curTip.y += (tipAnchor.y - curTip.y) * ease;
+          curTip.x = tipAnchor.x;
+          curTip.y = tipAnchor.y;
           curTip.above = tipAbove;
-          curTip.alpha = Math.min(1, curTip.alpha + tipDt / 140);
+          curTip.alpha = Math.min(1, curTip.alpha + tipDt / 120);
         }
       } else if (curTip) {
-        curTip.alpha = Math.max(0, curTip.alpha - tipDt / 140);
+        curTip.alpha = Math.max(0, curTip.alpha - tipDt / 90);
         if (curTip.alpha <= 0.01) tipCurRef.current = null;
-      }
-      if (prevTip) {
-        prevTip.alpha = Math.max(0, prevTip.alpha - tipDt / 140);
-        if (prevTip.alpha <= 0.01) tipPrevRef.current = null;
       }
 
       const paintTip = (t: {
@@ -3469,7 +3483,6 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
         ctx.textBaseline = "top";
         ctx.globalAlpha = 1;
       };
-      if (prevTip && prevTip.alpha > 0.01) paintTip(prevTip);
       if (tipCurRef.current && tipCurRef.current.alpha > 0.01) {
         paintTip(tipCurRef.current);
       }
