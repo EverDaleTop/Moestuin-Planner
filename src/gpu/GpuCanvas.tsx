@@ -1363,6 +1363,23 @@ const startObjectDrag = (def: GardenObjectDef, e: React.PointerEvent) => {
     // clicking the canvas closes the object picker menu
     handlersRef.current.onObjectMenuOpenChange(false);
 
+    // Naamlabels winnen altijd: ook van gewassen of handles eronder.
+    const chipHit = hitVeldChip(sp);
+    if (chipHit) {
+      const selectChip = () => {
+        handlersRef.current.onSelect([chipHit.id]);
+        handlersRef.current.onSelectCrop(null);
+      };
+      if (e.pointerType !== "mouse") {
+        pendingSelectRef.current = selectChip;
+      } else {
+        selectChip();
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      animateToElement(chipHit);
+      return;
+    }
+
     // Eerste klik op een niet-geselecteerd element selecteert altijd eerst,
     // vóór alle handle- en drag-logica. Resize-handles van de huidige selectie
     // kunnen een klik op een ander element anders afvangen (zeker als een bed
@@ -1664,18 +1681,6 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
       }
       // clicked on bed area but outside any plant -> drop plant selection
       handlersRef.current.onSelectCrop(null);
-    }
-    // Klik op een naamlabel: dat wint altijd van gewassen eronder en zoomt
-    // smooth naar het hele element.
-    const chipHit = hitVeldChip(sp);
-    if (chipHit) {
-      const ok = arm(() => {
-        handlersRef.current.onSelect([chipHit.id]);
-        handlersRef.current.onSelectCrop(null);
-      }, false);
-      if (ok) e.currentTarget.setPointerCapture(e.pointerId);
-      animateToElement(chipHit);
-      return;
     }
     const hit = hitItem(screenToWorld(sp, c));
     if (hit) {
@@ -2515,6 +2520,11 @@ gRef.current = { k: "drag", id: objHit.id, sp, origin };
           hoverCrop = hitCrop(wp, el);
         }
         hoverCropId = hoverCrop?.instanceId ?? null;
+      }
+      // Label onder de muis? Dan geen gewas-hover/tooltip erachter.
+      if (hitVeldChip(mouseRef.current)) {
+        hoverCrop = null;
+        hoverCropId = null;
       }
 
       // Hover-highlight animeren: de vulling/rand fadet zacht in en uit in
